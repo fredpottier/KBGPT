@@ -1,0 +1,1912 @@
+{
+  "metadata": {
+    "task": "T2",
+    "source": "kg_derived",
+    "corpus": "Regulatory Corpus (GDPR, EU AI Act, CCPA, NIST AI RMF, etc.)",
+    "count": 100,
+    "generated_at": "2026-04-11T12:00:00Z",
+    "note": "Questions derivees des tensions connues dans le KG reglementaire (3195 QS contradictions, 202 COMPLEMENTS). Couvre les divergences inter-reglementaires et intra-reglementaires."
+  },
+  "questions": [
+    {
+      "question_id": "T2_REG_KG_0001",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Y a-t-il des informations contradictoires sur le consentement dans les documents RGPD et CCPA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD exige un consentement libre, specifique, eclaire et univoque (opt-in) comme base legale du traitement.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "freely given, specific, informed and unambiguous indication of the data subject's wishes"},
+        "claim2": {"text": "La CCPA utilise un modele opt-out ou les donnees peuvent etre collectees sans consentement prealable, avec un droit de refuser la vente ulterieure.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "right to opt-out of the sale or sharing of the consumer's personal information"},
+        "tension_nature": "philosophical_difference",
+        "tension_level": "high",
+        "entities": ["consent", "Processing", "personal information"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "philosophical_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0002",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents concernant les amendes maximales applicables ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD prevoit des amendes de 20 millions d'euros ou 4% du CA mondial.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "up to 20 000 000 EUR, or up to 4 % of the total worldwide annual turnover"},
+        "claim2": {"text": "L'AI Act prevoit des amendes de 35 millions d'euros ou 7% du CA mondial pour les pratiques interdites.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "35 000 000 EUR or up to 7 % of its total worldwide annual turnover"},
+        "tension_nature": "escalation",
+        "tension_level": "high",
+        "entities": ["fines", "sanctions", "enforcement"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "escalation"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0003",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur la classification des risques des systemes d'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act classe les systemes en quatre niveaux de risque fixes avec des obligations specifiques par niveau.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "unacceptable risk, high risk, limited risk, minimal risk"},
+        "claim2": {"text": "Le NIST AI RMF propose une approche flexible sans categories predefinies, basee sur quatre fonctions (Govern, Map, Measure, Manage).", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "Govern, Map, Measure, and Manage"},
+        "tension_nature": "philosophical_difference",
+        "tension_level": "high",
+        "entities": ["AI systems", "risk management", "classification"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "philosophical_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0004",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Y a-t-il des contradictions sur la definition de 'donnees personnelles' entre le RGPD et la CCPA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD definit les donnees a caractere personnel comme toute information se rapportant a une personne physique identifiee ou identifiable.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "any information relating to an identified or identifiable natural person"},
+        "claim2": {"text": "La CCPA definit les informations personnelles comme incluant aussi les informations liees a un menage (household).", "doc_id": "13_CCPA_Statute_0beb83cc", "verbatim": "information that identifies, relates to, describes, is reasonably capable of being associated with, or could reasonably be linked, directly or indirectly, with a particular consumer or household"},
+        "tension_nature": "scope_variation",
+        "tension_level": "medium",
+        "entities": ["personal information", "data subject", "Consumers"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "scope_variation"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0005",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur la terminologie 'foundation models' vs 'general-purpose AI models' ?",
+      "ground_truth": {
+        "claim1": {"text": "Les amendements du Parlement europeen utilisent le terme 'foundation models' avec des obligations specifiques.", "doc_id": "05_EU_Parliament_AI_Act_Amendments_2023_1ea9aff7", "verbatim": "foundation models"},
+        "claim2": {"text": "La version finale de l'AI Act utilise le terme 'general-purpose AI models' (GPAI) avec un regime differencie.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "general-purpose AI model"},
+        "tension_nature": "evolution",
+        "tension_level": "high",
+        "entities": ["general-purpose AI models", "foundation models", "Providers"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "evolution"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0006",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur les delais de reponse aux demandes des individus ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD prevoit un delai d'un mois prorogeable de deux mois.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "within one month of receipt of the request"},
+        "claim2": {"text": "La CCPA prevoit un delai de 45 jours prorogeable de 45 jours.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "within 45 days of receiving the consumer's request"},
+        "tension_nature": "nuance",
+        "tension_level": "low",
+        "entities": ["data subject", "Consumers", "controller"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0007",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Y a-t-il des tensions entre les obligations de transparence du RGPD et de l'AI Act ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD exige des informations sur la logique sous-jacente des decisions automatisees.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "meaningful information about the logic involved"},
+        "claim2": {"text": "L'AI Act exige des instructions d'utilisation detaillees et un marquage lisible par machine du contenu genere.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "mark the output in a machine-readable format"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["AI systems", "data subject", "transparency"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0008",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les deux versions de l'AI Act different-elles sur la reconnaissance biometrique pour les forces de l'ordre ?",
+      "ground_truth": {
+        "claim1": {"text": "Les amendements du Parlement proposaient une interdiction totale de la reconnaissance biometrique a distance en temps reel.", "doc_id": "05_EU_Parliament_AI_Act_Amendments_2023_1ea9aff7", "verbatim": "ban on real-time remote biometric identification systems in publicly accessible spaces"},
+        "claim2": {"text": "La version finale prevoit des exceptions limitees pour les forces de l'ordre avec autorisation judiciaire.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "subject to prior authorisation granted by a judicial authority"},
+        "tension_nature": "evolution",
+        "tension_level": "high",
+        "entities": ["AI systems", "biometric identification", "law enforcement"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "evolution"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0009",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur la portee territoriale des reglementations ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD a une portee extraterritoriale couvrant tout traitement de donnees de personnes dans l'UE, quel que soit le lieu du responsable.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "regardless of whether the processing takes place in the Union or not"},
+        "claim2": {"text": "La CCPA ne s'applique qu'aux entreprises operant en Californie avec des seuils specifiques de CA et volume de donnees.", "doc_id": "13_CCPA_Statute_0beb83cc", "verbatim": "does business in the State of California"},
+        "tension_nature": "scope_variation",
+        "tension_level": "high",
+        "entities": ["controller", "Processing", "territorial scope"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "scope_variation"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0010",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur le traitement des donnees sensibles ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD interdit par defaut le traitement des categories speciales de donnees avec des exceptions limitees.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "Processing of special categories of personal data shall be prohibited"},
+        "claim2": {"text": "La CCPA accorde un droit de limiter l'utilisation des informations sensibles mais ne les interdit pas par defaut.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "right to limit the use and disclosure of sensitive personal information"},
+        "tension_nature": "philosophical_difference",
+        "tension_level": "high",
+        "entities": ["personal information", "sensitive data", "Processing"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "philosophical_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0011",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Y a-t-il des tensions sur l'approche de la gouvernance de l'IA entre l'UE et les Etats-Unis ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act cree un Bureau europeen de l'IA avec des pouvoirs d'investigation et de sanction.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "AI Office"},
+        "claim2": {"text": "Le NIST AI RMF propose une gouvernance organisationnelle interne sans autorite centralisee.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "A culture of risk management is cultivated and present"},
+        "tension_nature": "philosophical_difference",
+        "tension_level": "high",
+        "entities": ["AI systems", "governance", "enforcement"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "philosophical_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0012",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur le caractere contraignant vs volontaire des cadres reglementaires IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act est un reglement europeen directement applicable et juridiquement contraignant.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "This Regulation shall be binding in its entirety and directly applicable in all Member States"},
+        "claim2": {"text": "Le NIST AI RMF est volontaire et non prescriptif.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "voluntary and not intended to be prescriptive"},
+        "tension_nature": "philosophical_difference",
+        "tension_level": "high",
+        "entities": ["AI systems", "regulation", "compliance"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "philosophical_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0013",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les approches UE et indienne different-elles sur la priorite innovation vs protection ?",
+      "ground_truth": {
+        "claim1": {"text": "L'UE priorise la protection des droits fondamentaux avec un cadre reglementaire contraignant.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "fundamental rights"},
+        "claim2": {"text": "L'Inde priorise l'innovation et le deploiement rapide de l'IA avec le concept #AIforAll.", "doc_id": "16_India_AI_Strategy_NITI_Aayog_da5404db", "verbatim": "#AIforAll"},
+        "tension_nature": "philosophical_difference",
+        "tension_level": "high",
+        "entities": ["AI systems", "innovation", "regulation"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "philosophical_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0014",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les obligations des sous-traitants/service providers different-elles entre RGPD et CCPA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD impose des obligations directes aux sous-traitants (registre, notification, DPO).", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "processes the personal data only on documented instructions from the controller"},
+        "claim2": {"text": "La CCPA impose aux service providers des obligations essentiellement contractuelles.", "doc_id": "13_CCPA_Statute_0beb83cc", "verbatim": "processes personal information on behalf of a business pursuant to a written contract"},
+        "tension_nature": "scope_variation",
+        "tension_level": "medium",
+        "entities": ["controller", "Providers", "Processing"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "scope_variation"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0015",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur le concept de 'vente' de donnees personnelles ?",
+      "ground_truth": {
+        "claim1": {"text": "La CCPA definit specifiquement la 'sale' et accorde un droit d'opt-out.", "doc_id": "13_CCPA_Statute_0beb83cc", "verbatim": "selling, renting, releasing, disclosing, disseminating, making available, transferring"},
+        "claim2": {"text": "Le RGPD n'a pas de concept de 'vente de donnees' — tout transfert requiert une base legale independamment de la contrepartie.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "processing shall be lawful only if and to the extent that at least one of the following applies"},
+        "tension_nature": "conceptual_difference",
+        "tension_level": "medium",
+        "entities": ["personal information", "Processing", "consent"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "conceptual_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0016",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Y a-t-il une evolution entre les deux textes CCPA du corpus sur les seuils d'application ?",
+      "ground_truth": {
+        "claim1": {"text": "Le statut CCPA original prevoit un seuil de 50 000 consommateurs/menages/appareils.", "doc_id": "13_CCPA_Statute_0beb83cc", "verbatim": "buys, receives, sells, or shares the personal information of 50,000 or more consumers, households, or devices"},
+        "claim2": {"text": "La CCPA 2026 effective eleve le seuil a 100 000 consommateurs ou menages.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "100,000 or more consumers or households"},
+        "tension_nature": "evolution",
+        "tension_level": "medium",
+        "entities": ["Consumers", "personal information", "business"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "evolution"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0017",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur le droit a l'effacement/suppression ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD accorde un droit a l'effacement etendu ('droit a l'oubli') avec obligation de notifier les tiers.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "right to obtain from the controller the erasure of personal data"},
+        "claim2": {"text": "La CCPA accorde un droit de suppression avec des exceptions plus larges pour usages internes.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "delete the consumer's personal information from its records"},
+        "tension_nature": "scope_variation",
+        "tension_level": "medium",
+        "entities": ["data subject", "Consumers", "controller"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "scope_variation"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0018",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur les mecanismes d'application (enforcement) ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD est applique par des autorites independantes avec mecanisme de coherence transfrontalier.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "lead supervisory authority"},
+        "claim2": {"text": "La CCPA est appliquee principalement par le procureur general et la CPPA, avec droit d'action prive limite.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "California Privacy Protection Agency"},
+        "tension_nature": "structural_difference",
+        "tension_level": "medium",
+        "entities": ["enforcement", "controller", "Consumers"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "structural_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0019",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les deux textes AI Act sont-ils coherents sur le seuil de risque systemique GPAI ?",
+      "ground_truth": {
+        "claim1": {"text": "La version finale definit le seuil a 10^25 FLOPS.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "10^25 floating point operations"},
+        "claim2": {"text": "La version Parlement adoptee maintient le meme seuil de 10^25 FLOPS.", "doc_id": "26_EU_AI_Act_Parliament_Adopted_51eb24c1", "verbatim": "10^25 floating point operations"},
+        "tension_nature": "alignment",
+        "tension_level": "none",
+        "entities": ["general-purpose AI models", "systemic risk"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "alignment"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0020",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "L'EDPB et l'AI Act sont-ils alignes sur la gestion des donnees biometriques ?",
+      "ground_truth": {
+        "claim1": {"text": "L'EDPB analyse les risques de re-identification par les LLMs traitant des donnees biometriques.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe", "verbatim": "re-identification risks"},
+        "claim2": {"text": "L'AI Act interdit la categorisation biometrique basee sur des donnees sensibles.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "biometric categorisation systems that categorise individually natural persons based on their biometric data"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["AI systems", "biometric data", "Processing"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0021",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur les obligations de notification d'incident ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD impose une notification dans les 72 heures a l'autorite de controle.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "not later than 72 hours after having become aware of it"},
+        "claim2": {"text": "L'AI Act impose le signalement d'incidents graves sans delai fixe de 72 heures.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "report any serious incident"},
+        "tension_nature": "nuance",
+        "tension_level": "medium",
+        "entities": ["controller", "Providers", "incident"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0022",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur les roles de responsabilite (provider vs controller) ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD definit le responsable du traitement comme celui qui determine les finalites et les moyens.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "determines the purposes and means of the processing"},
+        "claim2": {"text": "L'AI Act definit le fournisseur comme celui qui developpe ou fait developper un systeme d'IA.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "develops an AI system or a general-purpose AI model"},
+        "tension_nature": "conceptual_difference",
+        "tension_level": "medium",
+        "entities": ["controller", "Providers", "AI systems"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "conceptual_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0023",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur la protection des enfants entre RGPD et CCPA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD fixe l'age du consentement a 16 ans (abaissable a 13 ans) pour les services de la societe de l'information.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "the child is at least 16 years old"},
+        "claim2": {"text": "La CCPA interdit la vente de donnees des moins de 16 ans sans opt-in et requiert le consentement parental pour les moins de 13 ans.", "doc_id": "13_CCPA_Statute_0beb83cc", "verbatim": "a consumer who is at least 13 years of age and less than 16 years of age"},
+        "tension_nature": "nuance",
+        "tension_level": "low",
+        "entities": ["consent", "data subject", "Consumers"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0024",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les guides Bird & Bird et TwoBirds sont-ils coherents dans leurs recommandations sur l'AI Act ?",
+      "ground_truth": {
+        "claim1": {"text": "Le guide Bird & Bird analyse les obligations par categorie d'acteur.", "doc_id": "bird_bird_ai_act_guide_4b8be131", "verbatim": "classification of AI systems"},
+        "claim2": {"text": "Le guide TwoBirds 2026 tient compte des delais d'application et des orientations de l'AI Office.", "doc_id": "20_TwoBirds_EU_AI_Act_Guide_2026_9b8e7105", "verbatim": "risk management system, data governance, technical documentation"},
+        "tension_nature": "complementarity",
+        "tension_level": "none",
+        "entities": ["Providers", "Deployers", "AI systems"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0025",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les approches indienne et americaine de la gestion des risques IA sont-elles similaires ?",
+      "ground_truth": {
+        "claim1": {"text": "Le NIST propose un cadre structure en quatre fonctions (Govern, Map, Measure, Manage) avec une granularite fine.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "Govern, Map, Measure, and Manage"},
+        "claim2": {"text": "L'Inde adopte une approche sectorielle (sante, agriculture, education, villes, transport) sans cadre transversal.", "doc_id": "16_India_AI_Strategy_NITI_Aayog_da5404db", "verbatim": "healthcare, agriculture, education, smart cities and infrastructure, smart mobility and transportation"},
+        "tension_nature": "philosophical_difference",
+        "tension_level": "medium",
+        "entities": ["AI systems", "risk management"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "philosophical_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0026",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur la surveillance humaine des systemes d'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD exige que les decisions automatisees produisant des effets juridiques ne soient pas fondees exclusivement sur le traitement automatise.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "not to be subject to a decision based solely on automated processing"},
+        "claim2": {"text": "L'AI Act exige une surveillance humaine effective mais n'exige pas necessairement que la decision finale soit humaine.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "effectively overseen by natural persons"},
+        "tension_nature": "nuance",
+        "tension_level": "medium",
+        "entities": ["AI systems", "data subject", "Deployers"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0027",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur la notion de trustworthiness/fiabilite ?",
+      "ground_truth": {
+        "claim1": {"text": "Le NIST identifie sept caracteristiques de trustworthiness dans une approche holistique.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "valid and reliable, safe, secure and resilient, accountable and transparent, explainable and interpretable, privacy-enhanced, and fair"},
+        "claim2": {"text": "L'AI Act se concentre sur des exigences specifiques de precision, robustesse et cybersecurite.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "accuracy, robustness and cybersecurity"},
+        "tension_nature": "conceptual_difference",
+        "tension_level": "medium",
+        "entities": ["AI systems", "trustworthiness"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "conceptual_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0028",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les penalites CCPA et RGPD sont-elles du meme ordre de grandeur ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD prevoit des amendes de 20 millions d'euros ou 4% du CA mondial.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "up to 20 000 000 EUR"},
+        "claim2": {"text": "La CCPA prevoit 2 500$ ou 7 500$ par violation.", "doc_id": "13_CCPA_Statute_0beb83cc", "verbatim": "not to exceed seven thousand five hundred dollars ($7,500) for each intentional violation"},
+        "tension_nature": "scale_difference",
+        "tension_level": "high",
+        "entities": ["fines", "enforcement"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "scale_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0029",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Y a-t-il une evolution dans le traitement des informations sensibles entre la CCPA originale et le CPRA ?",
+      "ground_truth": {
+        "claim1": {"text": "La CCPA originale ne distingue pas les informations sensibles.", "doc_id": "13_CCPA_Statute_0beb83cc", "verbatim": "personal information"},
+        "claim2": {"text": "Le CPRA introduit la categorie d'informations personnelles sensibles avec un droit de limitation.", "doc_id": "15_CPRA_Act_e9f88d3e", "verbatim": "sensitive personal information"},
+        "tension_nature": "evolution",
+        "tension_level": "high",
+        "entities": ["personal information", "sensitive data", "Consumers"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "evolution"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0030",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "L'EDPB et l'AEPD ont-ils la meme approche de l'IA et du RGPD ?",
+      "ground_truth": {
+        "claim1": {"text": "L'EDPB insiste sur les risques specifiques des LLMs (web scraping, hallucinations, memorisation).", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe", "verbatim": "web scraping, hallucinations, re-identification risks"},
+        "claim2": {"text": "L'AEPD met l'accent sur les mesures pratiques de conformite (AIPD, privacy by design).", "doc_id": "aepd_gdpr_ai_guide_eba2beca", "verbatim": "data protection by design and by default"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["Processing", "AI systems", "data protection"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0031",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les analyses d'impact requises (AIPD RGPD vs FRIA AI Act) ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD exige une AIPD pour les traitements a risque eleve centree sur la protection des donnees.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "data protection impact assessment"},
+        "claim2": {"text": "L'AI Act exige une FRIA centree sur les droits fondamentaux au-dela des seules donnees.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "fundamental rights impact assessment"},
+        "tension_nature": "overlap",
+        "tension_level": "medium",
+        "entities": ["controller", "Deployers", "AI systems"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "overlap"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0032",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur la gestion des biais dans l'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act impose des obligations legales de donnees d'entrainement representatives pour prevenir les biais.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "training, validation and testing data sets shall be relevant, sufficiently representative, and to the best extent possible, free of errors and complete"},
+        "claim2": {"text": "Le NIST AI RMF adopte une approche plus large des biais (statistiques, computationnels, humains, systemiques).", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "bias is broader than demographic balance and data representativeness"},
+        "tension_nature": "methodological_difference",
+        "tension_level": "medium",
+        "entities": ["AI systems", "bias", "data governance"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "methodological_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0033",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les EDPB guidelines DSA/RGPD et LLMs abordent-elles la transparence de la meme facon ?",
+      "ground_truth": {
+        "claim1": {"text": "Les guidelines DSA/RGPD traitent la transparence des plateformes et du profilage publicitaire.", "doc_id": "edpb_2025_guidelines_dsa_gdpr_interplay_dd99cf79", "verbatim": "interplay between the DSA and the GDPR"},
+        "claim2": {"text": "Les guidelines LLMs traitent la transparence de l'entrainement des modeles et de la generation de contenu.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe", "verbatim": "web scraping"},
+        "tension_nature": "complementarity",
+        "tension_level": "none",
+        "entities": ["Processing", "AI systems", "transparency"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0034",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "La CCPA 2026 et le CPRA traitent-ils differemment la prise de decision automatisee ?",
+      "ground_truth": {
+        "claim1": {"text": "La CCPA 2026 inclut des droits d'opt-out du profilage et de la prise de decision automatisee.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "automated decision-making technology"},
+        "claim2": {"text": "Le CPRA cree la CPPA avec pouvoir reglementaire pour definir les regles specifiques.", "doc_id": "15_CPRA_Act_e9f88d3e", "verbatim": "California Privacy Protection Agency"},
+        "tension_nature": "evolution",
+        "tension_level": "low",
+        "entities": ["Consumers", "Processing", "automated decision"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "evolution"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0035",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les exemptions pour la recherche scientifique ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD prevoit des derogations pour la recherche scientifique avec des garanties.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "scientific or historical research purposes"},
+        "claim2": {"text": "L'AI Act exempte les systemes utilises exclusivement pour la R&D avant mise sur le marche.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "exclusively for research and development purposes"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["Processing", "AI systems", "research"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0036",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur le droit d'acces aux donnees ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD accorde un droit d'acces complet incluant la logique des decisions automatisees.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "right to obtain from the controller confirmation as to whether or not personal data concerning him or her are being processed"},
+        "claim2": {"text": "La CCPA accorde un 'right to know' limite aux 12 derniers mois de collecte.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "categories of personal information it has collected about consumers in the preceding 12 months"},
+        "tension_nature": "scope_variation",
+        "tension_level": "medium",
+        "entities": ["data subject", "Consumers", "personal information"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "scope_variation"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0037",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les donnees anonymisees/des-identifiees ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD exclut les donnees anonymisees de son champ avec un standard strict.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "does not therefore concern the processing of such anonymous information"},
+        "claim2": {"text": "La CCPA definit les deidentified information avec un standard technique et contractuel detaille.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "deidentified"},
+        "tension_nature": "nuance",
+        "tension_level": "medium",
+        "entities": ["personal information", "Processing", "anonymization"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0038",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur les obligations de droit d'auteur pour l'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act exige une politique de respect du droit d'auteur et un resume du contenu d'entrainement.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "put in place a policy to comply with Union copyright law"},
+        "claim2": {"text": "Les amendements du Parlement proposaient des obligations de transparence plus strictes sur les donnees d'entrainement.", "doc_id": "05_EU_Parliament_AI_Act_Amendments_2023_1ea9aff7", "verbatim": "training data"},
+        "tension_nature": "evolution",
+        "tension_level": "medium",
+        "entities": ["general-purpose AI models", "Providers", "copyright"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "evolution"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0039",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Le rapport annuel EDPB et les guidelines LLMs ont-ils le meme ton sur l'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le rapport annuel presente les realisations institutionnelles dans un ton factuel.", "doc_id": "edpb_2025_annual_report_2024_030da253", "verbatim": "annual report 2024"},
+        "claim2": {"text": "Les guidelines LLMs adoptent un ton prescriptif avec des recommandations detaillees.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe", "verbatim": "web scraping, hallucinations, re-identification risks"},
+        "tension_nature": "tone_difference",
+        "tension_level": "low",
+        "entities": ["AI systems", "Processing", "data protection"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "tone_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0040",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents traitent-ils differemment les donnees des employes ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD s'applique pleinement aux donnees des employes.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "any information relating to an identified or identifiable natural person"},
+        "claim2": {"text": "La CCPA exemptait largement les donnees des employes, exemption reduite par le CPRA.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "employee personal information"},
+        "tension_nature": "scope_variation",
+        "tension_level": "high",
+        "entities": ["personal information", "Processing", "employment"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "scope_variation"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0041",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Y a-t-il des differences sur la definition du risque entre NIST et EDPB ?",
+      "ground_truth": {
+        "claim1": {"text": "Le NIST definit la vie privee comme composante de la trustworthiness, couvrant normes sociales et valeurs.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "privacy-enhanced"},
+        "claim2": {"text": "L'EDPB applique la definition stricte du RGPD centree sur les droits des personnes concernees.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe", "verbatim": "data subjects' rights"},
+        "tension_nature": "conceptual_difference",
+        "tension_level": "medium",
+        "entities": ["privacy", "risk management", "data protection"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "conceptual_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0042",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les deux versions de l'AI Act traitent-elles les obligations des deployers de la meme maniere ?",
+      "ground_truth": {
+        "claim1": {"text": "La version finale definit les obligations des deployers incluant surveillance humaine et FRIA.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "deployers shall use such systems in accordance with the instructions for use"},
+        "claim2": {"text": "La version Parlement contient des formulations similaires avec des precisions additionnelles.", "doc_id": "26_EU_AI_Act_Parliament_Adopted_51eb24c1", "verbatim": "deployers"},
+        "tension_nature": "nuance",
+        "tension_level": "low",
+        "entities": ["Deployers", "AI systems"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0043",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur la minimisation des donnees vs representativite des donnees d'entrainement ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD impose le principe de minimisation : donnees limitees au necessaire.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "adequate, relevant and limited to what is necessary"},
+        "claim2": {"text": "L'AI Act exige des donnees d'entrainement representatives et suffisamment completes pour prevenir les biais.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "sufficiently representative"},
+        "tension_nature": "tension",
+        "tension_level": "high",
+        "entities": ["Processing", "AI systems", "data governance"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "tension"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0044",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents traitent-ils differemment le droit de correction/rectification ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD accorde un droit de rectification des donnees inexactes depuis 2018.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "right to obtain from the controller the rectification of inaccurate personal data"},
+        "claim2": {"text": "Le CPRA ajoute un droit de correction (right to correct) a la CCPA, inexistant dans la version originale.", "doc_id": "15_CPRA_Act_e9f88d3e", "verbatim": "right to correct inaccurate personal information"},
+        "tension_nature": "evolution",
+        "tension_level": "medium",
+        "entities": ["data subject", "Consumers", "personal information"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "evolution"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0045",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "L'AI Act et le RGPD traitent-ils differemment les donnees d'entrainement de l'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD applique ses principes generaux sans distinction pour l'entrainement IA.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "processing shall be lawful"},
+        "claim2": {"text": "L'AI Act impose des exigences specifiques de gouvernance des donnees d'entrainement.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "training, validation and testing data sets shall be subject to data governance"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["Processing", "AI systems", "data governance"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0046",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur le transfert de donnees a des tiers ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD exige une base legale pour tout transfert a un tiers, consentement explicite pour les transferts internationaux.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "adequate level of protection"},
+        "claim2": {"text": "La CCPA impose un droit d'opt-out a posteriori plutot qu'un consentement prealable.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "right to opt-out of the sale or sharing"},
+        "tension_nature": "philosophical_difference",
+        "tension_level": "high",
+        "entities": ["personal information", "consent", "third parties"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "philosophical_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0047",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les systemes d'IA dans l'education ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act classe les systemes utilises dans l'education (admission, evaluation) comme haut risque.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "AI systems intended to be used for the purpose of determining access or admission or to assign natural persons to educational and vocational training institutions"},
+        "claim2": {"text": "L'Inde identifie l'education comme secteur prioritaire pour le deploiement positif de l'IA.", "doc_id": "16_India_AI_Strategy_NITI_Aayog_da5404db", "verbatim": "education"},
+        "tension_nature": "philosophical_difference",
+        "tension_level": "medium",
+        "entities": ["AI systems", "education"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "philosophical_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0048",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "L'EDPB et l'AI Act ont-ils la meme definition de risque IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act utilise une approche par categorie/annexe avec 8 domaines a haut risque.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "Annex III"},
+        "claim2": {"text": "L'EDPB evalue les risques en termes d'impact sur les droits et libertes sans categories predefinies.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe", "verbatim": "rights and freedoms"},
+        "tension_nature": "methodological_difference",
+        "tension_level": "medium",
+        "entities": ["AI systems", "risk", "data protection"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "methodological_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0049",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur la cybersecurite des systemes IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act exige resilience face aux tentatives de manipulation par des tiers.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "resilient against attempts by unauthorised third parties"},
+        "claim2": {"text": "Le RGPD exige pseudonymisation, chiffrement et capacite de resilience des systemes.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "pseudonymisation and encryption"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["AI systems", "cybersecurity", "Processing"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0050",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur le concept de 'dark patterns' et manipulation ?",
+      "ground_truth": {
+        "claim1": {"text": "La CCPA 2026 interdit les dark patterns qui subvertissent le consentement.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "dark patterns"},
+        "claim2": {"text": "L'AI Act interdit les techniques subliminales et la manipulation.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "subliminal techniques"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["consent", "Consumers", "AI systems"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0051",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur la notion de portabilite des donnees ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD accorde un droit explicite a la portabilite dans un format structure et lisible par machine.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "in a structured, commonly used and machine-readable format"},
+        "claim2": {"text": "La CCPA accorde un droit d'acces aux donnees mais sans droit de portabilite equivalent.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "right to know"},
+        "tension_nature": "scope_variation",
+        "tension_level": "medium",
+        "entities": ["data subject", "Consumers", "personal information"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "scope_variation"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0052",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les obligations de post-market monitoring ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act impose un systeme de surveillance apres commercialisation pour les systemes a haut risque.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "post-market monitoring system"},
+        "claim2": {"text": "Le RGPD impose une capacite continue de demontrer la conformite (accountability) sans systeme formel equivalent.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "be able to demonstrate compliance"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["Providers", "controller", "AI systems"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0053",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents traitent-ils differemment les sanctions pour fourniture d'informations incorrectes ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act prevoit des amendes de 7,5 millions ou 1% pour la fourniture d'informations incorrectes aux autorites.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "7 500 000 EUR or, if the offender is an undertaking, up to 1 % of its total worldwide annual turnover"},
+        "claim2": {"text": "Le RGPD prevoit des amendes de 10 millions ou 2% pour les violations d'obligations organisationnelles.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "up to 10 000 000 EUR, or up to 2 %"},
+        "tension_nature": "nuance",
+        "tension_level": "medium",
+        "entities": ["fines", "Providers", "controller"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0054",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Y a-t-il une tension entre tracabilite (AI Act) et minimisation (RGPD) pour les logs IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act exige des capacites de journalisation automatique pour la tracabilite.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "automatic recording of events (logs)"},
+        "claim2": {"text": "Le RGPD impose la minimisation des donnees y compris dans les logs.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "limited to what is necessary"},
+        "tension_nature": "tension",
+        "tension_level": "high",
+        "entities": ["AI systems", "Processing", "data governance"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "tension"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0055",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "L'AEPD et l'EDPB donnent-ils les memes recommandations pour l'evaluation d'impact IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AEPD recommande un audit algorithmique integre dans l'AIPD.", "doc_id": "aepd_gdpr_ai_guide_eba2beca", "verbatim": "data protection by design and by default"},
+        "claim2": {"text": "L'EDPB detaille les risques specifiques LLMs a evaluer (web scraping, hallucinations, memorisation).", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe", "verbatim": "web scraping, hallucinations"},
+        "tension_nature": "complementarity",
+        "tension_level": "none",
+        "entities": ["Processing", "AI systems", "impact assessment"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0056",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les amendes de niveau intermediaire AI Act et RGPD sont-elles comparables ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act prevoit 15 millions ou 3% pour les systemes a haut risque.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "15 000 000 EUR or up to 3 %"},
+        "claim2": {"text": "Le RGPD prevoit 10 millions ou 2% pour les violations d'obligations organisationnelles.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "10 000 000 EUR, or up to 2 %"},
+        "tension_nature": "escalation",
+        "tension_level": "medium",
+        "entities": ["fines", "enforcement"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "escalation"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0057",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur l'IA dans le secteur de la sante ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD classe les donnees de sante comme categorie speciale avec interdiction par defaut.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "data concerning health"},
+        "claim2": {"text": "L'Inde identifie la sante comme secteur prioritaire pour le deploiement positif de l'IA.", "doc_id": "16_India_AI_Strategy_NITI_Aayog_da5404db", "verbatim": "healthcare"},
+        "tension_nature": "philosophical_difference",
+        "tension_level": "medium",
+        "entities": ["health data", "AI systems"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "philosophical_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0058",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les droits CCPA originale et CCPA 2026 effective ont-ils evolue ?",
+      "ground_truth": {
+        "claim1": {"text": "La CCPA originale definit les droits fondamentaux : know, delete, opt-out.", "doc_id": "13_CCPA_Statute_0beb83cc", "verbatim": "right to know, right to delete, right to opt-out"},
+        "claim2": {"text": "La CCPA 2026 effective ajoute le droit de corriger et de limiter les informations sensibles.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "right to correct, right to limit"},
+        "tension_nature": "evolution",
+        "tension_level": "medium",
+        "entities": ["Consumers", "personal information"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "evolution"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0059",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur la protection des consommateurs vs citoyens ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD protege toute personne physique dont les donnees sont traitees, quel que soit son role.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "natural person"},
+        "claim2": {"text": "La CCPA protege specifiquement les 'consommateurs' definis comme residents californiens.", "doc_id": "13_CCPA_Statute_0beb83cc", "verbatim": "a natural person who is a California resident"},
+        "tension_nature": "scope_variation",
+        "tension_level": "medium",
+        "entities": ["data subject", "Consumers"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "scope_variation"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0060",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les codes de conduite volontaires pour l'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act encourage des codes de conduite volontaires pour les systemes a risque non eleve.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "codes of conduct"},
+        "claim2": {"text": "Le NIST AI RMF est lui-meme un cadre volontaire, assimilable a un code de conduite sectoriel.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "voluntary"},
+        "tension_nature": "complementarity",
+        "tension_level": "none",
+        "entities": ["AI systems", "regulation", "compliance"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0061",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur les obligations d'enregistrement des systemes IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act exige l'enregistrement des systemes a haut risque dans la base de donnees de l'UE.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "EU database for high-risk AI systems"},
+        "claim2": {"text": "Le RGPD exige un registre des activites de traitement interne mais pas d'enregistrement centralisé.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "record of processing activities"},
+        "tension_nature": "nuance",
+        "tension_level": "low",
+        "entities": ["controller", "Providers", "AI systems"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0062",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur le principe de non-discrimination ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD interdit le traitement de categories speciales revelant l'origine raciale/ethnique pour prevenir la discrimination.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "racial or ethnic origin"},
+        "claim2": {"text": "La CCPA accorde un droit de non-discrimination : l'exercice des droits ne doit pas entrainer de traitement discriminatoire.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "right to non-discrimination"},
+        "tension_nature": "nuance",
+        "tension_level": "low",
+        "entities": ["data subject", "Consumers", "discrimination"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0063",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur le traitement de l'IA par les forces de l'ordre ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act interdit l'identification biometrique temps reel sauf exceptions avec autorisation judiciaire.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "law enforcement"},
+        "claim2": {"text": "Le RGPD prevoit un cadre specifique pour le traitement a des fins penales (directive police).", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "prevention, investigation, detection or prosecution of criminal offences"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["AI systems", "law enforcement", "biometric data"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0064",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents traitent-ils differemment la transparence des GPAI ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act exige documentation technique, politique droit auteur et resume donnees d'entrainement pour les GPAI.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "draw up and keep up to date the technical documentation"},
+        "claim2": {"text": "Les amendements du Parlement avaient propose des obligations de transparence plus strictes pour les foundation models.", "doc_id": "05_EU_Parliament_AI_Act_Amendments_2023_1ea9aff7", "verbatim": "foundation models"},
+        "tension_nature": "evolution",
+        "tension_level": "medium",
+        "entities": ["general-purpose AI models", "Providers", "transparency"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "evolution"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0065",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur la definition de l'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act definit un systeme d'IA comme un systeme fonde sur la machine concu pour fonctionner avec differents niveaux d'autonomie.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "machine-based system that is designed to operate with varying levels of autonomy"},
+        "claim2": {"text": "Le NIST AI RMF ne fournit pas de definition unique et rigide de l'IA mais considere un spectre de technologies.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "AI technologies"},
+        "tension_nature": "conceptual_difference",
+        "tension_level": "low",
+        "entities": ["AI systems"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "conceptual_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0066",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Y a-t-il des tensions sur le social scoring entre les deux versions de l'AI Act ?",
+      "ground_truth": {
+        "claim1": {"text": "La version finale interdit les systemes de notation sociale par les autorites publiques.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "social scoring"},
+        "claim2": {"text": "La version Parlement proposait une interdiction elargie du social scoring incluant le secteur prive.", "doc_id": "26_EU_AI_Act_Parliament_Adopted_51eb24c1", "verbatim": "social scoring"},
+        "tension_nature": "evolution",
+        "tension_level": "medium",
+        "entities": ["AI systems", "social scoring"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "evolution"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0067",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur l'acces aux modeles IA par les autorites ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act donne a l'AI Office le pouvoir de demander l'acces aux modeles GPAI et a leur documentation.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "AI Office"},
+        "claim2": {"text": "Le RGPD donne aux autorites de controle le pouvoir d'acces aux locaux et aux operations de traitement.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "access to any premises of the controller and the processor"},
+        "tension_nature": "complementarity",
+        "tension_level": "none",
+        "entities": ["AI systems", "controller", "enforcement"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0068",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents traitent-ils differemment les obligations des PME/startups ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act prevoit un acces prioritaire des PME aux bacs a sable reglementaires et des frais reduits.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "SMEs including start-ups"},
+        "claim2": {"text": "Le RGPD n'a pas de regime specifique pour les PME sauf l'exemption de registre pour les organisations de moins de 250 employes.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "enterprise employing fewer than 250 persons"},
+        "tension_nature": "nuance",
+        "tension_level": "low",
+        "entities": ["Providers", "controller", "SMEs"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0069",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les obligations de marquage CE ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act exige le marquage CE pour les systemes a haut risque apres evaluation de conformite.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "CE marking of conformity"},
+        "claim2": {"text": "Le RGPD n'utilise pas de systeme de marquage de conformite equivalent.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "accountability"},
+        "tension_nature": "structural_difference",
+        "tension_level": "low",
+        "entities": ["AI systems", "Providers", "conformity"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "structural_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0070",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les exemptions militaires/defense ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act exempte explicitement les systemes d'IA a des fins militaires, de defense ou de securite nationale.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "exclusively for military, defence or national security purposes"},
+        "claim2": {"text": "Le RGPD prevoit des derogations pour la securite nationale mais pas d'exemption complete.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "national security"},
+        "tension_nature": "nuance",
+        "tension_level": "medium",
+        "entities": ["AI systems", "Processing", "military"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0071",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents traitent-ils de maniere coherente le droit de contestation des decisions IA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD accorde le droit de contester les decisions automatisees et d'obtenir une intervention humaine.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "right to obtain human intervention on the part of the controller"},
+        "claim2": {"text": "L'AI Act exige des mecanismes de surveillance humaine mais sans droit individuel de contestation equivalent.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "human oversight"},
+        "tension_nature": "nuance",
+        "tension_level": "medium",
+        "entities": ["data subject", "AI systems", "Deployers"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0072",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur l'extraterritorialite de l'AI Act et du RGPD ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD s'applique au traitement de donnees de personnes dans l'UE par des responsables hors UE.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "regardless of whether the processing takes place in the Union or not"},
+        "claim2": {"text": "L'AI Act s'applique aux fournisseurs hors UE dont les systemes sont mis sur le marche ou utilises dans l'UE.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "irrespective of whether those providers are established within the Union or in a third country"},
+        "tension_nature": "alignment",
+        "tension_level": "none",
+        "entities": ["Providers", "controller", "territorial scope"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "alignment"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0073",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur le droit a l'information au moment de la collecte ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD impose une information prealable detaillee au moment de la collecte (articles 13-14).", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "information to be provided where personal data are collected from the data subject"},
+        "claim2": {"text": "La CCPA impose la publication d'une politique de confidentialite et un notice at collection.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "notice at collection"},
+        "tension_nature": "nuance",
+        "tension_level": "low",
+        "entities": ["data subject", "Consumers", "transparency"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0074",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur le marketing direct et les communications electroniques ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD accorde un droit d'opposition absolu au traitement a des fins de prospection.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "direct marketing purposes, the data subject shall have the right to object at any time"},
+        "claim2": {"text": "La CCPA traite l'utilisation des donnees a des fins marketing via le droit d'opt-out de la vente/partage.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "opt-out of the sale or sharing"},
+        "tension_nature": "nuance",
+        "tension_level": "low",
+        "entities": ["personal information", "Processing", "marketing"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0075",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur le profilage dans le contexte de l'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD definit le profilage et accorde des droits specifiques contre les decisions automatisees.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "any form of automated processing of personal data consisting of the use of personal data to evaluate certain personal aspects"},
+        "claim2": {"text": "L'AI Act impose des obligations de surveillance humaine pour les systemes IA de profilage a haut risque.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "human oversight"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["AI systems", "data subject", "profiling"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0076",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les obligations de verification d'identite ?",
+      "ground_truth": {
+        "claim1": {"text": "La CCPA exige la verification de l'identite du consommateur pour les demandes d'exercice de droits.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "verify the identity of the consumer"},
+        "claim2": {"text": "Le RGPD prevoit que le responsable peut demander des informations supplementaires pour confirmer l'identite.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "request the provision of additional information necessary to confirm the identity"},
+        "tension_nature": "alignment",
+        "tension_level": "none",
+        "entities": ["data subject", "Consumers", "controller"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "alignment"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0077",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les normes harmonisees/standards techniques ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act prevoit le recours aux normes harmonisees pour presumer la conformite.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "harmonised standards"},
+        "claim2": {"text": "Le NIST AI RMF propose ses propres standards techniques volontaires.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "Govern, Map, Measure, and Manage"},
+        "tension_nature": "structural_difference",
+        "tension_level": "medium",
+        "entities": ["AI systems", "standards", "compliance"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "structural_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0078",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur la representation des interets des personnes affectees ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD prevoit le droit de mandater un organisme pour exercer les droits de la personne concernee.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "mandate a not-for-profit body, organisation or association"},
+        "claim2": {"text": "La CCPA permet aux consommateurs d'etre representes par un agent autorise pour exercer leurs droits.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "authorized agent"},
+        "tension_nature": "alignment",
+        "tension_level": "none",
+        "entities": ["data subject", "Consumers"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "alignment"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0079",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les obligations de cooperation entre autorites ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD organise la cooperation entre autorites via l'EDPB et le mecanisme de coherence.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "consistency mechanism"},
+        "claim2": {"text": "L'AI Act organise la cooperation via l'AI Board et l'AI Office.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "European Artificial Intelligence Board"},
+        "tension_nature": "structural_difference",
+        "tension_level": "low",
+        "entities": ["enforcement", "governance"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "structural_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0080",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les penalites pour les PME ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act prevoit des amendes reduites pour les PME et startups.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "SMEs including start-ups"},
+        "claim2": {"text": "La CCPA applique les memes penalites (2 500$/7 500$ par violation) sans distinction de taille.", "doc_id": "13_CCPA_Statute_0beb83cc", "verbatim": "seven thousand five hundred dollars ($7,500) for each intentional violation"},
+        "tension_nature": "nuance",
+        "tension_level": "medium",
+        "entities": ["fines", "SMEs", "enforcement"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0081",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents traitent-ils differemment la notion d'equite (fairness) ?",
+      "ground_truth": {
+        "claim1": {"text": "Le NIST AI RMF identifie l'equite comme composante de trustworthiness couvrant les biais systemiques.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "fair"},
+        "claim2": {"text": "L'AI Act traite l'equite via les obligations de gouvernance des donnees et de prevention des biais.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "free of errors and complete in view of the intended purpose"},
+        "tension_nature": "nuance",
+        "tension_level": "low",
+        "entities": ["AI systems", "fairness", "bias"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0082",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les systemes de notation/scoring ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act interdit le social scoring public et classe le credit scoring comme haut risque.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "social scoring, creditworthiness"},
+        "claim2": {"text": "Le RGPD traite le scoring comme une forme de profilage soumise a l'article 22.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "profiling"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["AI systems", "profiling", "scoring"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0083",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les obligations de tests adverses pour les modeles IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act impose des tests adverses (adversarial testing) aux fournisseurs de GPAI a risque systemique.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "adversarial testing"},
+        "claim2": {"text": "Le NIST AI RMF recommande des evaluations incluant des tests mais sans obligation formelle.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "Measure"},
+        "tension_nature": "scope_variation",
+        "tension_level": "medium",
+        "entities": ["AI systems", "general-purpose AI models", "testing"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "scope_variation"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0084",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les regulatory sandboxes vs approche NIST ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act prevoit des bacs a sable reglementaires avec supervision des autorites nationales.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "AI regulatory sandbox"},
+        "claim2": {"text": "Le NIST AI RMF ne prevoit pas de mecanisme equivalent de sandbox supervise.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "voluntary"},
+        "tension_nature": "structural_difference",
+        "tension_level": "medium",
+        "entities": ["AI systems", "regulation", "innovation"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "structural_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0085",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur le role du DPO et son equivalent AI Act ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD cree le role de DPO avec des obligations specifiques de designation et d'independance.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "data protection officer"},
+        "claim2": {"text": "L'AI Act ne cree pas de role equivalent de responsable de la conformite IA.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "quality management system"},
+        "tension_nature": "gap",
+        "tension_level": "medium",
+        "entities": ["controller", "Providers", "compliance"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "gap"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0086",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur la gestion des donnees de geolocalisation ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD traite les donnees de localisation comme donnees personnelles standard (pas de categorie speciale).", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "location data"},
+        "claim2": {"text": "La CCPA classe la geolocalisation precise comme information personnelle sensible avec droit de limitation.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "precise geolocation"},
+        "tension_nature": "scope_variation",
+        "tension_level": "medium",
+        "entities": ["personal information", "geolocation", "sensitive data"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "scope_variation"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0087",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents traitent-ils differemment les deepfakes et contenus generes ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act exige le marquage des deepfakes et du contenu genere par IA.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "artificially generated or manipulated image, audio or video content"},
+        "claim2": {"text": "Le RGPD ne traite pas specifiquement les deepfakes mais couvre le traitement de donnees biometriques utilisees.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "biometric data"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["AI systems", "biometric data", "transparency"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0088",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les systemes d'IA dans la justice ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act classe les systemes utilises dans la justice (aide a la decision judiciaire) comme haut risque.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "administration of justice and democratic processes"},
+        "claim2": {"text": "Le RGPD traite les decisions judiciaires comme des decisions automatisees soumises a l'article 22.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "legal effects"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["AI systems", "justice", "data subject"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0089",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les guides pratiques different-ils dans leurs recommandations de calendrier de conformite ?",
+      "ground_truth": {
+        "claim1": {"text": "Le guide Bird & Bird recommande de commencer la classification des systemes immediatement.", "doc_id": "bird_bird_ai_act_guide_4b8be131", "verbatim": "classification of AI systems"},
+        "claim2": {"text": "Le guide TwoBirds 2026 integre le calendrier echelonne de l'AI Act dans ses recommandations.", "doc_id": "20_TwoBirds_EU_AI_Act_Guide_2026_9b8e7105", "verbatim": "phased approach"},
+        "tension_nature": "complementarity",
+        "tension_level": "none",
+        "entities": ["Providers", "Deployers", "compliance"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0090",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les infrastructures critiques et l'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act classe les systemes d'IA utilises comme composants de securite d'infrastructures critiques comme haut risque.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "critical infrastructure"},
+        "claim2": {"text": "L'Inde identifie les villes intelligentes et infrastructures comme secteur prioritaire pour l'IA.", "doc_id": "16_India_AI_Strategy_NITI_Aayog_da5404db", "verbatim": "smart cities and infrastructure"},
+        "tension_nature": "philosophical_difference",
+        "tension_level": "medium",
+        "entities": ["AI systems", "infrastructure"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "philosophical_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0091",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur le guichet unique et la coordination entre autorites ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD prevoit un mecanisme de guichet unique avec autorite chef de file pour les traitements transfrontaliers.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "lead supervisory authority"},
+        "claim2": {"text": "L'AI Act ne prevoit pas de guichet unique equivalent mais une coordination via l'AI Board.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "European Artificial Intelligence Board"},
+        "tension_nature": "structural_difference",
+        "tension_level": "medium",
+        "entities": ["enforcement", "governance"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "structural_difference"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0092",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur l'obligation de nommer un representant dans l'UE ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD exige la designation d'un representant dans l'UE pour les responsables non etablis dans l'UE.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "representative in the Union"},
+        "claim2": {"text": "L'AI Act exige la designation d'un mandataire (authorised representative) pour les fournisseurs non UE.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "authorised representative"},
+        "tension_nature": "alignment",
+        "tension_level": "none",
+        "entities": ["Providers", "controller", "representative"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "alignment"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0093",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur le traitement des reclamations des individus ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD prevoit le droit de deposer une reclamation aupres d'une autorite de controle.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "right to lodge a complaint with a supervisory authority"},
+        "claim2": {"text": "La CCPA prevoit la possibilite de saisir la CPPA ou le procureur general, plus un droit d'action prive limite.", "doc_id": "14_CCPA_2026_Effective_8d57eba9", "verbatim": "California Privacy Protection Agency"},
+        "tension_nature": "nuance",
+        "tension_level": "low",
+        "entities": ["data subject", "Consumers", "enforcement"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0094",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les obligations liees aux systemes de recommandation ?",
+      "ground_truth": {
+        "claim1": {"text": "Les guidelines EDPB DSA/RGPD traitent les obligations de transparence des systemes de recommandation.", "doc_id": "edpb_2025_guidelines_dsa_gdpr_interplay_dd99cf79", "verbatim": "recommender systems"},
+        "claim2": {"text": "L'AI Act impose des obligations de transparence pour les systemes IA interagissant avec des personnes.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "AI systems intended to interact directly with natural persons"},
+        "tension_nature": "complementarity",
+        "tension_level": "none",
+        "entities": ["AI systems", "transparency", "Consumers"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0095",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur les obligations pour les distributeurs de systemes IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act definit des obligations specifiques pour les distributeurs de systemes a haut risque.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "distributor"},
+        "claim2": {"text": "Le RGPD ne definit pas de role equivalent de distributeur dans sa chaine de responsabilites.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "controller and processor"},
+        "tension_nature": "gap",
+        "tension_level": "low",
+        "entities": ["Providers", "AI systems", "distribution"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "gap"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0096",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur la gestion des rappels de produits IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act prevoit des mecanismes de retrait et de rappel pour les systemes a haut risque non conformes.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "withdrawal or recall"},
+        "claim2": {"text": "Le RGPD prevoit la cessation du traitement et la suppression des donnees en cas de violation.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "order the suspension of data flows"},
+        "tension_nature": "complementarity",
+        "tension_level": "low",
+        "entities": ["AI systems", "Providers", "enforcement"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0097",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur l'agriculture et l'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'Inde identifie l'agriculture comme secteur prioritaire pour l'IA avec des applications concretes.", "doc_id": "16_India_AI_Strategy_NITI_Aayog_da5404db", "verbatim": "agriculture"},
+        "claim2": {"text": "L'AI Act ne traite pas specifiquement l'agriculture dans sa classification des risques.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "Annex III"},
+        "tension_nature": "gap",
+        "tension_level": "low",
+        "entities": ["AI systems", "agriculture"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "gap"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0098",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents sont-ils coherents sur les systemes de gestion de la qualite ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act exige un systeme de gestion de la qualite (QMS) pour les fournisseurs de systemes a haut risque.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "quality management system"},
+        "claim2": {"text": "Le RGPD exige des mesures techniques et organisationnelles sans imposer un QMS formel.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "technical and organisational measures"},
+        "tension_nature": "nuance",
+        "tension_level": "low",
+        "entities": ["Providers", "controller", "quality"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0099",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents different-ils sur la duree de conservation des logs/donnees ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act exige la conservation des logs pendant une duree appropriee a la finalite du systeme.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "logs shall be kept for a period appropriate in light of the intended purpose"},
+        "claim2": {"text": "Le RGPD impose la limitation de conservation au strict necessaire, sans duree fixe.", "doc_id": "Full_GDPR_Text_bd84e63f", "verbatim": "kept for no longer than is necessary"},
+        "tension_nature": "nuance",
+        "tension_level": "low",
+        "entities": ["AI systems", "Processing", "retention"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "nuance"
+      }
+    },
+    {
+      "question_id": "T2_REG_KG_0100",
+      "task": "T2_contradictions",
+      "source": "kg_derived",
+      "question": "Les documents traitent-ils differemment les obligations de formation du personnel ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act exige que le personnel supervisant les systemes a haut risque ait les competences et la formation adequates.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7", "verbatim": "AI literacy"},
+        "claim2": {"text": "Le NIST AI RMF recommande la formation comme partie de la fonction Govern pour cultiver une culture de gestion des risques.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5", "verbatim": "culture of risk management"},
+        "tension_nature": "complementarity",
+        "tension_level": "none",
+        "entities": ["AI systems", "training", "governance"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "complementarity"
+      }
+    }
+  ]
+}

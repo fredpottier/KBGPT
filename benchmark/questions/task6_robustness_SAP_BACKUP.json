@@ -1,0 +1,3930 @@
+{
+  "metadata": {
+    "task": "T6",
+    "source": "robustness_coverage",
+    "description": "Questions testant la robustesse d'OSMOSIS sur des typologies non couvertes : false premise, unanswerable, temporal, causale, hypothetique, negation, synthese large, conditionnelle, set/liste. Domain-agnostic par structure.",
+    "count": 246,
+    "generated": "2026-04-01T12:00:00",
+    "categories": [
+      "false_premise",
+      "unanswerable",
+      "temporal_evolution",
+      "causal_why",
+      "hypothetical",
+      "negation",
+      "synthesis_large",
+      "conditional",
+      "set_list",
+      "multi_hop"
+    ]
+  },
+  "questions": [
+    {
+      "question_id": "T6_FP_001",
+      "category": "false_premise",
+      "question": "Pourquoi SAP S/4HANA ne supporte-t-il plus le Single Sign-On via logon tickets ?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "SAP S/4HANA supporte toujours le SSO via logon tickets. La premisse de la question est fausse.",
+        "evidence_claim": "SAP S/4HANA supports the use of logon tickets for SSO when using a Web browser as the front-end client.",
+        "evidence_doc": "027_SAP_S4HANA_2023_Security_Guide"
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_FP_002",
+      "category": "false_premise",
+      "question": "Comment fonctionne le support natif d'Oracle Database dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "SAP S/4HANA necessite SAP HANA comme base de donnees. Oracle n'est pas supporte nativement.",
+        "evidence_claim": "A new installation of SAP S/4HANA needs to run on the SAP HANA database.",
+        "evidence_doc": "027_SAP_S4HANA_2023_Security_Guide"
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_FP_003",
+      "category": "false_premise",
+      "question": "Depuis quelle version SAP a-t-il abandonne le protocole SNC pour securiser les connexions RFC ?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "SAP n'a pas abandonne SNC. Les connexions RFC peuvent toujours etre protegees par SNC.",
+        "evidence_claim": "RFC connections can be protected using Secure Network Communications (SNC).",
+        "evidence_doc": "027_SAP_S4HANA_2023_Security_Guide"
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_FP_004",
+      "category": "false_premise",
+      "question": "Pourquoi SAP Credit Management utilise-t-il uniquement des roles statiques sans objets d'autorisation ?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "SAP Credit Management utilise des objets d'autorisation specifiques comme F_UKM_SGMT et S_APPL_LOG.",
+        "evidence_claim": "SAP Credit Management uses the authorization object F_UKM_SGMT to control access rights.",
+        "evidence_doc": "027_SAP_S4HANA_2023_Security_Guide"
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_FP_005",
+      "category": "false_premise",
+      "question": "Comment SAP S/4HANA gere-t-il l'archivage des donnees de cartes de paiement en texte clair ?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "Les fichiers d'archive ne sont PAS stockes en texte clair mais en format binaire specifique SAP.",
+        "evidence_claim": "The archive files in the file system and the ILM store are stored not in plain text but in binary text in an SAP-specific format.",
+        "evidence_doc": "027_SAP_S4HANA_2023_Security_Guide"
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_FP_006",
+      "category": "false_premise",
+      "question": "Pourquoi le guide de securite SAP S/4HANA 2023 ne couvre-t-il pas l'edition Cloud Private ?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "Le guide de securite couvre explicitement SAP S/4HANA ET SAP S/4HANA Cloud Private Edition 2023.",
+        "evidence_claim": "SAP S/4HANA and SAP S/4HANA Cloud Private Edition 2023 are covered by the security guide.",
+        "evidence_doc": "027_SAP_S4HANA_2023_Security_Guide"
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_FP_007",
+      "category": "false_premise",
+      "question": "Comment les utilisateurs doivent-ils saisir manuellement leur mot de passe a chaque acces SSO dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "Avec SSO, l'utilisateur n'a PAS besoin de saisir un mot de passe. Il accede au systeme directement apres authentification initiale.",
+        "evidence_claim": "The user does not need to enter a user ID or password for authentication, but can access the system directly once it has been authenticated.",
+        "evidence_doc": "027_SAP_S4HANA_2023_Security_Guide"
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_UN_001",
+      "category": "unanswerable",
+      "question": "Quel est le cout de licence annuel de SAP S/4HANA Cloud Private Edition pour une entreprise de 500 utilisateurs ?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Le corpus ne contient aucune information sur les prix ou couts de licence SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "pas mentionne",
+          "corpus",
+          "documents disponibles"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_invent_price": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_002",
+      "category": "unanswerable",
+      "question": "Combien de clients SAP utilisent SAP S/4HANA en production dans le monde en 2024 ?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Le corpus ne contient pas de statistiques sur le nombre de clients SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_invent_number": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_003",
+      "category": "unanswerable",
+      "question": "Quelle est la performance benchmark TPS de SAP S/4HANA sur un serveur a 128 Go de RAM ?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Le corpus ne contient pas de benchmarks de performance materiels.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_invent_number": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_004",
+      "category": "unanswerable",
+      "question": "Quelles sont les alternatives open-source recommandees par SAP pour remplacer SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "SAP ne recommande evidemment pas d'alternatives open-source a son propre produit. Le corpus n'en parle pas.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne mentionne pas",
+          "aucune reference"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_005",
+      "category": "unanswerable",
+      "question": "Quel est le temps moyen de migration d'un systeme SAP ECC vers SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Le corpus contient des guides de conversion mais aucune estimation de duree moyenne.",
+        "expected_keywords": [
+          "pas d'information precise",
+          "varie",
+          "depend",
+          "pas de duree"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_invent_duration": true,
+        "may_mention_conversion_guides": true
+      }
+    },
+    {
+      "question_id": "T6_UN_006",
+      "category": "unanswerable",
+      "question": "Quel plugin Chrome est necessaire pour utiliser SAP Fiori ?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "SAP Fiori est une application web standard, aucun plugin specifique n'est mentionne dans le corpus.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne mentionne pas",
+          "navigateur web"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_invent_plugin": true
+      }
+    },
+    {
+      "question_id": "T6_UN_007",
+      "category": "unanswerable",
+      "question": "Quels sont les salaires moyens des consultants SAP S/4HANA en Europe ?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Le corpus est de la documentation technique, pas des donnees RH/salaires.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne traite pas",
+          "hors du scope"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_008",
+      "category": "unanswerable",
+      "question": "Comment configurer l'integration de SAP S/4HANA avec Salesforce CRM ?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Le corpus ne contient pas d'information sur l'integration avec Salesforce.",
+        "expected_keywords": [
+          "pas d'information",
+          "non mentionne",
+          "aucune reference"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_TE_001",
+      "category": "temporal_evolution",
+      "question": "Comment les prerequis business function pour PICM ont-ils evolue entre le guide d'installation 2021 et celui de 2023 ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "claim_2021": "The business function /PICM/CA_CPD_PICM_1 can be activated through the transaction SFW5",
+        "claim_2023": "The business function /PICM/CA_CPD_PICM_1 is activated through the transaction SFW5",
+        "evolution": "Formulation plus directive en 2023 (is activated vs can be activated)",
+        "docs": [
+          "011_SAP_S4HANA_2023_Installation_Guide",
+          "012_SAP_S4HANA_2021_Installation_Guide"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true,
+        "must_cite_both_docs": true
+      }
+    },
+    {
+      "question_id": "T6_TE_002",
+      "category": "temporal_evolution",
+      "question": "Le scope fonctionnel du SAP S/4HANA Cloud Private Edition a-t-il change entre FPS03 et l'edition 2025 ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03",
+          "023_1212_Business-Scope-2025-SAP-Cloud-ERP"
+        ],
+        "evolution": "Rebranding (S/4HANA Cloud Private Edition → SAP Cloud ERP Private Edition) + ajout de nouvelles fonctionnalites 2025"
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_changes": true,
+        "must_cite_both_docs": true
+      }
+    },
+    {
+      "question_id": "T6_TE_003",
+      "category": "temporal_evolution",
+      "question": "Les recommandations de securite pour les connexions SNC ont-elles evolue entre le Security Guide 2022 et 2023 ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "027_SAP_S4HANA_2023_Security_Guide",
+          "028_SAP_S4HANA_2022_Security_Guide"
+        ],
+        "note": "Le guide 2022 mentionne DIAG et RFC pour SNC, le guide 2023 ne mentionne que RFC"
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_004",
+      "category": "temporal_evolution",
+      "question": "Comment la description de Transaction /SAPAPO/OM17 a-t-elle change entre les Operations Guide 2021, 2022 et 2023 ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "claim_2021": "comparing it with data stored in SAP HANA SQL tables of SAP HANA",
+        "claim_2023": "comparing it with the corresponding data stored in SQL tables of SAP HANA",
+        "evolution": "Formulation simplifiee : suppression redondance 'of SAP HANA', ajout 'corresponding'",
+        "docs": [
+          "014_SAP_S4HANA_2021_Operations_Guide",
+          "015_SAP_S4HANA_2022_Operations_Guide",
+          "017_SAP_S4HANA_2023_Operations_Guide"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_multiple_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_005",
+      "category": "temporal_evolution",
+      "question": "Le nom du second report de suppression pour les donnees de plan de controle a-t-il change entre les versions 2022 et 2023 du Security Guide ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "claim_2022": "CNS_CP_DELETE or CNS_CP_DELETE_MULT",
+        "claim_2023": "CNS_CP_DELETE or CNS_DP_DELETE_MULT",
+        "evolution": "Le second report est passe de CNS_CP_DELETE_MULT a CNS_DP_DELETE_MULT",
+        "docs": [
+          "027_SAP_S4HANA_2023_Security_Guide",
+          "028_SAP_S4HANA_2022_Security_Guide"
+        ]
+      },
+      "grading_rules": {
+        "must_identify_specific_change": true,
+        "must_cite_both_versions": true
+      }
+    },
+    {
+      "question_id": "T6_TE_006",
+      "category": "temporal_evolution",
+      "question": "Le prerequis de visibilite de la business function PCA_XKEYV a-t-il ete renforce entre 2022 et 2023 ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "claim_2022": "requires the business function ... to be visible",
+        "claim_2023": "requires the business function ... to be visible and activated",
+        "evolution": "2023 ajoute l'exigence d'activation en plus de la visibilite",
+        "docs": [
+          "027_SAP_S4HANA_2023_Security_Guide",
+          "028_SAP_S4HANA_2022_Security_Guide"
+        ]
+      },
+      "grading_rules": {
+        "must_identify_specific_change": true,
+        "must_cite_both_versions": true
+      }
+    },
+    {
+      "question_id": "T6_TE_007",
+      "category": "temporal_evolution",
+      "question": "La direction des appels RFC pour SAP Dispute Management a-t-elle change entre les Security Guide 2022 et 2023 ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "claim_2022": "dialog calls from the Collections Management system to the Accounts Receivable system",
+        "claim_2023": "dialog calls from the Accounts Receivable system to the Collections Management system",
+        "evolution": "Direction inversee entre 2022 et 2023",
+        "docs": [
+          "027_SAP_S4HANA_2023_Security_Guide",
+          "028_SAP_S4HANA_2022_Security_Guide"
+        ]
+      },
+      "grading_rules": {
+        "must_identify_direction_change": true,
+        "must_cite_both_versions": true
+      }
+    },
+    {
+      "question_id": "T6_TE_008",
+      "category": "temporal_evolution",
+      "question": "Le business catalog requis avec SAP_SLL_BC_PI_MM_DOC_TRANS a-t-il change entre 2022 et 2023 ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "claim_2022": "requires assigning the business catalog SAP_CMD_BC_CUSTOMER_DSP",
+        "claim_2023": "requires assigning the business catalog SAP_CMD_BC_PRODUCT_DSP",
+        "evolution": "Prerequis change de CUSTOMER_DSP a PRODUCT_DSP",
+        "docs": [
+          "027_SAP_S4HANA_2023_Security_Guide",
+          "028_SAP_S4HANA_2022_Security_Guide"
+        ]
+      },
+      "grading_rules": {
+        "must_identify_specific_change": true,
+        "must_cite_both_versions": true
+      }
+    },
+    {
+      "question_id": "T6_CA_001",
+      "category": "causal_why",
+      "question": "Pourquoi SAP S/4HANA necessite-t-il SAP HANA comme base de donnees ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "note": "Le corpus explique le prerequis mais la raison technique (in-memory, colonnar) peut ne pas etre explicite. Le systeme devrait expliquer ce qu'il sait sans inventer.",
+        "evidence_claim": "A new installation of SAP S/4HANA needs to run on the SAP HANA database."
+      },
+      "grading_rules": {
+        "must_mention_hana_requirement": true,
+        "must_not_invent_reasons": true,
+        "may_say_reason_not_documented": true
+      }
+    },
+    {
+      "question_id": "T6_CA_002",
+      "category": "causal_why",
+      "question": "Pourquoi faut-il bloquer les donnees personnelles apres la fin de leur utilisation (End of Purpose) ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "After the primary purpose has ended (EoP), the data is blocked and can only be accessed by users with special authorization.",
+        "note": "Raison implicite : conformite RGPD/data protection"
+      },
+      "grading_rules": {
+        "must_explain_eop_concept": true,
+        "must_not_invent_reasons": true,
+        "may_mention_data_protection": true
+      }
+    },
+    {
+      "question_id": "T6_CA_003",
+      "category": "causal_why",
+      "question": "Pourquoi SAP recommande-t-il d'activer le Secure Session Management ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "Activate secure session management to prevent access in javascript or plug-ins to the SAP logon ticket and security session cookies.",
+        "reason": "Pour empecher l'acces aux tickets et cookies de session par du code javascript ou des plugins"
+      },
+      "grading_rules": {
+        "must_explain_security_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_004",
+      "category": "causal_why",
+      "question": "Pourquoi faut-il verifier le code custom avant la conversion vers SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "Before converting to SAP S/4HANA 2022, you need to check your custom code against the SAP S/4HANA simplifications.",
+        "reason": "Certains processus SAP Business Suite ne sont plus supportes"
+      },
+      "grading_rules": {
+        "must_mention_simplifications": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_005",
+      "category": "causal_why",
+      "question": "Pourquoi SAP utilise-t-il un format binaire specifique pour l'archivage des donnees de cartes de paiement ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "The archive files are stored not in plain text but in binary text in an SAP-specific format.",
+        "note": "Raison implicite : securite des donnees sensibles (PCI DSS)"
+      },
+      "grading_rules": {
+        "must_mention_binary_format": true,
+        "must_not_invent_reasons": true,
+        "may_mention_security": true
+      }
+    },
+    {
+      "question_id": "T6_HY_001",
+      "category": "hypothetical",
+      "question": "Si je desactive le Secure Session Management, quels risques cela pose-t-il ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "Secure session management prevents access in javascript or plug-ins to the SAP logon ticket and security session cookie(s).",
+        "expected_inference": "Sans Secure Session Management, le ticket de connexion et les cookies de session seraient accessibles par du javascript ou des plugins, creant un risque de vol de session."
+      },
+      "grading_rules": {
+        "must_identify_risk": true,
+        "must_base_on_documented_facts": true,
+        "must_not_invent_risks": true
+      }
+    },
+    {
+      "question_id": "T6_HY_002",
+      "category": "hypothetical",
+      "question": "Que se passerait-il si on ne planifie pas de job regulier pour les reports de suppression CNS_CP_DELETE ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "A regular job should be scheduled to call one of the deletion reports CNS_CP_DELETE or CNS_DP_DELETE_MULT.",
+        "expected_inference": "Les donnees de plan de controle ne seraient pas supprimees regulierement, ce qui pourrait poser des problemes de conformite et d'espace de stockage."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_003",
+      "category": "hypothetical",
+      "question": "Si le key replacement pour le chiffrement des cartes de paiement n'est pas active, que se passe-t-il ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "If key replacement is not activated, various SSF applications exist for the storage files of encrypted payment card data.",
+        "expected_inference": "Des applications SSF distinctes gereraient le stockage des fichiers chiffres au lieu du mecanisme de remplacement de cle periodique."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_004",
+      "category": "hypothetical",
+      "question": "Que risque-t-on si on supprime des donnees personnelles dont la derniere utilisation date de moins de 500 jours ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "The data cannot be deleted unless the last use was more than 500 days in the past.",
+        "expected_inference": "Selon la documentation, la suppression n'est pas autorisee avant 500 jours apres la derniere utilisation."
+      },
+      "grading_rules": {
+        "must_cite_500_days_rule": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_005",
+      "category": "hypothetical",
+      "question": "Si une entreprise utilise SAP ECC et veut utiliser les apps Fiori, doit-elle migrer vers S/4HANA ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "note": "Le corpus mentionne Fiori dans le contexte S/4HANA. Le systeme devrait mentionner ce qu'il sait sans affirmer categoriquement."
+      },
+      "grading_rules": {
+        "must_base_on_documented_facts": true,
+        "must_not_invent_migration_path": true
+      }
+    },
+    {
+      "question_id": "T6_NE_001",
+      "category": "negation",
+      "question": "Quels processus SAP Business Suite ne sont plus supportes dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "Some of the SAP Business Suite processes are no longer supported.",
+        "note": "Le systeme devrait mentionner que certains processus ne sont plus supportes et pointer vers les simplifications"
+      },
+      "grading_rules": {
+        "must_mention_deprecated_processes": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_002",
+      "category": "negation",
+      "question": "Quand est-ce qu'une connexion ILM store n'est PAS necessaire ?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "If you use the local SRS service of the application system to control ILM stores, you do not need a connection.",
+        "condition": "Quand on utilise le service SRS local"
+      },
+      "grading_rules": {
+        "must_identify_exception": true,
+        "must_cite_condition": true
+      }
+    },
+    {
+      "question_id": "T6_NE_003",
+      "category": "negation",
+      "question": "Dans quels cas l'audit ABAP platform n'est-il PAS active avec les parametres Secure by Default ?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "ABAP platform configurations and HANA auditing will only be enabled in case the source system does not have a customer configuration.",
+        "condition": "L'audit n'est active que si le systeme source n'a pas de configuration client"
+      },
+      "grading_rules": {
+        "must_identify_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_004",
+      "category": "negation",
+      "question": "Qu'est-ce que les utilisateurs ne peuvent PAS faire avec des donnees bloquees apres End of Purpose ?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "After the primary purpose has ended (EoP), the data is blocked and can only be accessed by users with special authorization.",
+        "note": "Les utilisateurs normaux ne peuvent pas acceder aux donnees bloquees"
+      },
+      "grading_rules": {
+        "must_mention_restricted_access": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_005",
+      "category": "negation",
+      "question": "Quelles sont les limites de Windows Wordprocessor Integration (WWI) ? Que ne peut-il pas faire sans compte Windows ?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "Windows Wordprocessor Integration (WWI) requires a Windows user account.",
+        "note": "WWI ne peut pas fonctionner sans compte Windows"
+      },
+      "grading_rules": {
+        "must_mention_windows_requirement": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_SY_001",
+      "category": "synthesis_large",
+      "question": "Donnez une vue complete de la gestion des donnees personnelles dans SAP S/4HANA : stockage, archivage, suppression et controle d'acces.",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "EoP_check",
+          "data_blocking",
+          "ILM",
+          "archiving",
+          "deletion_reports",
+          "authorization_objects",
+          "500_days_rule"
+        ],
+        "min_docs": 2
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_002",
+      "category": "synthesis_large",
+      "question": "Faites une synthese complete des mecanismes de securite des communications dans SAP S/4HANA : protocoles, chiffrement, authentification.",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "SNC",
+          "RFC_security",
+          "SSO",
+          "logon_tickets",
+          "SAML",
+          "secure_session",
+          "encryption"
+        ],
+        "min_docs": 2
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_003",
+      "category": "synthesis_large",
+      "question": "Quelles sont toutes les integrations SAP S/4HANA avec des systemes externes mentionnees dans la documentation ?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "SuccessFactors",
+          "Field_Service_Management",
+          "Cloud_ALM",
+          "BTP",
+          "Process_Integration"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_enumerate_integrations": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_004",
+      "category": "synthesis_large",
+      "question": "Resume l'ensemble des operations de maintenance et monitoring recommandees pour SAP S/4HANA en production.",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "liveCache_consistency",
+          "RFC_monitoring",
+          "job_scheduling",
+          "security_audit_log",
+          "qRFC_monitoring"
+        ],
+        "min_docs": 2
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_005",
+      "category": "synthesis_large",
+      "question": "Decrivez l'ensemble du processus de conversion d'un systeme SAP Business Suite vers SAP S/4HANA, incluant les prerequis, etapes et verifications.",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "custom_code_check",
+          "simplifications",
+          "database_migration",
+          "HANA_requirement",
+          "Fiori_setup"
+        ],
+        "min_docs": 2
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_CO_001",
+      "category": "conditional",
+      "question": "Quel objet d'autorisation est necessaire si un utilisateur doit evaluer l'acces aux donnees de cartes de paiement ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "condition": "Evaluer l'acces aux donnees de cartes de paiement",
+        "answer": "La transaction CCSEC_LOG_SHOW est utilisee pour evaluer l'acces aux donnees de cartes de paiement.",
+        "evidence_doc": "027_SAP_S4HANA_2023_Security_Guide"
+      },
+      "grading_rules": {
+        "must_mention_transaction": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_002",
+      "category": "conditional",
+      "question": "Si j'utilise Web Dynpro pour ABAP, quels sont les cas d'usage mentionnes dans la documentation ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "condition": "Web Dynpro for ABAP",
+        "answer": "Utilise pour la creation de modeles d'evaluation et l'edition des documents de performance des employes.",
+        "evidence_claim": "Applications based on Web Dynpro technology for ABAP are used for creating appraisal templates and editing performance management documents."
+      },
+      "grading_rules": {
+        "must_cite_use_cases": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_003",
+      "category": "conditional",
+      "question": "Dans le cas ou l'on utilise SAP Cloud Integration, quelles integrations sont supportees ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "condition": "SAP Cloud Integration",
+        "evidence_claim": "SAP Field Service Management is integrated with Service using SAP Cloud Integration and SAP Cloud Connector."
+      },
+      "grading_rules": {
+        "must_mention_field_service": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_004",
+      "category": "conditional",
+      "question": "Quel est le pool alias utilise si on configure XML DAS dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "condition": "XML DAS configuration",
+        "answer": "SAP/BC_XMLA",
+        "evidence_claim": "XML DAS uses the database pool alias SAP/BC_XMLA"
+      },
+      "grading_rules": {
+        "must_cite_alias": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_005",
+      "category": "conditional",
+      "question": "Si je veux archiver les plans financiers obsoletes, quel Archiving Object dois-je utiliser ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "condition": "Archivage de plans financiers",
+        "evidence_claim": "Archiving Object for Financial Plans is used to archive financial plans that are no longer needed."
+      },
+      "grading_rules": {
+        "must_mention_archiving_object": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_SE_001",
+      "category": "set_list",
+      "question": "Quels sont les differents types de donnees personnelles stockees pour Commodity Procurement and Commodity Sales ?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "PeriodEnd Valuation",
+          "Versioned Persistency of Logistics Pricing Data",
+          "BRFplus Decision Table Entries",
+          "Pricing Condition Records"
+        ],
+        "evidence_doc": "027_SAP_S4HANA_2023_Security_Guide"
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 3,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_SE_002",
+      "category": "set_list",
+      "question": "Listez tous les objets d'autorisation mentionnes pour SAP Credit Management.",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "F_UKM_SGMT",
+          "S_APPL_LOG"
+        ],
+        "evidence_doc": "027_SAP_S4HANA_2023_Security_Guide"
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_SE_003",
+      "category": "set_list",
+      "question": "Quels sont les guides SAP disponibles pour SAP S/4HANA 2023 dans le corpus ?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "Security Guide",
+          "Installation Guide",
+          "Operations Guide",
+          "Conversion Guide",
+          "Feature Scope Description"
+        ],
+        "note": "Le systeme doit lister les types de documents qu'il connait"
+      },
+      "grading_rules": {
+        "must_list_guides": true,
+        "min_items": 3
+      }
+    },
+    {
+      "question_id": "T6_SE_004",
+      "category": "set_list",
+      "question": "Quelles sont les methodes d'authentification SSO supportees par SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "logon_tickets",
+          "SAML",
+          "Kerberos"
+        ],
+        "evidence_doc": "027_SAP_S4HANA_2023_Security_Guide"
+      },
+      "grading_rules": {
+        "must_list_methods": true,
+        "min_items": 2,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_SE_005",
+      "category": "set_list",
+      "question": "Quels composants SAP supportent le End of Purpose (EoP) check ?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "Just-In-Time Supply to Production",
+          "Just-In-Time Supply to Customer",
+          "EWM Labor Management"
+        ],
+        "evidence_doc": "027_SAP_S4HANA_2023_Security_Guide"
+      },
+      "grading_rules": {
+        "must_list_components": true,
+        "min_items": 2,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_001",
+      "category": "multi_hop",
+      "question": "SAP utilise ILM pour la gestion du cycle de vie des informations. L'archivage ILM utilise-t-il du texte clair ? Et les donnees archivees peuvent-elles etre supprimees avant 500 jours ?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "SAP uses ILM to help set up a compliant information lifecycle management process",
+          "archive files are stored not in plain text but in binary text",
+          "data cannot be deleted unless the last use was more than 500 days in the past"
+        ],
+        "expected_answer": "Non au texte clair (format binaire) et non a la suppression avant 500 jours."
+      },
+      "grading_rules": {
+        "must_answer_both_parts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_002",
+      "category": "multi_hop",
+      "question": "Contract Accounts Receivable suit le standard PCI DSS. Ce standard s'applique-t-il au stockage des donnees de cartes ? Et comment ces donnees sont-elles archivees ?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "Contract Accounts Receivable and Payable follows the Payment Card Industry Data Security Standard",
+          "PCA_SECURITY_* database table is used for data of payment card",
+          "archive files are stored not in plain text but in binary text in an SAP-specific format"
+        ]
+      },
+      "grading_rules": {
+        "must_answer_both_parts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_003",
+      "category": "multi_hop",
+      "question": "WWI utilise RFC pour lire les donnees SAP. Ces connexions RFC peuvent-elles etre securisees ? Et quelle est la contrainte systeme pour WWI ?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "Windows Wordprocessor Integration (WWI) uses Remote Function Call (RFC) to read data",
+          "RFC connections can be protected using Secure Network Communications (SNC)",
+          "Windows Wordprocessor Integration (WWI) requires a Windows user account"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_three_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_004",
+      "category": "multi_hop",
+      "question": "BEI_PEXEC est utilise pour predire des scores de risque. Quel objet d'autorisation controle son execution ? Et dans quel module SAP est-ce utilise ?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "BEI_PEXEC uses the authorization object to execute the predict_risk_score_wrapper prediction report",
+          "Behavioral Insights module"
+        ],
+        "evidence_doc": "027_SAP_S4HANA_2023_Security_Guide"
+      },
+      "grading_rules": {
+        "must_identify_auth_object": true,
+        "must_identify_module": true
+      }
+    },
+    {
+      "question_id": "T6_MH_005",
+      "category": "multi_hop",
+      "question": "SAP S/4HANA supporte l'integration avec SuccessFactors Employee Central. Quelles donnees peut-on integrer ? Et quel objet d'autorisation controle l'acces aux objets TemSe lies a cette integration ?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "SAP S/4HANA supports the integration scenario with SAP SuccessFactors Employee Central",
+          "You can integrate contingent worker data like basic data and contact details",
+          "SAP S/4HANA system uses the authorization object S_TMS_ACT to control access to TemSe objects"
+        ],
+        "docs": [
+          "024_SAP-008",
+          "025_SAP_S4HANA_2023",
+          "027_SAP_S4HANA_2023_Security_Guide"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_three_facts": true,
+        "must_cite_multiple_docs": true
+      }
+    },
+    {
+      "question_id": "T6_UN_009",
+      "category": "unanswerable",
+      "question": "Quelle est la fourchette de salaire pour un consultant SAP S/4HANA en France?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les salaires varient selon l'expérience, le niveau d'expertise et l'entreprise, et ne sont pas disponibles dans la documentation technique.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_010",
+      "category": "unanswerable",
+      "question": "Quelles sont les principales entreprises concurrentes de SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les informations sur les concurrents ne sont pas fournies dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_011",
+      "category": "unanswerable",
+      "question": "Quel est le coût moyen d'un programme de formation SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les coûts de formation ne sont pas inclus dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_012",
+      "category": "unanswerable",
+      "question": "Quels sont les prix spécifiques des outils de migration SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les détails sur le prix des outils de migration ne sont pas fournis dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_013",
+      "category": "unanswerable",
+      "question": "Quels sont les contrats de niveau de service (SLA) garantis pour SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les détails des contrats de niveau de service ne sont pas inclus dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_014",
+      "category": "unanswerable",
+      "question": "Quels sont les délais moyens de réponse du support technique pour SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les informations sur les délais de réponse du support technique ne sont pas disponibles dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_015",
+      "category": "unanswerable",
+      "question": "Quand seront les dates de fin de vie pour les différentes versions de SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les dates de fin de vie ne sont pas fournies dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_016",
+      "category": "unanswerable",
+      "question": "Quelles sont les principales réussites des clients utilisant SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les histoires de réussite des clients ne sont pas incluses dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_017",
+      "category": "unanswerable",
+      "question": "Quels sont les coûts moyens pour obtenir une certification SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les coûts de certification ne sont pas inclus dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_018",
+      "category": "unanswerable",
+      "question": "Quelles sont les principales options pour les programmes de partenariat avec SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les détails sur les programmes de partenariat ne sont pas inclus dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_019",
+      "category": "unanswerable",
+      "question": "Quels sont les coûts moyens pour l'intégration avec Salesforce dans SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les détails sur les coûts d'intégration avec Salesforce ne sont pas inclus dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_020",
+      "category": "unanswerable",
+      "question": "Quels sont les coûts moyens pour l'intégration avec ServiceNow dans SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les détails sur les coûts d'intégration avec ServiceNow ne sont pas inclus dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_021",
+      "category": "unanswerable",
+      "question": "Quelle est la taille moyenne de la machine requise pour SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les informations sur la taille de la machine requise ne sont pas incluses dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_022",
+      "category": "unanswerable",
+      "question": "Quels sont les principaux défis rencontrés par les clients lors de la mise en œuvre de SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les défis spécifiques des clients ne sont pas inclus dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_023",
+      "category": "unanswerable",
+      "question": "Quelles sont les principales opportunités de marché pour SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les statistiques de marché ne sont pas incluses dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_024",
+      "category": "unanswerable",
+      "question": "Quelle est la demande actuelle pour les consultants SAP S/4HANA en France?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les statistiques de demande pour les consultants ne sont pas incluses dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_UN_025",
+      "category": "unanswerable",
+      "question": "Quels sont les principaux avantages concurrentiels de SAP S/4HANA par rapport à d'autres solutions?",
+      "ground_truth": {
+        "expected_behavior": "admit_ignorance",
+        "reason": "Les comparaisons avec les concurrents ne sont pas incluses dans la documentation technique de SAP.",
+        "expected_keywords": [
+          "pas d'information",
+          "ne dispose pas",
+          "non disponible",
+          "aucune donnee"
+        ]
+      },
+      "grading_rules": {
+        "must_admit_no_info": true,
+        "must_not_hallucinate": true
+      }
+    },
+    {
+      "question_id": "T6_FP_008",
+      "category": "false_premise",
+      "question": "Le Recruteur Restreint peut changer l'état des demandes et des publications.",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "Le Recruteur Restreint ne peut pas changer l'état des demandes et des publications.",
+        "evidence_claim": "Restricted Recruiter cannot change the status of requisitions and publications"
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_009",
+      "category": "false_premise",
+      "question": "Est-ce vrai que le Département de Trésorerie et de Gestion des Risques autorise l'utilisation de partenaires commerciaux qui sont des personnes physiques?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "Le Département de Trésorerie et de Gestion des Risques ne permet pas l'utilisation de partenaires commerciaux qui sont des personnes physiques.",
+        "evidence_claim": "Treasury and Risk Management does not allow the use of business partners who are natural persons."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_010",
+      "category": "false_premise",
+      "question": "Est-ce que l'utilisateur technique nécessite des autorisations spécifiques pour le système SAP HR?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "L'utilisateur technique ne nécessite pas d'autorisations spécifiques pour le système SAP HR.",
+        "evidence_claim": "The technical user does not require authorizations specific to the SAP HR solution."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_011",
+      "category": "false_premise",
+      "question": "Les fichiers d'archive dans le système de fichiers et le stockage ILM sont-ils stockés en texte brut dans un format compressé spécifique à SAP ?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "Les fichiers d'archive dans le système de fichiers et le stockage ILM sont stockés non pas en texte brut, mais en format binaire compressé spécifique à SAP.",
+        "evidence_claim": "The archive files in the file system and the ILM store are stored not in plain text but in binary text in an SAP-specific, compressed format."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_012",
+      "category": "false_premise",
+      "question": "Est-ce que SAP recommande de désactiver la fonction du scanner anti-virus ?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "SAP recommande que les clients ne désactivent pas la fonction du scanner anti-virus.",
+        "evidence_claim": "SAP recommends that customers do not turn off the virus scanner function."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_013",
+      "category": "false_premise",
+      "question": "Est-ce que l'accès à un répertoire qui ne correspond pas à une carte stockée est autorisé sans provoquer d'erreur à l'exécution?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "L'accès à un répertoire qui ne correspond pas à une carte stockée provoque une erreur à l'exécution.",
+        "evidence_claim": "The mapping is validated at runtime and if access is requested to a directory that does not match a stored mapping, then an error occurs."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_014",
+      "category": "false_premise",
+      "question": "Est-il possible de créer un objet d'affaires qui contient des données bloquées ?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "Il n'est pas possible de créer un objet d'affaires qui contient des données bloquées.",
+        "evidence_claim": "It is not possible to create a business object that contains blocked data."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_015",
+      "category": "false_premise",
+      "question": "Doit-on filtrer les e-mails entrants et sortants contenant des pièces jointes PDF avec JavaScript?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "E-mails avec des pièces jointes PDF contenant du JavaScript ne doivent pas être filtrés dans le processus d'entrée et de sortie des e-mails.",
+        "evidence_claim": "E-mails with PDF attachments that contain JavaScript must not be filtered out in the e-mail inbound and outbound process."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_016",
+      "category": "false_premise",
+      "question": "Le système ne vérifie pas la validité de l'assignation en temps réel et ne génère aucun message d'erreur même si l'accès à un répertoire est demandé qui ne correspond à aucune assignation définie.",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "Le système valide l'assignation en temps réel et génère un message d'erreur si l'accès à un répertoire est demandé qui ne correspond à aucune assignation définie.",
+        "evidence_claim": "The system validates the assignment at runtime and issues an error message if access to a directory is requested that does not match any assignment defined."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_017",
+      "category": "false_premise",
+      "question": "La gestion de communication bancaire SAP n'est pas importante pour fournir explicitement un accès aux fichiers correspondants dans le système de fichiers sans autoriser l'accès à d'autres répertoires ou fichiers.",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "La gestion de communication bancaire SAP est importante pour fournir explicitement un accès aux fichiers correspondants dans le système de fichiers sans autoriser l'accès à d'autres répertoires ou fichiers.",
+        "evidence_claim": "SAP Bank Communication Management is important to explicitly provide access to the corresponding files in the file system without allowing access to other directories or files."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_018",
+      "category": "false_premise",
+      "question": "Après la fin de l'usage principal (EoP), les données restent accessibles aux utilisateurs d'affaires de SAP, sans restriction particulière.",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "Après la fin de l'usage principal (EoP), les données sont bloquées et ne peuvent être accessibles qu'aux utilisateurs avec des autorisations spéciales, comme les auditeurs fiscaux.",
+        "evidence_claim": "After the primary purpose has ended (EoP), the data is blocked and can only be accessed by users with special authorizations (for example, tax auditors), not by business users of SAP applications."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_019",
+      "category": "false_premise",
+      "question": "Peut-on accéder à un répertoire qui ne correspond à aucune affectation stockée sans que cela provoque une erreur ?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "Si l'accès à un répertoire est demandé qui ne correspond pas à une affectation stockée, une erreur se produit.",
+        "evidence_claim": "If access to a directory is requested that does not correspond to a stored assignment, an error occurs."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_020",
+      "category": "false_premise",
+      "question": "Est-il correct d'archiver des informations de carte de crédit en texte clair ?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "Les informations de carte de crédit en texte clair ne doivent pas être archivées.",
+        "evidence_claim": "Clear text credit card information should not be archived."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_021",
+      "category": "false_premise",
+      "question": "Peut-on affirmer que l'utilisateur peut accéder aux documents d'évaluation de tous les employés AT, indépendamment de sa zone de responsabilité?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "L'utilisateur ne peut afficher et traiter les documents d'évaluation que pour ceux des employés AT qui sont dans sa zone de responsabilité.",
+        "evidence_claim": "The user can display and process appraisal documents only for those AT employees who are in his or her area of responsibility"
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_022",
+      "category": "false_premise",
+      "question": "Est-il recommandé d'activer l'option Set RFC Trace dans votre système de production ?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "Do not activate the Set RFC Trace option in your productive system.",
+        "evidence_claim": "Do not activate the Set RFC Trace option in your productive system."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_023",
+      "category": "false_premise",
+      "question": "Le système SAP peut lire le numéro de personnel sans l'utilisateur.",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "Le système SAP ne peut lire le numéro de personnel que via l'utilisateur.",
+        "evidence_claim": "The SAP system can only read the personnel number via the user."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_024",
+      "category": "false_premise",
+      "question": "Est-ce que l'utilisateur doit entrer un ID utilisateur ou un mot de passe pour l'authentification avant de pouvoir accéder directement au système?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "L'utilisateur n'a pas besoin d'entrer un ID utilisateur ou un mot de passe pour l'authentification, mais peut accéder directement au système une fois que celui-ci a vérifié le ticket de connexion.",
+        "evidence_claim": "The user does not need to enter a user ID or password for authentication, but can access the system directly once it has checked the logon ticket."
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_FP_025",
+      "category": "false_premise",
+      "question": "Est-ce que SAP Information Lifecycle Management (SAP ILM) est nécessaire pour la suppression simplifiée et le blocage de données personnelles dans le Transaction Manager lorsqu'on utilise uniquement le Risk Management pour analyser les Transactions?",
+      "ground_truth": {
+        "expected_behavior": "reject_premise",
+        "correct_fact": "SAP Information Lifecycle Management (SAP ILM) n'est pas nécessaire pour la suppression simplifiée et le blocage de données personnelles dans le Transaction Manager lorsqu'on utilise uniquement le Risk Management pour analyser les Transactions.",
+        "evidence_claim": "SAP Information Lifecycle Management (SAP ILM) is not necessary for simplified blocking and deletion of personal data in the Transaction Manager when only using Risk Management to analyze Transaction "
+      },
+      "grading_rules": {
+        "must_correct_premise": true,
+        "must_not_confirm_false_claim": true
+      }
+    },
+    {
+      "question_id": "T6_NE_006",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible pour un Recruteur restreint concernant les demandes et publications?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "Restricted Recruiter cannot change the status of requisitions and publications"
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_007",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible selon le département de Trésorerie et Gestion des Risques concernant l'utilisation de partenaires commerciaux qui sont des personnes physiques?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "Treasury and Risk Management does not allow the use of business partners who are natural persons."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_008",
+      "category": "negation",
+      "question": "Qu'est-ce qui NE EST PAS possible pour un utilisateur technique dans le système SAP HR sans autorisations spécifiques?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "The technical user does not require authorizations specific to the SAP HR solution."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_009",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible avec les fichiers archivés dans le système de fichiers et le magasin ILM de SAP ? Par exemple, sont-ils stockés en texte brut ou dans un format compressé spécifique à SAP ?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "The archive files in the file system and the ILM store are stored not in plain text but in binary text in an SAP-specific, compressed format."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_010",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible selon SAP en ce qui concerne le fonctionnement du scanner anti-virus?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "SAP recommends that customers do not turn off the virus scanner function."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_011",
+      "category": "negation",
+      "question": "Qu'est-ce qui ne serait pas possible lors de l'accès à un répertoire qui ne correspond pas à une carte de correspondance stockée?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "The mapping is validated at runtime and if access is requested to a directory that does not match a stored mapping, then an error occurs."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_012",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible en ce qui concerne la création d'un objet d'affaires contenant des données bloquées?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "It is not possible to create a business object that contains blocked data."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_013",
+      "category": "negation",
+      "question": "Qu'est-ce qui NE EST PAS possible en ce qui concerne les e-mails entrants et sortants contenant des pièces jointes PDF avec du JavaScript?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "E-mails with PDF attachments that contain JavaScript must not be filtered out in the e-mail inbound and outbound process."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_014",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible lors de la demande d'accès à un répertoire qui ne correspond à aucune affectation définie?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "The system validates the assignment at runtime and issues an error message if access to a directory is requested that does not match any assignment defined."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_015",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible avec SAP Bank Communication Management en ce qui concerne l'accès aux fichiers du système de fichiers?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "SAP Bank Communication Management is important to explicitly provide access to the corresponding files in the file system without allowing access to other directories or files."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_016",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible après la fin de l'utilisation principale des données dans les applications SAP?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "After the primary purpose has ended (EoP), the data is blocked and can only be accessed by users with special authorizations (for example, tax auditors), not by business users of SAP applications."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_017",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est pas possible lorsqu'une demande d'accès à un répertoire ne correspond pas à une affectation stockée?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "If access to a directory is requested that does not correspond to a stored assignment, an error occurs."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_018",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible en ce qui concerne l'archivage des informations de carte de crédit en clair ?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "Clear text credit card information should not be archived."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_019",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible pour un utilisateur en ce qui concerne les documents d'évaluation des employés AT ?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "The user can display and process appraisal documents only for those AT employees who are in his or her area of responsibility"
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_020",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible dans un système de production ? Ne pas activer l'option Set RFC Trace.",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "Do not activate the Set RFC Trace option in your productive system."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_021",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible avec le système SAP en ce qui concerne le numéro de personnel ?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "The SAP system can only read the personnel number via the user."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_022",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible sans entrer un ID utilisateur ou un mot de passe pour l'authentification?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "The user does not need to enter a user ID or password for authentication, but can access the system directly once it has checked the logon ticket."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_023",
+      "category": "negation",
+      "question": "Qu'est-ce qui NE EST PAS possible sans SAP Information Lifecycle Management (SAP ILM) lors de l'analyse des transactions par la Gestion des Risques ?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "SAP Information Lifecycle Management (SAP ILM) is not necessary for simplified blocking and deletion of personal data in the Transaction Manager when only using Risk Management to analyze Transaction "
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_024",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible/supported/autorisé lorsque le système utilise l'objet d'autorisation PLOG et l'autorisation structurale correspondante?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "The system displays only objects for which the user has authorization through the authorization object PLOG and the corresponding structural authorization."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_NE_025",
+      "category": "negation",
+      "question": "Qu'est-ce qui n'est PAS possible selon les recommandations de SAP pour les clients logiciels ?",
+      "ground_truth": {
+        "expected_behavior": "find_negation",
+        "evidence_claim": "SAP recommends using only trustworthy client software, keeping the client software up-to-date, and using secure configuration settings."
+      },
+      "grading_rules": {
+        "must_mention_negation": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_006",
+      "category": "conditional",
+      "question": "Si l'on assigne le catalogue d'entreprise SAP_SLL_BC_CLS_ISSRVCCODE au rôle backend, quand faut-il assigner le catalogue d'entreprise SAP_CMD_BC_PRODUCT_DSP dans le même rôle backend ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "Assigning business catalog SAP_SLL_BC_CLS_ISSRVCCODE in backend role requires assigning business catalog SAP_CMD_BC_PRODUCT_DSP in the same backend role"
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_007",
+      "category": "conditional",
+      "question": "Si l'on assigne le catalogue d'entreprise SAP_SLL_BC_CLS_OVERVIEW au rôle backend, quand faut-il assigner le catalogue d'entreprise SAP_CMD_BC_PRODUCT_DSP dans le même rôle backend ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "Assigning business catalog SAP_SLL_BC_CLS_OVERVIEW in backend role requires assigning business catalog SAP_CMD_BC_PRODUCT_DSP in the same backend role."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_008",
+      "category": "conditional",
+      "question": "Si l'administration du cadre de connectivité unifiée (UCON) est mise en place correctement, quand le système SAP S/4HANA sera-t-il protégé de manière significative lors de l'accès distant via les RFCs ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "Unified Connectivity (UCON) administration framework significantly increases protection for SAP S/4HANA system when accessed remotely using RFCs."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_009",
+      "category": "conditional",
+      "question": "Si les appels BAPI et l'envoi d'IDocs vers le RFC destination ne utilisent pas la relation de système de confiance/fiable, quel prérequis est nécessaire ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "The RFC destination for BAPI calls and sending IDocs does not use the trusted/trusting system relationship and requires a communication user."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_010",
+      "category": "conditional",
+      "question": "Si l'objet d'autorisation P_PYC_POL a ACTVT défini sur 03 (Affichage), alors quand est-ce que l'on peut voir la liste des politiques?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "Viewing the list of policies requires the authorization object P_PYC_POL with ACTVT set to 03 (Display)."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_011",
+      "category": "conditional",
+      "question": "Si le système SAP S/4HANA Utilities nécessite le certificat serveur de SAP Cloud Platform Integration pour des communications sécurisées, quand doit-on s'assurer que ce prérequis est rempli ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "SAP S/4HANA Utilities system requires the server certificate from SAP Cloud Platform Integration for secure communications."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_013",
+      "category": "conditional",
+      "question": "Si les modules de fonction mentionnés dans l'activité Define Application Function Modules Registered for EoP Check Customizing (vue V_BUTEOPFM) sont appelés par le rapport de désactivation/activation, quand sont-ils utilisés et quelles sont les prérequis pour cette utilisation?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "The function modules mentioned in the Define Application Function Modules Registered for EoP Check Customizing activity (view V_BUTEOPFM) are called by the blocking/unblocking report when performing t"
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_014",
+      "category": "conditional",
+      "question": "Si SAP S/4HANA prend en charge l'utilisation de billets de connexion pour l'authentification unique (SSO) lors de l'utilisation d'un navigateur web en tant que client frontal, quand est-ce que cette fonctionnalité est utilisée ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "SAP S/4HANA supports the use of logon tickets for SSO when using a Web browser as the front-end client."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_015",
+      "category": "conditional",
+      "question": "Si l'on assigne le catalogue d'entreprise SAP_SLL_BC_CLS_CMMDTYCODE au rôle backend, quand faut-il assigner le catalogue d'entreprise SAP_CMD_BC_PRODUCT_DSP dans le même rôle backend ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "Assigning business catalog SAP_SLL_BC_CLS_CMMDTYCODE in backend role requires assigning business catalog SAP_CMD_BC_PRODUCT_DSP in the same backend role"
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_016",
+      "category": "conditional",
+      "question": "Si l'on assigne le catalogue d'entreprise SAP_SLL_BC_PROD_CLS_DISP au rôle backend, quand faut-il assigner le catalogue d'entreprise SAP_CMD_BC_PRODUCT_DSP dans le même rôle backend ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "Assigning business catalog SAP_SLL_BC_PROD_CLS_DISP in backend role requires assigning business catalog SAP_CMD_BC_PRODUCT_DSP in the same backend role."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_017",
+      "category": "conditional",
+      "question": "Si le détail du client de la commande de vente est fourni, quand le processus Order (ERP_PP_SFC) utilise-t-il ces informations ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "Process Order (ERP_PP_SFC) uses customer details from the sales order when created."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_018",
+      "category": "conditional",
+      "question": "Si le profil de contrôle anti-virus PAOC_RCF_BL/HTTP_UPLOAD est utilisé dans SAP E-Recruiting pour vérifier les virus lors du téléchargement d'attachements, quand est-ce que cette vérification est effectuée ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "In the Virus Scan when Uploading Documents Customizing activity, the virus scan profile / PAOC_RCF_BL/HTTP_UPLOAD is used in SAP E-Recruiting to perform a virus check when uploading attachments."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_019",
+      "category": "conditional",
+      "question": "Si le Service de Mappage de Clés Unifié est connecté à SAP Process Integration, quand est-il nécessaire d'utiliser cette intégration pour résoudre les conflits lors de l'affectation de numéros dans un scénario à plusieurs systèmes sans un système central de traitement des données maîtresse de client?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "Unified Key Mapping Service is connected to SAP Process Integration to resolve conflicts when assigning numbers in a multiple-system scenario without a central system for processing customer master da"
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_020",
+      "category": "conditional",
+      "question": "Si les destinations requises par SAP Process Integration ne sont pas spécifiques à une application, quand faut-il définir ces destinations pour respecter les prérequis?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "SAP Process Integration requires destinations that are not application-specific."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_021",
+      "category": "conditional",
+      "question": "Si un technicien de maintenance doit effectuer son travail efficacement et en toute sécurité, quand doit-il suivre les fonctions couvertes par le rôle de planificateur de maintenance ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "The maintenance planner role covers all the functions that a maintenance technician requires to carry out the work effectively and safely."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_022",
+      "category": "conditional",
+      "question": "Si le scanner de virus détecte du contenu malveillant lors de l'upload et de l'importation de données dans l'application Import Consolidation Master Data, qu'est-ce qui se passe ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "If the virus scanner detects malicious content when uploading and importing data in the Import Consolidation Master Data app, the process is terminated."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_023",
+      "category": "conditional",
+      "question": "Si une société utilise SAP S/4HANA, quand doit-elle effectuer la migration de données une fois pour le stockage chiffré des données de cartes de paiement?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "SAP business partner in S/4HANA systems requires a one-time data migration for encrypted storage of payment card data."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_024",
+      "category": "conditional",
+      "question": "Si les enregistrements des partenaires d'affaires sont archivés quand la finalité commerciale des partenaires est achevée, quand archiverons-nous les dossiers des partenaires dont la collaboration est terminée ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "Business partner records are archived when the business purpose of the business partners is completed."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CO_025",
+      "category": "conditional",
+      "question": "Si l'on assigne le catalogue d'entreprise SAP_SLL_BC_LICASSGMT_DISP au rôle backend, quel prérequis doit-on alors satisfaire ?",
+      "ground_truth": {
+        "expected_behavior": "conditional_extraction",
+        "evidence_claim": "Assigning business catalog SAP_SLL_BC_LICASSGMT_DISP in backend role requires assigning business catalog SAP_CMD_BC_BP_DISP in the same backend role."
+      },
+      "grading_rules": {
+        "must_cite_condition": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_CA_006",
+      "category": "causal_why",
+      "question": "Pourquoi avoir différents options pour collecter et évaluer les données dans le but de créer des analytics d'inventaire commercial ainsi que de dériver des tendances et fournir des recommandations pour la direction supérieure?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "You have various options for collecting and evaluating data in order to create business inventory analytics as well as to derive trends and provide recommendations for senior management."
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_007",
+      "category": "causal_why",
+      "question": "Pourquoi utiliser la fonctionnalité Vérification de la Disponibilité du Produit pour réprioriser les documents de vente et les ordres de transport de stock et effectuer des contrôles de masse automatiques de disponibilité ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "You can use the Product Availability Check feature to re-prioritize sales documents and stock transport orders and perform automated mass availability checks to ensure that a limited supply of materia"
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_008",
+      "category": "causal_why",
+      "question": "Pourquoi est-il important d'intégrer les données financières locales au système central de comptabilité des recettes ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "Central Finance Integration Mapping of data from local systems to Revenue Accounting as a part of Central Finance in order to process revenue accounting data from local systems centrally and provide a"
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_009",
+      "category": "causal_why",
+      "question": "Pourquoi utiliser les services de sécurité et de gestion responsable des produits (PS&S) dans TM pour assurer le transport en toute sécurité des marchandises dangereuses conformément aux régulations légales pour les services PS&S ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "You can use product safety and stewardship (PS&S) services in TM to ensure the safe transportation of dangerous goods in accordance with legal regulations for PS&S services."
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_010",
+      "category": "causal_why",
+      "question": "Pourquoi les vues dans le Guide d'implémentation des services administratifs RH sont-elles protégées séparément par un regroupement pour le contrôle d'autorisation afin d'empêcher les utilisateurs non autorisés de maintenir des données liées aux personnes ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "The views in the Implementation Guide for HR Administrative Services are protected separately by a grouping for the authorization check to prevent unauthorized users from maintaining person-related da"
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_011",
+      "category": "causal_why",
+      "question": "Pourquoi est-il nécessaire d'implémenter des mesures techniques et organisationnelles supplémentaires dans la gestion des trésors et du risque pour garantir le respect des délais concernant le stockage et la suppression des données personnelles impliquant des personnes physiques?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "Treasury and Risk Management requires additional technical and organizational measures to ensure respect for deadlines governing the storage and deletion of personal data when involving natural person"
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_012",
+      "category": "causal_why",
+      "question": "Pourquoi les groupes d'autorisation avec l'objet d'autorisation B_BUPA_GRP sont-ils utilisés pour protéger les données des employés ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "Authorization groups with authorization object B_BUPA_GRP are used to protect employee data."
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_013",
+      "category": "causal_why",
+      "question": "Pourquoi les actions correctives et préventives permettent-elles de déclencher des actions afin de résoudre un problème et de l'empêcher de se reproduire ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "Corrective and preventive actions allow you to trigger actions in order to solve a problem and to prevent the problem from recurring."
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_014",
+      "category": "causal_why",
+      "question": "Pourquoi serait-il important de désactiver la fonction de téléversement de fichiers pour prévenir les utilisateurs d'uploader des fichiers sur votre système ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "The file upload function can be disabled to prevent users from uploading files to your system."
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_015",
+      "category": "causal_why",
+      "question": "Pourquoi est-il important d'utiliser un processus d'approbation pour les chimiques afin d'assurer que de nouveaux produits chimiques introduits dans votre entreprise soient approuvés du point de vue de la santé, de la sécurité et de l'environnement avant d'être commandés?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "You can use the approval process for chemicals to ensure that new chemicals that are introduced in your company are approved from a health, safety, and environmental aspect before they are ordered. Th"
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_016",
+      "category": "causal_why",
+      "question": "Pourquoi SAP S/4HANA utilise-t-elle les Communications de Réseau Sécurisées (SNC) pour protéger les connexions RFC ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "SAP S/4HANA uses Secure Network Communications (SNC) to protect RFC connections."
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_017",
+      "category": "causal_why",
+      "question": "Pourquoi l'activation de l'option Set RFC Trace empêcherait-elle une application d'être conforme au PCI, puisque le système sauvegarde tous les données d'entrée d'un appel RFC en clair dans un fichier, et si des numéros de carte de crédit (PAN) sont inclus ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "Activating the Set RFC Trace option would result in no longer being PCI compliant because the system saves all input data of an RFC call in clear text to a file, and if credit card numbers (PAN) are i"
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_018",
+      "category": "causal_why",
+      "question": "Pourquoi les groupes d'autorisation avec l'objet d'autorisation B_BUPA_GRP sont-ils utilisés pour protéger les données des employés ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "Authorization groups with authorization object B_BUPA_GRP are used to protect employee data."
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_019",
+      "category": "causal_why",
+      "question": "Pourquoi les services web OData et LO-MD-BP enregistrent-ils des données de journalisation pour protéger et restreindre l'accès aux données sensibles des partenaires d'affaires ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "The OData and web services for Business Partner (LO-MD-BP) log data to protect and restrict access to sensitive data of business partners."
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_020",
+      "category": "causal_why",
+      "question": "Pourquoi FS-PM a-t-elle créé quatre implémentations dans le BAdI BADI_IRM_NOTIFICATION pour s'assurer que seules les objets réellement supprimés dans FS-PM sont signalés à SAP NetWeaver BW ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "FS-PM has created four implementations in the BAdI BADI_IRM_NOTIFICATION to ensure that only those objects are reported to SAP NetWeaver BW that are actually deleted in FS-PM."
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_021",
+      "category": "causal_why",
+      "question": "Pourquoi faut-il utiliser le processus d'approbation des chimiques pour s'assurer que de nouveaux produits chimiques soient approuvés du point de vue de la santé, de la sécurité et de l'environnement avant d'être commandés?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "You can use the approval process for chemicals to ensure that new chemicals are approved from a health, safety, and environmental aspect before they are ordered."
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_022",
+      "category": "causal_why",
+      "question": "Pourquoi faut-il s'assurer que les données soient disponibles pour une date clé lors de l'implémentation du gestionnaire de transactions avec des données héritées d'un système source ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "To implement the Transaction Manager with legacy data from a source system, you need to ensure the data is available for a key date."
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_023",
+      "category": "causal_why",
+      "question": "Pourquoi chaque transaction individuelle d'affaires est-elle stockée sous forme de document pour assurer une vérification détaillée ?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "Each individual business transaction, that is, each posting and each document for a given customer, is stored in document format in order to ensure itemized verification."
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_CA_025",
+      "category": "causal_why",
+      "question": "Pourquoi SAP recommande-t-elle l'utilisation de SSL pour protéger les communications réseau où des cookies sécuritaires sont transférés?",
+      "ground_truth": {
+        "expected_behavior": "explain_reasoning",
+        "evidence_claim": "SAP recommends using SSL to protect network communications where security-relevant cookies are transferred."
+      },
+      "grading_rules": {
+        "must_explain_reason": true,
+        "must_not_invent_reasons": true
+      }
+    },
+    {
+      "question_id": "T6_HY_006",
+      "category": "hypothetical",
+      "question": "Si la condition n'est pas satisfaite, c'est-à-dire si le business catalog SAP_CMD_BC_PRODUCT_DSP n'est pas assigné au même rôle back-end, que se passe-t-il lorsque l'on essaie d'assigner le business catalog SAP_SLL_BC_CLS_ISSRVCCODE?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "Assigning business catalog SAP_SLL_BC_CLS_ISSRVCCODE in backend role requires assigning business catalog SAP_CMD_BC_PRODUCT_DSP in the same backend role"
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_007",
+      "category": "hypothetical",
+      "question": "Si la condition n'est pas satisfaite, c'est-à-dire si le business catalog SAP_CMD_BC_PRODUCT_DSP n'est pas assigné dans le même rôle back-end, que se passe-t-il lors de la tentative d'assignation du business catalog SAP_SLL_BC_CLS_OVERVIEW?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "Assigning business catalog SAP_SLL_BC_CLS_OVERVIEW in backend role requires assigning business catalog SAP_CMD_BC_PRODUCT_DSP in the same backend role."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_008",
+      "category": "hypothetical",
+      "question": "Si la mise en œuvre du cadre administratif de l'Unified Connectivity (UCON) n'est pas réalisée, qu'advient-il de la protection du système SAP S/4HANA lors de l'accès distant via des RFCs?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "Unified Connectivity (UCON) administration framework significantly increases protection for SAP S/4HANA system when accessed remotely using RFCs."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_009",
+      "category": "hypothetical",
+      "question": "Si la condition n'est pas satisfaite, qu'arrive-t-il lorsqu'on essaie d'effectuer des appels BAPI ou d'envoyer des IDocs sans utiliser un utilisateur de communication?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "The RFC destination for BAPI calls and sending IDocs does not use the trusted/trusting system relationship and requires a communication user."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_010",
+      "category": "hypothetical",
+      "question": "Si l'objet d'autorisation P_PYC_POL n'a pas le paramètre ACTVT défini sur 03 (Affichage), que se passe-t-il lorsque l'on essaie de consulter la liste des politiques ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "Viewing the list of policies requires the authorization object P_PYC_POL with ACTVT set to 03 (Display)."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_011",
+      "category": "hypothetical",
+      "question": "Si la condition n'est pas satisfaite, qu'arrivera-t-il au système SAP S/4HANA Utilities ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "SAP S/4HANA Utilities system requires the server certificate from SAP Cloud Platform Integration for secure communications."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_013",
+      "category": "hypothetical",
+      "question": "Si les modules de fonction mentionnés dans l'activité Define Application Function Modules Registered for EoP Check Customizing (vue V_BUTEOPFM) ne sont pas appelés par le rapport de désactivation/activation lors de la performance de t, que se passe-t-il ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "The function modules mentioned in the Define Application Function Modules Registered for EoP Check Customizing activity (view V_BUTEOPFM) are called by the blocking/unblocking report when performing t"
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_014",
+      "category": "hypothetical",
+      "question": "Si les conditions pour l'utilisation des billets de connexion pour l'authentification unique (SSO) avec un navigateur web n'étaient pas remplies, que se passerait-il?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "SAP S/4HANA supports the use of logon tickets for SSO when using a Web browser as the front-end client."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_015",
+      "category": "hypothetical",
+      "question": "Si la condition n'est pas satisfaite, c'est-à-dire si le business catalog SAP_CMD_BC_PRODUCT_DSP n'est pas assigné dans le même rôle backend, que se passe-t-il lorsqu'on essaie d'utiliser le business catalog SAP_SLL_BC_CLS_CMMDTYCODE ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "Assigning business catalog SAP_SLL_BC_CLS_CMMDTYCODE in backend role requires assigning business catalog SAP_CMD_BC_PRODUCT_DSP in the same backend role"
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_016",
+      "category": "hypothetical",
+      "question": "Si la condition n'est pas satisfaite, c'est-à-dire si le business catalog SAP_CMD_BC_PRODUCT_DSP n'est pas assigné dans le même rôle backend que SAP_SLL_BC_PROD_CLS_DISP, qu'arrive-t-il ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "Assigning business catalog SAP_SLL_BC_PROD_CLS_DISP in backend role requires assigning business catalog SAP_CMD_BC_PRODUCT_DSP in the same backend role."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_017",
+      "category": "hypothetical",
+      "question": "Si les détails du client de la commande vente ne sont pas utilisés par le processus d'ordonnancement (ERP_PP_SFC) lors de sa création, que se passe-t-il ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "Process Order (ERP_PP_SFC) uses customer details from the sales order when created."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_018",
+      "category": "hypothetical",
+      "question": "Si la condition n'est pas satisfaite, que se passe-t-il lors du téléchargement des pièces jointes dans SAP E-Recruiting?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "In the Virus Scan when Uploading Documents Customizing activity, the virus scan profile / PAOC_RCF_BL/HTTP_UPLOAD is used in SAP E-Recruiting to perform a virus check when uploading attachments."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_019",
+      "category": "hypothetical",
+      "question": "Si le Service de Mappage de Clés Unifié n'était pas connecté à l'Intégration de Processus SAP, que se passerait-il en termes de conflits lors de l'affectation de numéros dans un scénario à plusieurs systèmes sans un système central pour le traitement des données maîtresses clients?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "Unified Key Mapping Service is connected to SAP Process Integration to resolve conflicts when assigning numbers in a multiple-system scenario without a central system for processing customer master da"
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_020",
+      "category": "hypothetical",
+      "question": "Si les destinations nécessaires pour SAP Process Integration étaient spécifiques à chaque application, que se passerait-il?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "SAP Process Integration requires destinations that are not application-specific."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_022",
+      "category": "hypothetical",
+      "question": "Si le scanneur de virus ne détecte aucune contenance malveillante lors de l'upload et de l'importation des données dans l'application Import Consolidation Master Data, que se passe-t-il ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "If the virus scanner detects malicious content when uploading and importing data in the Import Consolidation Master Data app, the process is terminated."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_023",
+      "category": "hypothetical",
+      "question": "Si la condition n'est pas respectée, que se passe-t-il avec le stockage chiffré des données de carte de paiement dans les systèmes SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "SAP business partner in S/4HANA systems requires a one-time data migration for encrypted storage of payment card data."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_024",
+      "category": "hypothetical",
+      "question": "Si la condition n'est pas satisfaite, que se passe-t-il avec les dossiers des partenaires d'affaires?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "Business partner records are archived when the business purpose of the business partners is completed."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_HY_025",
+      "category": "hypothetical",
+      "question": "Si la condition n'est pas satisfaite, c'est-à-dire si le business catalog SAP_CMD_BC_BP_DISP n'est pas assigné lors de l'assignation du business catalog SAP_SLL_BC_LICASSGMT_DISP au rôle backend, qu'arrivera-t-il ?",
+      "ground_truth": {
+        "expected_behavior": "infer_from_docs",
+        "evidence_claim": "Assigning business catalog SAP_SLL_BC_LICASSGMT_DISP in backend role requires assigning business catalog SAP_CMD_BC_BP_DISP in the same backend role."
+      },
+      "grading_rules": {
+        "must_identify_consequence": true,
+        "must_base_on_documented_facts": true
+      }
+    },
+    {
+      "question_id": "T6_SE_006",
+      "category": "set_list",
+      "question": "Quels sont les éléments qui doivent être entrés lorsque HAP00/AUTHO est actif?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "structural profile dans l'objet d'autorisation P_HAP_DOC",
+          "utilisateur avec ce profil structurel dans la table T77UA"
+        ],
+        "evidence_claim": "When HAP00/AUTHO is active, a structural profile must be entered in the authorization object P_HAP_DOC and the user must be entered together with this structural profile in table T77UA."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_007",
+      "category": "set_list",
+      "question": "Quels sont les champs inclus dans cet objet d'autorisation qui sont les mêmes que ceux de l'objet d'autorisation P_ORGIN, ainsi que le champ PROFL (profil structurel) ?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "les mêmes champs que P_ORGIN",
+          "PROFL"
+        ],
+        "evidence_claim": "This authorization object consists of the same fields as the authorization object P_ORGIN, and also includes the field PROFL (structural profile)."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_008",
+      "category": "set_list",
+      "question": "Quels sont les éléments nécessaires pour maintenir les allowlists et activer la protection en utilisant la transaction UCON_CHW du cadre UCON ?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "utiliser la transaction UCON_CHW",
+          "maintenir les allowlists",
+          "activer la protection"
+        ],
+        "evidence_claim": "To maintain allowlists and to switch protection on, use transaction UCON_CHW of the UCON framework."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_009",
+      "category": "set_list",
+      "question": "Quels sont les éléments dans lesquels K_ORDER est vérifié selon l'information donnée?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "Monitor iViews",
+          "Master Data iViews",
+          "Express Planning services"
+        ],
+        "evidence_claim": "K_ORDER is checked in the relevant Monitor iViews, Master Data iViews, and Express Planning services."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_010",
+      "category": "set_list",
+      "question": "Quels sont les éléments qui permettent à un utilisateur de supprimer des documents d'évaluation terminés, indépendamment des paramètres de personnalisation et des autorisations définies dans l'objet d'autorisation P_HAP_DOC pour la suppression?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "paramètres de personnalisation",
+          "autorisations définies",
+          "documents d'évaluation terminés",
+          "objet d'autorisation P_HAP_DOC"
+        ],
+        "evidence_claim": "Regardless of the Customizing setting and the user's authorizations defined for setting 06 -Delete in authorization object P_HAP_DOC, the user can always delete completed appraisal documents in transa"
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_011",
+      "category": "set_list",
+      "question": "Quels sont les éléments vérifiés par l'objet d'autorisation K_CCA ? Veuillez lister les éléments.",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "Monitor iViews",
+          "Master Data iViews",
+          "Express Planning services"
+        ],
+        "evidence_claim": "The authorization object K_CCA is checked in the relevant Monitor iViews, Master Data iViews, and Express Planning services."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_012",
+      "category": "set_list",
+      "question": "Dans le concept de rôle d'application, quels sont les éléments qui dépendent des rôles PFCG et des rôles métier?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "business roles",
+          "PFCG roles"
+        ],
+        "evidence_claim": "In the application role concept, there is a dependency between business roles and PFCG roles."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_013",
+      "category": "set_list",
+      "question": "Quels sont les documents que l'utilisateur peut afficher et modifier même s'il n'a pas l'autorisation pour l'appréciant ?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "appraisal documents"
+        ],
+        "evidence_claim": "Even if a user does not have authorization for the appraiser's person, he or she can display and edit all appraisal documents that include the appraiser.\n\"\"\""
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_014",
+      "category": "set_list",
+      "question": "Quels sont les éléments auxquels donne accès le rôle SAP_RCF_MANAGER dans SAP E-Recruiting?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "accès aux données des candidats",
+          "requisitions auxquelles les données des candidats sont assignées",
+          "accès à SAP E-Recruiting depuis le portail (Self Service du Manager)"
+        ],
+        "evidence_claim": "The SAP_RCF_MANAGER role provides access to candidate data assigned to requisitions for which the manager, who is required to access SAP E-Recruiting from the Portal (Manager Self Service) and wants t"
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_015",
+      "category": "set_list",
+      "question": "Quels sont les interfaces standard utilisées pour la communication avec des systèmes externes via BAPI, IDoc et XI ?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "BAPI",
+          "IDoc",
+          "XI"
+        ],
+        "evidence_claim": "Communication with external systems is possible using standard interfaces via BAPI, IDoc, and XI."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_016",
+      "category": "set_list",
+      "question": "Quels sont les éléments que le responsable peut consulter et/ou modifier pour les personnes dans la zone A?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "appreciation_template_A",
+          "objectif_setting_agreements"
+        ],
+        "evidence_claim": "For persons in area A, a user can view and/or edit the appraisal template A and Objective Setting Agreements."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_017",
+      "category": "set_list",
+      "question": "Quels types de communications peuvent avoir des destinations RFC différentes définies lors de la personnalisation d'ALE ?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "dialog calls",
+          "BAPI calls",
+          "sending IDocs"
+        ],
+        "evidence_claim": "In Customizing of ALE, different RFC destinations can be defined for dialog calls, BAPI calls, and sending IDocs."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_018",
+      "category": "set_list",
+      "question": "Quels types de données sont stockés dans la base de données du système SAP Dispute Management ?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "Master data",
+          "Transaction data",
+          "Customizing data"
+        ],
+        "evidence_claim": "Master data, transaction data, and Customizing data of SAP Dispute Management are stored in the database of the SAP system."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_019",
+      "category": "set_list",
+      "question": "Dans le processus de gestion de la santé et de la sécurité, quels éléments de données personnelles sont affichés concernant le responsable de l'évaluation des risques et les autres personnes impliquées dans l'évaluation des risques?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "nom",
+          "prénom",
+          "fonction",
+          "date de naissance",
+          "adresse"
+        ],
+        "evidence_claim": "In Health and Safety Management processes, personal data is displayed about the risk assessment lead and the other persons involved in a risk assessment."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_020",
+      "category": "set_list",
+      "question": "Quelles sont les mesures de sécurité que vous devez mettre en place si vous échangez des données contenant des informations de carte de crédit non chiffrées via des messages IDoc entre les systèmes?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "access restrictions",
+          "deletion concept at the level of the file system"
+        ],
+        "evidence_claim": "If you exchange data between systems using IDoc messages containing unencrypted credit card information, you have to implement access restrictions and a deletion concept at the level of the file syste"
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_021",
+      "category": "set_list",
+      "question": "Quels sont les éléments qui peuvent provoquer une erreur lors de l'accès à un répertoire?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "accès à un répertoire qui ne correspond pas à une carte de correspondance stockée",
+          "validation de la correspondance en temps réel"
+        ],
+        "evidence_claim": "The mapping is validated at runtime and if access is requested to a directory that does not match a stored mapping, then an error occurs."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_022",
+      "category": "set_list",
+      "question": "Quels sont les éléments qui peuvent être détectés comme malveillants par le scanner de virus lors de l'upload et de l'importation de données dans l'application Import Consolidation Master Data?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "malicious_content",
+          "virus"
+        ],
+        "evidence_claim": "If the virus scanner detects malicious content when uploading and importing data in the Import Consolidation Master Data app, the process is terminated."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_023",
+      "category": "set_list",
+      "question": "Quels sont les formats de stockage spécifiques à SAP mentionnés dans le texte ?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "archive files",
+          "binary text",
+          "SAP-specific, compressed format"
+        ],
+        "evidence_claim": "The archive files in the file system and the ILM store are stored not in plain text but in binary text in an SAP-specific, compressed format."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_024",
+      "category": "set_list",
+      "question": "Quels sont les éléments nécessaires pour l'encryption et la décryption utilisant le SSF Framework selon le fait mentionné?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "applications",
+          "SSF application"
+        ],
+        "evidence_claim": "For encryption and decryption using the SSF Framework, the applications communicate using an SSF application."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_SE_025",
+      "category": "set_list",
+      "question": "Quels sont les éléments créés par le SOA Manager pour les connexions point à point via Web Services Reliable Messaging (WSRM) ?",
+      "ground_truth": {
+        "expected_behavior": "enumerate_set",
+        "expected_items": [
+          "la porte logique",
+          "la fin de service"
+        ],
+        "evidence_claim": "For point to point connections via Web Services Reliable Messaging (WSRM), the SOA Manager is used in both systems to create the logical port and the endpoint."
+      },
+      "grading_rules": {
+        "must_list_items": true,
+        "min_items": 2
+      }
+    },
+    {
+      "question_id": "T6_TE_009",
+      "category": "temporal_evolution",
+      "question": "Quelles sont les principales différences dans la description des permissions d'accès entre la version 2022 et 2023 du Guide de Sécurité SAP?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "028_SAP_S4HANA_2022_Security",
+          "027_SAP_S4HANA_2023_Security"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_010",
+      "category": "temporal_evolution",
+      "question": "Comment les recommandations pour la gestion des mots de passe ont-elles évolué dans le Guide de Sécurité SAP entre 2022 et 2023?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "028_SAP_S4HANA_2022_Security",
+          "027_SAP_S4HANA_2023_Security"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_011",
+      "category": "temporal_evolution",
+      "question": "Quelles sont les nouvelles fonctionnalités en matière de chiffrement des données mentionnées dans la version 2023 du Guide de Sécurité SAP par rapport à 2022?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "028_SAP_S4HANA_2022_Security",
+          "027_SAP_S4HANA_2023_Security"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_012",
+      "category": "temporal_evolution",
+      "question": "Comment le Guide de Sécurité SAP a-t-il intégré les nouvelles normes de sécurité dans sa documentation entre 2022 et 2023?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "028_SAP_S4HANA_2022_Security",
+          "027_SAP_S4HANA_2023_Security"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_013",
+      "category": "temporal_evolution",
+      "question": "Quelles sont les modifications apportées aux procédures de sauvegarde et de restauration des données sensibles dans le Guide de Sécurité SAP entre 2022 et 2023?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "028_SAP_S4HANA_2022_Security",
+          "027_SAP_S4HANA_2023_Security"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_014",
+      "category": "temporal_evolution",
+      "question": "Quelles sont les principales différences dans la structure du Guide des Opérations entre les versions 2021 et 2023 de SAP ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "014_SAP_S4HANA_2021_Operations",
+          "017_SAP_S4HANA_2023_Operations"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_015",
+      "category": "temporal_evolution",
+      "question": "Comment les instructions pour l'installation et la configuration des systèmes ont-elles évolué dans le Guide des Opérations de SAP entre 2021 et 2023 ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "014_SAP_S4HANA_2021_Operations",
+          "017_SAP_S4HANA_2023_Operations"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_016",
+      "category": "temporal_evolution",
+      "question": "Quels nouveaux outils de documentation et d'aide à la navigation ont été ajoutés dans le Guide des Opérations de SAP entre 2021 et 2023 ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "014_SAP_S4HANA_2021_Operations",
+          "017_SAP_S4HANA_2023_Operations"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_017",
+      "category": "temporal_evolution",
+      "question": "Comment les sections dédiées aux meilleures pratiques ont-elles évolué dans le Guide des Opérations de SAP entre 2021 et 2023 ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "014_SAP_S4HANA_2021_Operations",
+          "017_SAP_S4HANA_2023_Operations"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_018",
+      "category": "temporal_evolution",
+      "question": "Quelles sont les principales modifications apportées aux sections relatives aux mises à jour et aux migrations dans le Guide des Opérations de SAP entre 2021 et 2023 ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "014_SAP_S4HANA_2021_Operations",
+          "017_SAP_S4HANA_2023_Operations"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_019",
+      "category": "temporal_evolution",
+      "question": "Quelles sont les principales différences dans la structure de l'Installation Guide entre les versions SAP 2021 et 2023?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "012_SAP_S4HANA_2021_Installation",
+          "011_SAP_S4HANA_2023_Installation"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_020",
+      "category": "temporal_evolution",
+      "question": "Comment les instructions pour la configuration des systèmes ont-elles évolué dans l'Installation Guide entre les versions SAP 2021 et 2023?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "012_SAP_S4HANA_2021_Installation",
+          "011_SAP_S4HANA_2023_Installation"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_021",
+      "category": "temporal_evolution",
+      "question": "Quels nouveaux outils ou méthodes de déploiement sont mentionnés dans l'Installation Guide SAP 2023 par rapport à la version 2021?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "012_SAP_S4HANA_2021_Installation",
+          "011_SAP_S4HANA_2023_Installation"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_022",
+      "category": "temporal_evolution",
+      "question": "Comment l'Installation Guide SAP 2023 améliore-t-elle la documentation sur la sécurisation des systèmes par rapport à l'Installation Guide 2021?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "012_SAP_S4HANA_2021_Installation",
+          "011_SAP_S4HANA_2023_Installation"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_023",
+      "category": "temporal_evolution",
+      "question": "Quelles sont les modifications apportées aux sections dédiées aux mises à jour et aux patchs dans l'Installation Guide SAP entre les versions 2021 et 2023?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "012_SAP_S4HANA_2021_Installation",
+          "011_SAP_S4HANA_2023_Installation"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_024",
+      "category": "temporal_evolution",
+      "question": "Quelles sont les principales différences dans la documentation SAP entre la version FPS03 et la version 2025 en ce qui concerne la gestion des projets ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "022_Business-Scope-FPS03",
+          "023_Business-Scope-2025"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_TE_025",
+      "category": "temporal_evolution",
+      "question": "Comment la documentation SAP a-t-elle évolué en termes de présentation et d'organisation des informations entre la version FPS03 et la version 2025 ?",
+      "ground_truth": {
+        "expected_behavior": "compare_versions",
+        "docs": [
+          "022_Business-Scope-FPS03",
+          "023_Business-Scope-2025"
+        ]
+      },
+      "grading_rules": {
+        "must_mention_both_versions": true,
+        "must_identify_change": true
+      }
+    },
+    {
+      "question_id": "T6_SY_006",
+      "category": "synthesis_large",
+      "question": "Quelle serait une vue d'ensemble complète de SAP ERP, y compris ses principales fonctionnalités, intégrations possibles, et comment elle interagit avec d'autres produits SAP comme S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "fonctionnalités principales",
+          "intégrations possibles",
+          "interaction avec S/4HANA",
+          "architecture",
+          "mises à jour et évolutions"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_007",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de SAP HANA, y compris ses principales caractéristiques, son rôle dans les applications SAP, et comment il est utilisé dans différents scénarios d'entreprise?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "caractéristiques principales",
+          "rôle dans les applications SAP",
+          "utilisation dans différents scénarios d'entreprise"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_008",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de SAP Fiori, y compris ses fonctionnalités clés, son intégration avec d'autres produits SAP, et ses mécanismes de sécurité?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "fonctionnalités clés",
+          "intégration avec d'autres produits SAP",
+          "mécanismes de sécurité"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_009",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de SAP Extended Warehouse Management, y compris ses concepts d'autorisation, son utilisation éventuelle de BRFplus pour la gestion du travail, et sa capacité à utiliser des applications de géocodage tiers comme PTV eServer?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "concepts d'autorisation",
+          "utilisation de BRFplus",
+          "gestion du travail",
+          "applications de géocodage tiers",
+          "fonctionnalités générales"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_010",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de la base de données SAP HANA, y compris ses caractéristiques principales, son utilisation dans différents systèmes SAP, et comment elle supporte les opérations de stockage et de traitement de données?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "caractéristiques principales",
+          "utilisation dans différents systèmes SAP",
+          "stockage de données",
+          "traitement de données"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_011",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de la plateforme SAP Business Technology Platform, y compris ses principaux composants, ses fonctionnalités, et comment elle intègre les différents services SAP tels que SAP S/4HANA Utilities et SAP Cloud Platform Integration?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "composants principaux",
+          "fonctionnalités",
+          "intégration des services SAP",
+          "utilisation du protocole SOAP"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_012",
+      "category": "synthesis_large",
+      "question": "Quelle serait une synthèse complète de SAP NetWeaver, couvrant ses différents aspects et fonctionnalités ?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "architecture",
+          "fonctionnalités",
+          "utilisation",
+          "intégration",
+          "avantages",
+          "défis"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_013",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de la gestion étendue des entrepôts (Extended Warehouse Management) dans SAP, y compris ses concepts d'autorisation, son utilisation éventuelle de BRFplus pour la gestion du travail, et sa possibilité d'utiliser des applications de géocodage tierces comme PTV eServer?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "concepts d'autorisation",
+          "utilisation de BRFplus",
+          "applications de géocodage tierces",
+          "vue d'ensemble complète"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_014",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de SAP Master Data Governance, y compris ses fonctionnalités clés, ses applications spécifiques et son processus de gouvernance basé sur les workflows?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "fonctionnalités clés",
+          "applications spécifiques",
+          "processus de gouvernance",
+          "fonctionnement des workflows"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_015",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de SAP Business Suite, y compris ses fonctionnalités, son intégration avec d'autres produits SAP, sa compatibilité avec SAP S/4HANA, et les changements ou suppressions de certains processus ?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "fonctionnalités",
+          "intégration",
+          "compatibilité",
+          "changements",
+          "suppressions"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_016",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de SAP Fiori Launchpad, y compris ses fonctionnalités, sa sécurité, son intégration avec d'autres produits SAP et son rôle dans la gestion des applications?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "fonctionnalités",
+          "sécurité",
+          "intégration avec d'autres produits SAP",
+          "rôle dans la gestion des applications"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_017",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète des responsabilités et des fonctions du rôle SAP Maintenance Planner, y compris la création, l'approbation, la préparation et l'exécution des ordres de maintenance?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "création des ordres de maintenance",
+          "approbation des ordres de maintenance",
+          "préparation des ordres de maintenance pour l'exécution",
+          "fonctions de sécurité et d'efficacité",
+          "rôle du technicien de maintenance"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_018",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de SAP GUI, y compris ses principales fonctionnalités, ses interactions avec d'autres composants SAP, et ses utilisations dans différents contextes d'entreprise?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "fonctionnalités principales",
+          "interactions avec d'autres composants SAP",
+          "utilisations dans différents contextes d'entreprise"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_019",
+      "category": "synthesis_large",
+      "question": "Qu'est-ce que l'RFC dans SAP et comment est-il utilisé dans différents modules comme la gestion des créances, la gestion des comptes récevables et la gestion des relations avec les clients? Pouvez-vous donner un aperçu complet de l'RFC, y compris ses fonctions, ses utilisations courantes et ses avantages?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "définition de l'RFC",
+          "fonctions de l'RFC",
+          "utilisations courantes de l'RFC",
+          "avantages de l'RFC",
+          "modules SAP utilisant l'RFC"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_020",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de l'entité SAP business partner, y compris ses relations avec d'autres entités SAP, ses utilisations pour la gestion des données de paiement et la gestion des données personnelles, et son intégration dans différents systèmes SAP comme SAP S/4HANA et SAP Business Suite?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "relations avec d'autres entités SAP",
+          "gestion des données de paiement",
+          "gestion des données personnelles",
+          "intégration dans SAP S/4HANA",
+          "intégration dans SAP Business Suite"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_021",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de SAP Ariba, y compris son rôle dans la gestion des approvisionnements, ses fonctionnalités clés, ses intégrations avec d'autres systèmes SAP, et les changements récents dans son nom et ses technologies de sécurité?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "rôle dans la gestion des approvisionnements",
+          "fonctionnalités clés",
+          "intégrations avec d'autres systèmes SAP",
+          "changements de nom",
+          "technologies de sécurité"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_022",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de HTTP, y compris ses fonctions de base, son utilisation dans différents systèmes d'information comme SAP S/4HANA, et ses interactions avec d'autres protocoles et technologies?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "fonction de base de HTTP",
+          "utilisation dans SAP S/4HANA",
+          "interaction avec d'autres protocoles",
+          "technologies associées"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_023",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète des fonctionnalités et des utilisations de SAP Data Services?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "fonctionnalités clés",
+          "intégration avec d'autres produits SAP",
+          "avantages pour l'entreprise",
+          "cas d'utilisation"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_024",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de SAP Analytics Cloud (SAC), y compris ses fonctionnalités, utilisations et intégrations possibles?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "fonctionnalités",
+          "utilisations",
+          "intégrations"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_SY_025",
+      "category": "synthesis_large",
+      "question": "Quelle est une vue d'ensemble complète de l'entité BRFplus dans SAP, y compris ses utilisations courantes, ses interactions avec d'autres modules comme EWM, et comment il remplace ou modifie les tables de transaction traditionnelles?",
+      "ground_truth": {
+        "expected_behavior": "multi_aspect_synthesis",
+        "expected_aspects": [
+          "utilisations courantes",
+          "interactions avec EWM",
+          "remplacement des tables de transaction"
+        ],
+        "min_docs": 3
+      },
+      "grading_rules": {
+        "must_cover_multiple_aspects": true,
+        "must_cite_multiple_docs": true,
+        "min_aspects": 3
+      }
+    },
+    {
+      "question_id": "T6_MH_006",
+      "category": "multi_hop",
+      "question": "Quelle est la possibilité d'intégrer SAP S/4HANA dans un paysage existant de SAP Business Suite et comment est-ce que le contrôle EoP pour le suivi du volume de substance est intégré dans SAP ERP ?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "It is possible to integrate SAP S/4HANA into an existing SAP Business Suite landscape by replacing the SAP ERP enhancement package product with SAP S/",
+          "The EoP check for Substance Volume Tracking is integrated in the ILM objects of SAP ERP."
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_007",
+      "category": "multi_hop",
+      "question": "Quelle est la base de données utilisée pour une nouvelle installation de SAP S/4HANA et où est stocké les données ERMS ?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "A new installation of SAP S/4HANA needs to run on the SAP HANA database",
+          "ERMS data is stored in the SAP HANA database"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_008",
+      "category": "multi_hop",
+      "question": "Quelle fonctionnalité de sécurité protège les applications SAP Fiori Launchpad utilisées par SAP S/4HANA contre les attaques de click-jacking?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "UCON mechanism protects standard SAP Fiori Launchpad applications against click-jacking attacks",
+          "SAP S/4HANA uses SAP Fiori apps to display documents"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_009",
+      "category": "multi_hop",
+      "question": "Quelle technologie peut être utilisée en complément de l'authorization concept fourni par AS ABAP dans Extended Warehouse Management (EWM) pour la gestion du travail ?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "Extended Warehouse Management (EWM) uses the authorization concept provided by the AS ABAP",
+          "BRFplus is sometimes used in EWM for Labor Management"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_010",
+      "category": "multi_hop",
+      "question": "Quelle base de données est utilisée pour stocker les données d'ERMS et pour installer une nouvelle version de SAP S/4HANA?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "ERMS data is stored in the SAP HANA database.",
+          "A new installation of SAP S/4HANA needs to run on the SAP HANA database."
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_011",
+      "category": "multi_hop",
+      "question": "Quelle est la méthode utilisée par SAP S/4HANA Utilities pour envoyer des informations à SAP Cloud Platform Integration pour le traitement de données maîtresses techniques et commerciales?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "SAP S/4HANA Utilities integration sends information to SAP Cloud Platform Integration for processing",
+          "SAP S/4HANA Utilities communicates with SAP Cloud Platform Integration services by way of SOAP Web services"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_012",
+      "category": "multi_hop",
+      "question": "Quelle fonctionnalité de sécurité fournie par SAP NetWeaver est utilisée par SAP E-Recruiting pour assurer la sécurité des données lors de l'utilisation de la Single Sign-On (SSO)?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "SAP NetWeaver Application Server provides standard virus check for ABAP",
+          "SAP E-Recruiting supports the Single Sign-On (SSO) mechanisms provided by SAP NetWeaver"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_013",
+      "category": "multi_hop",
+      "question": "Quelle fonctionnalité d'EWM peut être influencée par l'utilisation de BRFplus et quel système de gestion des autorisations est utilisé par EWM?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "BRFplus is sometimes used in EWM for Labor Management",
+          "Extended Warehouse Management (EWM) uses the authorization concept provided by the AS ABAP"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_014",
+      "category": "multi_hop",
+      "question": "Quels sont les contraintes pour les business partners avec l'indicateur de fin de but assigné dans le contexte de la gouvernance centrale MDG et quels sont les applications MDG qui fournissent un processus de gouvernance basé sur un workflow pour ces entités?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "The MDG consolidation application and the MDG mass processing application do not process business partners with the end of purpose indicator assigned.",
+          "MDG for Business Partner (MDG-BP), MDG for Supplier (MDG-S), and MDG for Customer (MDG-C) provide a workflow-based governance process for business par"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_015",
+      "category": "multi_hop",
+      "question": "Quelles sont les implications de l'intégration de SAP S/4HANA dans une infrastructure existante de SAP Business Suite, compte tenu du fait que certains processus SAP Business Suite ne sont plus supportés?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "It is possible to integrate SAP S/4HANA into an existing SAP Business Suite landscape by replacing the SAP ERP enhancement package product with SAP S/",
+          "Some of the SAP Business Suite processes are no longer supported."
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_016",
+      "category": "multi_hop",
+      "question": "Quelle mécanisme de protection est utilisé pour prévenir les attaques de click-jacking sur l'Investigative Case Management qui est délivrée dans le SAP Fiori Launchpad?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "UCON mechanism protects standard SAP Fiori Launchpad applications against click-jacking attacks",
+          "Investigative Case Management (ICM) delivers all the functionalities as apps in a SAP Fiori Launchpad"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_017",
+      "category": "multi_hop",
+      "question": "Quelles sont les étapes nécessaires pour préparer et exécuter une ordonnance de maintenance une fois qu'elle a été approuvée?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "Once the maintenance order has been approved, the maintenance planner prepares the maintenance order for execution and schedules the maintenance order",
+          "The maintenance planner creates maintenance orders"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_018",
+      "category": "multi_hop",
+      "question": "Quelle est la méthode de communication entre SAP GUI transactions et SAP E-Recruiting lors de la maintenance des données maîtresses HR et comment SNC contribue-t-il à l'authentification des utilisateurs dans ce contexte?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "SAP GUI transactions use RFC connections to communicate with SAP E-Recruiting when maintaining HR master data",
+          "SNC is available for user authentication and provides for an SSO environment when using the SAP GUI for Windows or Remote Function Calls"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_019",
+      "category": "multi_hop",
+      "question": "Quelle est la fonction de l'entité RFC dans les systèmes SAP mentionnés et comment est-elle utilisée dans la gestion des comptes reçus ?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "SAP Credit Management uses communication destinations (RFC)",
+          "This destination is used for dialog calls that take place from the Collections Management system to the Accounts Receivable system by means of RFC."
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_020",
+      "category": "multi_hop",
+      "question": "Quelle est la relation entre la façon dont SAP Business Partner gère les données de carte de paiement et son utilisation pour contrôler le blocage et la suppression de données personnelles dans SAP S/4HANA pour le commerce international?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "SAP business partner uses CCINS and CCNUM to relate to payment card data in the CCARD table",
+          "SAP S/4HANA for international trade uses SAP Business Partner (BP) instead to control the blocking and deletion of personal data"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_021",
+      "category": "multi_hop",
+      "question": "Quelle est la nouvelle dénomination d'Ariba Network et quel composant est utilisé pour obtenir le certificat de serveur pour l'encryption HTTPS SSL?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "Ariba Network has been renamed to SAP Business Network",
+          "For HTTPS SSL encryption, the server certificate is obtained from Ariba"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_022",
+      "category": "multi_hop",
+      "question": "Quelle est la fonction de l'HTTP Allowlist dans SAP S/4HANA et comment est-ce lié à la communication avec le catalogue via des paramètres d'URL HTTP/HTTPS?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "SAP S/4HANA uses the HTTP Allowlist feature provided by the ABAP Platform to specify which pages are allowed to render the application within a frame.",
+          "SAP S/4HANA communicates with the catalog via HTTP/HTTPS URL parameters."
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_023",
+      "category": "multi_hop",
+      "question": "Quelle technologie permet de créer des applications Fiori basées sur le modèle de programmation SAP S/4HANA et quelle solution d'adressage peut être intégrée avec SAP Data Services pour améliorer la qualité des données?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "SAP S/4HANA programming model supports the creation of Fiori-based apps using core data services (CDS) for data modeling and access",
+          "SAP S/4HANA enables the address cleansing solution to provide key features when integrated with SAP Data Services or SAP HANA smart data quality"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_024",
+      "category": "multi_hop",
+      "question": "Quelle fonctionnalité de SAP Analytics Cloud permettrait de visualiser les KPIs de vente dans le cadre de la gestion des stocks ?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "Sales KPIs are integrated in SAP Analytics Cloud",
+          "SAP Analytics Cloud business content is used for warehouse management"
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    },
+    {
+      "question_id": "T6_MH_025",
+      "category": "multi_hop",
+      "question": "Quelle est la fonction de BRFplus dans EWM et quels types de tables sont utilisés pour stocker les règles qu'il implémente?",
+      "ground_truth": {
+        "expected_behavior": "chain_reasoning",
+        "chain": [
+          "BRFplus is sometimes used in EWM for Labor Management",
+          "The Business Rules Framework plus (BRFplus) is used to implement rules for entering settings. Tables behind these transactions are replaced by BRFplus tables."
+        ]
+      },
+      "grading_rules": {
+        "must_chain_facts": true,
+        "must_cite_source": true
+      }
+    }
+  ]
+}

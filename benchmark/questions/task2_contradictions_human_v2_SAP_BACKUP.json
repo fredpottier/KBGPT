@@ -1,0 +1,462 @@
+{
+  "metadata": {
+    "task": "T2",
+    "source": "human_expert_v2",
+    "corpus": "SAP Enterprise Documentation",
+    "count": 25,
+    "generated_at": "2026-03-29T14:00:00",
+    "note": "Questions rédigées manuellement par un expert, basées sur les 20 CONTRADICTS réels du KG. Questions qu'un consultant SAP poserait naturellement."
+  },
+  "questions": [
+    {
+      "question_id": "T2_EXP_0001",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Comment SAP Dispute Management communique-t-il entre les systèmes ? Utilise-t-il des appels synchrones ou asynchrones ?",
+      "ground_truth": {
+        "claim1": {"text": "SAP Dispute Management uses synchronous BAPI calls in a one-system scenario.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "claim2": {"text": "SAP Dispute Management uses asynchronous BAPI calls between the systems involved.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["SAP Dispute Management", "BAPI"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0002",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Quel protocole de communication est utilisé entre le système Accounts Receivable et le Dispute Case Processing : BAPI ou RFC ?",
+      "ground_truth": {
+        "claim1": {"text": "This destination is used for synchronous and asynchronous BAPI calls from the Accounts Receivable system to the Dispute Case Processing system.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "claim2": {"text": "RFC calls take place from the Accounts Receivable system to the Dispute Case Processing system and vice versa in the ALE scenario of SAP Dispute Management.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["Accounts Receivable system", "BAPI", "RFC", "Dispute Case Processing system"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0003",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Dans quel cas les IDocs sont-ils envoyés au système Dispute Case Processing depuis Accounts Receivable ? Lors du clearing ou lors des paiements partiels ?",
+      "ground_truth": {
+        "claim1": {"text": "IDocs are sent to the Dispute Case Processing system from the Accounts Receivable system when items are cleared.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "claim2": {"text": "IDocs are sent to the Dispute Case Processing system from the Accounts Receivable system when partial payments are executed on items.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["Dispute Case Processing system", "IDocs"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0004",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Où sont stockées les données personnelles pour Commodity Procurement and Commodity Sales ? Dans VLOGP ou dans PeriodEnd Valuation ?",
+      "ground_truth": {
+        "claim1": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the Versioned Persistency of Logistics Pricing Data (VLOGP).", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "claim2": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the PeriodEnd Valuation (PEV).", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["Commodity Procurement and Commodity Sales", "VLOGP", "PEV"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0005",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Les données personnelles du Commodity Procurement sont-elles gérées via BRFplus Decision Tables ou via Pricing Condition Records dans CPE Formula Assembly ?",
+      "ground_truth": {
+        "claim1": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the BRFplus Decision Table Entries for CPE Formula Assembly.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "claim2": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in Pricing Condition Records in CPE Formula Assembly.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["Commodity Procurement and Commodity Sales", "BRFplus", "CPE Formula Assembly"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0006",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Comment la gestion des données personnelles a-t-elle évolué entre le Security Guide 2022 et 2023 pour le module Commodity Procurement ?",
+      "ground_truth": {
+        "claim1": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the PeriodEnd Valuation (PEV).", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "claim2": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the Versioned Persistency of Logistics Pricing Data (VLOGP).", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["Commodity Procurement and Commodity Sales"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0007",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Quel est le nom officiel du produit : SAP S/4HANA Cloud Private Edition ou SAP Cloud ERP Private Edition ?",
+      "ground_truth": {
+        "claim1": {"text": "SAP S/4HANA Cloud Private Edition is the only analytics solution to bring together BI, Planning, and Predictive in the cloud", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
+        "claim2": {"text": "SAP Cloud ERP Private Edition is the only analytics solution to bring together BI, Planning, and Predictive in the cloud", "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["SAP S/4HANA Cloud Private Edition", "SAP Cloud ERP Private Edition"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0008",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Le produit analytics qui combine BI, Planning et Predictive dans le cloud s'appelle-t-il encore S/4HANA Cloud Private Edition dans les documents récents ?",
+      "ground_truth": {
+        "claim1": {"text": "SAP S/4HANA Cloud Private Edition is the only analytics solution to bring together BI, Planning, and Predictive in the cloud", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
+        "claim2": {"text": "SAP Cloud ERP Private Edition is only available in SAP S/4HANA Private Cloud Edition", "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["Planning", "Business Intelligence (BI)"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0009",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "SAP Field Service Management s'intègre-t-il avec SAP ECC ou avec SAP S/4HANA via Cloud Integration ?",
+      "ground_truth": {
+        "claim1": {"text": "SAP Field Service Management enables field service organizations to integrate with SAP ECC software.", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
+        "claim2": {"text": "SAP Field Service Management is integrated with Service using SAP Cloud Integration and SAP Cloud Connector.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["SAP Field Service Management", "SAP ECC", "SAP Cloud Integration"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0010",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Quels composants SAP supportent les logon tickets pour le Single Sign-On via navigateur web ?",
+      "ground_truth": {
+        "claim1": {"text": "ISF supports the use of logon tickets for SSO when using a Web browser as the front-end client.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "claim2": {"text": "SAP S/4HANA supports the use of logon tickets for SSO when using a Web browser as the front-end client.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["ISF", "SSO", "SAP S/4HANA"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0011",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Le support SSO par logon tickets est-il spécifique à ISF ou à l'ensemble de SAP S/4HANA ?",
+      "ground_truth": {
+        "claim1": {"text": "ISF supports the use of logon tickets for SSO when using a Web browser as the front-end client.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "claim2": {"text": "SAP S/4HANA supports the use of logon tickets for SSO when using a Web browser as the front-end client.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["ISF", "SSO"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0012",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Cross-Application Time Sheet (CA-TS) et SAP E-Recruiting supportent-ils tous les deux le SSO par logon tickets ?",
+      "ground_truth": {
+        "claim1": {"text": "Cross-Application Time Sheet (CA-TS) supports the use of logon tickets for SSO when using a Web browser as the frontend client.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "claim2": {"text": "SAP E-Recruiting supports the use of logon tickets for SSO when using a Web browser as the frontend client.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["CA-TS", "SSO", "E-Recruiting"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0013",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Dans le scénario SUMA, la procédure de planning du primary control cycle est-elle indépendante ou identique à celle du secondary control cycle ?",
+      "ground_truth": {
+        "claim1": {"text": "The type of planning procedure assigned to the primary control cycle is independent of the secondary control cycle's planning procedure.", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"},
+        "claim2": {"text": "Planning procedure assigned to the primary control cycle and secondary control cycles are the same in SUMA scenario.", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["primary control cycle", "SUMA", "control cycle"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0014",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Comment fonctionne le replenishment planning pour un primary control cycle avec takt-based planning ? Le two-level replenishment est-il possible ?",
+      "ground_truth": {
+        "claim1": {"text": "For a primary control cycle with takt-based planning procedure, two-level replenishment planning through supermarket is possible.", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"},
+        "claim2": {"text": "Planning procedure assigned to the primary control cycle and secondary control cycles are the same in SUMA scenario.", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["primary control cycle", "SUMA"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0015",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Quelles sont les différences entre les Security Guides 2022 et 2023 concernant la communication dans SAP Dispute Management ?",
+      "ground_truth": {
+        "claim1": {"text": "SAP Dispute Management uses synchronous BAPI calls in a one-system scenario.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "claim2": {"text": "RFC calls take place from the Accounts Receivable system to the Dispute Case Processing system and vice versa in the ALE scenario of SAP Dispute Management.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["SAP Dispute Management", "BAPI", "RFC"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0016",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "La transaction CMM_DEL_DOC_VERSIONS est-elle liée à VLOGP ou à PeriodEnd Valuation pour Commodity Procurement ?",
+      "ground_truth": {
+        "claim1": {"text": "Transaction CMM_DEL_DOC_VERSIONS is used to display information about stored personal data in the versioned persistency of logistics pricing data (VLOGP) of Commodity Procurement and Commodity Sales.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "claim2": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the PeriodEnd Valuation (PEV).", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["CMM_DEL_DOC_VERSIONS", "VLOGP", "PEV"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0017",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Quel est le sens des appels entre Accounts Receivable et Dispute Case Processing ? Unidirectionnel ou bidirectionnel ?",
+      "ground_truth": {
+        "claim1": {"text": "This destination is used for synchronous and asynchronous BAPI calls from the Accounts Receivable system to the Dispute Case Processing system.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "claim2": {"text": "There are calls from the Dispute Case Processing system to the system for Accounts Receivable Accounting.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["Accounts Receivable system", "Dispute Case Processing system"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0018",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "SAP Field Service Management nécessite-t-il SAP Cloud Connector pour l'intégration ou peut-il se connecter directement à ECC ?",
+      "ground_truth": {
+        "claim1": {"text": "SAP Field Service Management enables field service organizations to integrate with SAP ECC software.", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
+        "claim2": {"text": "SAP Field Service Management is integrated with Service using SAP Cloud Integration and SAP Cloud Connector.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["SAP Field Service Management", "SAP Cloud Connector"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0019",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Comment les données personnelles sont-elles gérées entre les versions du Security Guide pour le module Commodity Sales ? Y a-t-il eu des changements ?",
+      "ground_truth": {
+        "claim1": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the BRFplus Decision Table Entries for CPE Formula Assembly.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "claim2": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the PeriodEnd Valuation (PEV).", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["Commodity Procurement and Commodity Sales"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0020",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Quelle est la direction des communications IDoc dans le scénario ALE du Dispute Management ? Du système AR vers DCP ou l'inverse ?",
+      "ground_truth": {
+        "claim1": {"text": "IDocs are sent to the Dispute Case Processing system from the Accounts Receivable system when items are cleared.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "claim2": {"text": "IDocs are sent to the Dispute Case Processing system from the Accounts Receivable system when the clearing of items is reset.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["IDocs", "Dispute Case Processing system", "ALE"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0021",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Y a-t-il des incohérences dans la documentation SAP concernant les méthodes d'intégration de SAP Dispute Management ?",
+      "ground_truth": {
+        "claim1": {"text": "SAP Dispute Management uses synchronous BAPI calls in a one-system scenario.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "claim2": {"text": "SAP Dispute Management uses asynchronous BAPI calls between the systems involved.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["SAP Dispute Management"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0022",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Le renommage de S/4HANA Cloud Private Edition en Cloud ERP Private Edition a-t-il un impact sur les fonctionnalités analytics documentées ?",
+      "ground_truth": {
+        "claim1": {"text": "SAP S/4HANA Cloud Private Edition is the only analytics solution to bring together BI, Planning, and Predictive in the cloud", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
+        "claim2": {"text": "SAP Cloud ERP Private Edition is the only analytics solution to bring together BI, Planning, and Predictive in the cloud", "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["SAP S/4HANA Cloud Private Edition", "SAP Cloud ERP Private Edition", "BI", "Planning"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0023",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Quels modules SAP utilisent le SSO via logon tickets pour l'accès navigateur ? La liste est-elle la même entre les versions du Security Guide ?",
+      "ground_truth": {
+        "claim1": {"text": "ISF supports the use of logon tickets for SSO when using a Web browser as the front-end client.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "claim2": {"text": "SAP E-Recruiting supports the use of logon tickets for SSO when using a Web browser as the frontend client.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["ISF", "E-Recruiting", "SSO"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0024",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Pour le scénario SUMA dans SAP Production Planning, le planning du control cycle primaire et secondaire doit-il être aligné ?",
+      "ground_truth": {
+        "claim1": {"text": "The type of planning procedure assigned to the primary control cycle is independent of the secondary control cycle's planning procedure.", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"},
+        "claim2": {"text": "Planning procedure assigned to the primary control cycle and secondary control cycles are the same in SUMA scenario.", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["SUMA", "primary control cycle", "secondary control cycles"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    },
+    {
+      "question_id": "T2_EXP_0025",
+      "task": "T2_contradictions",
+      "source": "human_expert_v2",
+      "question": "Quels changements y a-t-il eu entre les Security Guides 2022 et 2023 pour le stockage des données personnelles dans le module Commodity ?",
+      "ground_truth": {
+        "claim1": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the Versioned Persistency of Logistics Pricing Data (VLOGP).", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "claim2": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the BRFplus Decision Table Entries for CPE Formula Assembly.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "tension_nature": "CONTRADICTS",
+        "entities": ["Commodity Procurement and Commodity Sales", "VLOGP", "BRFplus"]
+      },
+      "grading_rules": {
+        "must_surface_both_sides": true,
+        "must_not_arbitrate_silently": true,
+        "must_cite_both_sources": true,
+        "expected_tension_type": "CONTRADICTS"
+      }
+    }
+  ]
+}

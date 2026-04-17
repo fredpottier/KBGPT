@@ -1,0 +1,1412 @@
+{
+  "metadata": {
+    "task": "T1",
+    "source": "human_derived",
+    "corpus": "SAP Enterprise Documentation",
+    "count": 100,
+    "generated_at": "2026-03-22T18:00:00Z",
+    "note": "Questions generees manuellement par Claude en lisant les caches d'extraction SAP (SANS acces au KG ni Qdrant)"
+  },
+  "questions": [
+    {
+      "question_id": "T1_HUM_0000",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel outil est utilise pour orchestrer la conversion vers SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Le Software Update Manager (SUM) est l'outil principal utilise pour orchestrer la conversion vers SAP S/4HANA.",
+        "verbatim_quote": "Software Update Manager (SUM)",
+        "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Software Update Manager"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0001",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel est le prerequis concernant Unicode pour la conversion vers S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Le systeme doit etre Unicode. Si le systeme n'est pas Unicode, une conversion en deux etapes est necessaire : upgrade + conversion Unicode d'abord.",
+        "verbatim_quote": "system must be Unicode",
+        "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Unicode"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0002",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle SAP Note contient les informations de release pour SAP S/4HANA 2023 ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Note 3307222 contient les informations de release pour SAP S/4HANA 2023.",
+        "verbatim_quote": "SAP Note 3307222: SAP S/4HANA 2023 Release Information Note",
+        "doc_id": "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "3307222"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0003",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel client SAP doit etre supprime avant la conversion vers S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Le client 066 (Early Watch client) doit etre supprime avant la conversion. Voir SAP Note 1749142.",
+        "verbatim_quote": "Client 066 (Early Watch client) must be removed before the conversion",
+        "doc_id": "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "066"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0004",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel patch SPAM/SAINT est requis avant la conversion vers S/4HANA 2023 ?",
+      "ground_truth": {
+        "expected_claim": "Le patch SPAM/SAINT 71 ou superieur est requis avant la conversion.",
+        "verbatim_quote": "SPAM/SAINT patch 71",
+        "doc_id": "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "patch 71"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0005",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quels sont les codes retour du SI-Check et que signifient-ils lors d'un upgrade S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Vert = OK, Jaune = avertissements (data changes, business functions), Rouge 7 = erreurs confirmables (data loss, deprecation), Rouge 8/12 = blockers a resoudre obligatoirement.",
+        "verbatim_quote": "green = OK, yellow = warnings, red 7 = confirmable errors, red 8/12 = blockers",
+        "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "vert"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0006",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Qu'est-ce que le Data Transition Validation (DTV) dans le contexte d'un upgrade S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Le Data Transition Validation (DTV) compare les donnees avant et apres l'upgrade. Il est inclus dans la licence standard. Voir SAP Note 3117879.",
+        "verbatim_quote": "Data Transition Validation (DTV) — compare data before/after upgrade, included in standard license",
+        "doc_id": "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Data Transition Validation"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0007",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel objet d'autorisation protege l'import de la Simplification Database ?",
+      "ground_truth": {
+        "expected_claim": "L'objet d'autorisation S_YCM est requis pour importer la Simplification Database.",
+        "verbatim_quote": "authorization object S_YCM",
+        "doc_id": "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "S_YCM"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0008",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle SAP Note faut-il consulter pour telecharger la Simplification Database ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Note 2241080 permet de telecharger la Simplification Database.",
+        "verbatim_quote": "SAP Note 2241080: download of Simplification Database",
+        "doc_id": "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "2241080"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0009",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle est la convention de nommage pour la destination RFC vers SAP Solution Manager ?",
+      "ground_truth": {
+        "expected_claim": "La convention de nommage est SM_<SID>CLNT<CLNT>_READ.",
+        "verbatim_quote": "SM_<SID>CLNT<CLNT>_READ",
+        "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "SM_"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0010",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quels sont les 4 principes d'acces de SAP aux systemes clients dans SAP S/4HANA Cloud Private Edition ?",
+      "ground_truth": {
+        "expected_claim": "Les 4 etapes sont : Consent, Authentication, Authorisation, et Log Review.",
+        "verbatim_quote": "Consent, Authentication, Authorisation, Log Review",
+        "doc_id": "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Consent"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0011",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle architecture reseau est utilisee pour la haute disponibilite du SAPRouter ?",
+      "ground_truth": {
+        "expected_claim": "Deux SAPRouters (A et B) sur deux Availability Zones avec failover keepalive sur le port tcp/3299.",
+        "verbatim_quote": "Two SAPRouters (A and B) on two Availability Zones, failover keepalive, port tcp/3299",
+        "doc_id": "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "3299"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0012",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quels fournisseurs d'infrastructure cloud sont supportes par RISE with SAP ?",
+      "ground_truth": {
+        "expected_claim": "Les fournisseurs d'infrastructure supportes incluent SAP Data Center, AWS, Azure, IBM Cloud, Google Cloud, Lenovo, Hewlett Packard Enterprise, et Dell Technologies.",
+        "verbatim_quote": "SAP Data Center, AWS, Azure, IBM Cloud, Lenovo, Hewlett Packard Enterprise, Dell Technologies",
+        "doc_id": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "AWS"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0013",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelles certifications de securite SAP maintient-il pour ses services cloud (RISE) ?",
+      "ground_truth": {
+        "expected_claim": "SAP maintient les certifications SOC 1, SOC 2 (bi-annuels), ISO 27001, ISO 22301, BS10012 et ISO 9001.",
+        "verbatim_quote": "Bi-Annual SOC 1 and SOC 2, ISO 27001, ISO 22301 and BS10012, ISO 9001",
+        "doc_id": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "SOC 1"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0014",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelles options de connectivite Azure sont supportees pour RISE with SAP ?",
+      "ground_truth": {
+        "expected_claim": "Les options incluent Site-to-Site VPN, Express Route, Express Route Direct, VNET Peering (Regional et Global), Virtual WAN. Pour le VNET Peering, RISE en tant que Spoke uniquement est supporte.",
+        "verbatim_quote": "RISE as a Spoke only is supported",
+        "doc_id": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Spoke"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0015",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel objet d'autorisation controle l'acces au spool dans le Payroll Control Center ?",
+      "ground_truth": {
+        "expected_claim": "L'objet d'autorisation S_SPO_ACT avec les champs SPOACTION (BASE, DISP) et SPOAUTH (namespace spool) controle l'acces.",
+        "verbatim_quote": "Authorization object S_SPO_ACT, fields: SPOACTION (values: BASE, DISP) and SPOAUTH",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "S_SPO_ACT"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0016",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel est le namespace de spool utilise pour le Payroll Control Center et est-il transportable ?",
+      "ground_truth": {
+        "expected_claim": "Le namespace est /PCC/. Il n'est PAS transportable et doit etre re-maintenu manuellement en production.",
+        "verbatim_quote": "Namespace /PCC/; namespace is not transportable — must be re-maintained in production",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "/PCC/"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0017",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel role SAP est fourni pour le team lead dans le Payroll Control Center ?",
+      "ground_truth": {
+        "expected_claim": "Le role SAP_HR_PYC_TM_MNG est fourni pour le team lead, avec l'objet d'autorisation P_PYD_INST.",
+        "verbatim_quote": "Team lead sample role: SAP_HR_PYC_TM_MNG; authorization object P_PYD_INST",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "SAP_HR_PYC_TM_MNG"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0018",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle SAP Note est necessaire pour l'import JSON de consent records dans SAP ILM ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Note 2607792 est necessaire pour l'import JSON de consent records.",
+        "verbatim_quote": "SAP Note 2607792 for JSON import of consent records",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "2607792"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0019",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel business catalog doit etre co-assigne avec les catalogues Intrastat dans le Security Guide 2023 ?",
+      "ground_truth": {
+        "expected_claim": "Le business catalog SAP_CMD_BC_BP_DISP (Master Data - Business Partner Display) doit etre co-assigne.",
+        "verbatim_quote": "Business Catalog SAP_CMD_BC_BP_DISP must be co-assigned",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "SAP_CMD_BC_BP_DISP"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0020",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quels objets d'autorisation sont necessaires pour le scenario E-Recruiting Manager ?",
+      "ground_truth": {
+        "expected_claim": "Les objets d'autorisation incluent P_RCF_POOL, P_RCF_STAT, P_RCF_ACT et CA_POWL (avec POWL_APPID = ERC_WORKCENTER).",
+        "verbatim_quote": "P_RCF_POOL, P_RCF_STAT, P_RCF_ACT, CA_POWL with POWL_APPID: ERC_WORKCENTER",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "P_RCF_POOL"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0021",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel pattern de nommage suivent les roles standard pour Incentive & Sales Force Management ?",
+      "ground_truth": {
+        "expected_claim": "Les roles single suivent le pattern SAP_ICM_S_* et les roles composite SAP_ICM_C_*.",
+        "verbatim_quote": "single roles SAP_ICM_S_*, composite roles SAP_ICM_C_*",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "SAP_ICM_S_"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0022",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Vers quels systemes les donnees de settlement ISF peuvent-elles etre transferees ?",
+      "ground_truth": {
+        "expected_claim": "Les donnees peuvent etre transferees vers FI-AP, FI-AR, HR-PY, FS-CD et des systemes non-SAP.",
+        "verbatim_quote": "Settlement data transferable to SAP systems: FI-AP, FI-AR, HR-PY, FS-CD and non-SAP systems",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "FI-AP"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0023",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle SAP Note concerne les permissions de lecture generales pour les utilisateurs dans SAP Enterprise Portal (ESS) ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Note 939412 concerne les permissions de lecture generales pour les utilisateurs finaux dans SAP Enterprise Portal.",
+        "verbatim_quote": "SAP Note 939412 for end-user general reading permission in SAP Enterprise Portal",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "939412"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0024",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle transaction est utilisee pour le monitoring MRP dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Les transactions MD04 et MD07 sont utilisees pour les evaluations MRP (stock-requirements list).",
+        "verbatim_quote": "MD04/MD07 — MRP evaluations/stock-requirements list",
+        "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "MD04"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0025",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel rapport permet de detecter les inconsistences ATP dans les documents de vente ?",
+      "ground_truth": {
+        "expected_claim": "Le rapport ATP_VBBE_CONSISTENCY permet de detecter et corriger les inconsistences dans la persistance secondaire des documents de vente.",
+        "verbatim_quote": "ATP_VBBE_CONSISTENCY — Report to detect/correct inconsistencies in sales document secondary persistence",
+        "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "ATP_VBBE_CONSISTENCY"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0026",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "A quelle frequence le job /SCWM/R_BW_COLLECTIVE_RUN doit-il etre planifie dans EWM ?",
+      "ground_truth": {
+        "expected_claim": "Le job /SCWM/R_BW_COLLECTIVE_RUN doit etre planifie quotidiennement (Daily) pour transferer les queues qRFC vers la BI Delta Queue.",
+        "verbatim_quote": "/SCWM/R_BW_COLLECTIVE_RUN — Daily — Transfer qRFC queues to BI Delta Queue",
+        "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Daily"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0027",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel est le niveau de trace par defaut pour le service WWI dans EHS ?",
+      "ground_truth": {
+        "expected_claim": "Le niveau de trace par defaut est 3 (sur une echelle de 0 a 5, ou 0 = erreurs fatales uniquement et 5 = debug trace).",
+        "verbatim_quote": "Default = level 3. Range: 0 (fatal errors only) to 5 (debug trace)",
+        "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "level 3"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0028",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle transaction est utilisee pour le WWI Monitor dans SAP EHS ?",
+      "ground_truth": {
+        "expected_claim": "La transaction CG5Z est utilisee pour le WWI Monitor, qui affiche la queue de generation de rapports et les ordres d'expedition.",
+        "verbatim_quote": "Transaction CG5Z (WWI Monitor — shows report generation queue and shipping orders)",
+        "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "CG5Z"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0029",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel rapport doit etre execute regulierement pour supprimer physiquement les donnees de specification dans EHS ?",
+      "ground_truth": {
+        "expected_claim": "Le rapport RC1PHDEL doit etre execute regulierement car les donnees marquees pour suppression ne sont pas supprimees physiquement par defaut.",
+        "verbatim_quote": "Report RC1PHDEL must be run regularly to physically delete specification data",
+        "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "RC1PHDEL"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0030",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle table de base de donnees croît si aucun DMS externe n'est utilise dans EHS ?",
+      "ground_truth": {
+        "expected_claim": "La table DRAO croît si aucun DMS externe n'est utilise. Voir SAP Note 586293.",
+        "verbatim_quote": "Database table DRAO grows if no external DMS is used; see SAP Note 586293",
+        "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "DRAO"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0031",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle transaction initialise le cache Expert dans SAP EHS ?",
+      "ground_truth": {
+        "expected_claim": "La transaction CGSADM initialise le cache Expert et sert d'outil d'administration central pour WWI et Expert.",
+        "verbatim_quote": "Transaction CGSADM: Central admin tool for WWI + Expert",
+        "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "CGSADM"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0032",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelles transactions sont utilisees pour le monitoring des queues qRFC dans SAP liveCache ?",
+      "ground_truth": {
+        "expected_claim": "SMQ1 pour le monitoring Outbound Queue et SMQ2 pour le monitoring Inbound Queue.",
+        "verbatim_quote": "SMQ1 — qRFC Monitor (Outbound Queue), SMQ2 — qRFC Monitor (Inbound Queue)",
+        "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "SMQ1"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0033",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle transaction permet un controle fonctionnel rapide de la configuration liveCache ?",
+      "ground_truth": {
+        "expected_claim": "La transaction /SAPAPO/OM03 permet un controle fonctionnel rapide (brief functional check) de liveCache.",
+        "verbatim_quote": "/SAPAPO/OM03 — Brief functional check",
+        "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "/SAPAPO/OM03"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0034",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "A quelle frequence le job RSQIWKEXI doit-il etre planifie dans EWM et pourquoi ?",
+      "ground_truth": {
+        "expected_claim": "Le job RSQIWKEXI doit etre planifie toutes les heures (Hourly) pour redemarrer les queues de mouvements de marchandises bloquees par des verrous temporaires sur les materiaux.",
+        "verbatim_quote": "RSQIWKEXI — Hourly — Restart goods movement queues blocked by temporary material locks",
+        "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "RSQIWKEXI"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0035",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle SAP Note faut-il consulter pour la derniere version de contenu SAP Best Practices ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Note 3330258 contient la derniere version de contenu SAP Best Practices.",
+        "verbatim_quote": "check SAP Note 3330258 for latest content version",
+        "doc_id": "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "3330258"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0036",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Les roles SAP_BR* sont-ils concus comme roles productifs ?",
+      "ground_truth": {
+        "expected_claim": "Non, les roles SAP_BR* ne sont PAS concus comme roles productifs. Ils doivent etre adaptes aux besoins du client.",
+        "verbatim_quote": "SAP_BR* roles are not designed as productive roles",
+        "doc_id": "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "not designed as productive"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0037",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "SAP Best Practices livre-t-il un concept d'autorisation pret a l'emploi ?",
+      "ground_truth": {
+        "expected_claim": "Non, SAP Best Practices ne livre PAS de concept d'autorisation. Il doit etre adapte selon les besoins du client.",
+        "verbatim_quote": "SAP Best Practices does not deliver an authorization concept — must be adapted per customer requirements",
+        "doc_id": "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "does not deliver"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0038",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quels scope items EWM necessitent une configuration manuelle non capturee dans les transport requests ?",
+      "ground_truth": {
+        "expected_claim": "Les scope items 1FS (Basic Warehouse Inbound), 1G2 (Outbound to Customer), 1FU (Initial Stock Upload), 1FY (Replenishment), 1FW (Physical Inventory), 1G0 (Scrapping), 1V5, 1V7, 1V9, 1VB, 1VD necessitent une configuration manuelle.",
+        "verbatim_quote": "EWM scope items requiring manual config: 1FS, 1G2, 1FU, 1FY, 1FW, 1G0, 1V5, 1V7, 1V9, 1VB, 1VD",
+        "doc_id": "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "1FS"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0039",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel type de connexion utiliser dans SM59 pour une destination RFC vers un systeme ABAP ?",
+      "ground_truth": {
+        "expected_claim": "Le type de connexion 3 (ABAP system) est utilise dans SM59 pour les destinations RFC vers un systeme ABAP.",
+        "verbatim_quote": "connection type 3 = ABAP system",
+        "doc_id": "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "type 3"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0040",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Qu'est-ce que Joule dans le contexte SAP S/4HANA Cloud 2025 ?",
+      "ground_truth": {
+        "expected_claim": "Joule est le copilote IA de SAP Business AI, avec une couche d'orchestration multi-agents. Les Joule Agents collaborent sur des scenarios comme la gestion des litiges, la planification et la comptabilite.",
+        "verbatim_quote": "Joule AI copilot, multi-agent orchestration layer, Joule Agents collaborating on dispute management / planning / accounting",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Joule"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0041",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quels partenaires AI sont listes dans l'ecosysteme SAP Business Data Cloud 2025 ?",
+      "ground_truth": {
+        "expected_claim": "Les partenaires AI incluent Aleph Alpha, Anthropic, AWS, Cohere, Databricks, Google Cloud, IBM, Meta, Microsoft, Mistral AI et nVIDIA.",
+        "verbatim_quote": "Aleph Alpha, Anthropic, AWS, Cohere, Databricks, Google Cloud, IBM, Meta, Microsoft, Mistral AI, nVIDIA",
+        "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Anthropic"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0042",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Que permet la fonctionnalite Create Purchase Requisitions de Joule ?",
+      "ground_truth": {
+        "expected_claim": "Joule permet de creer des demandes d'achat avec des articles materiels ou de service, d'ajouter une source d'approvisionnement, et de creer des articles free-text non disponibles dans le systeme.",
+        "verbatim_quote": "Create Purchase Requisitions capability — enables purchasers to create PRs with material or service items, add source of supply, create free-text materials",
+        "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Purchase Requisition"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0043",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Qu'est-ce que le Production Planning Optimizer (PPO) dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Le PPO est un outil de planification basee sur les contraintes utilisant la programmation lineaire pour l'optimisation des couts, avec support des ressources de production partagees et des relations de transfert de stock entre usines.",
+        "verbatim_quote": "Production Planning Optimizer (PPO) constraint-based planning: cost-based optimization via linear programming, shared production resources, stock transfer relations between plants",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "linear programming"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0044",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Combien de pays de l'UE sont couverts par la fonctionnalite Intrastat dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "La fonctionnalite Intrastat couvre les 27 Etats membres de l'UE.",
+        "verbatim_quote": "EU Intrastat country coverage: 27 EU member states",
+        "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "27"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0045",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle est la validite d'un permis de travail de niveau 1 dans l'industrie Oil & Gas avec S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Un permis de travail de niveau 1 a une validite d'un seul shift. Un niveau 2 peut aller jusqu'a 14 jours.",
+        "verbatim_quote": "level 1: one shift validity; level 2: up to 14 days",
+        "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "one shift"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0046",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Qu'est-ce que l'AI-assisted in-house service initiation dans S/4HANA Cloud 2023 FPS03 ?",
+      "ground_truth": {
+        "expected_claim": "C'est une fonctionnalite qui permet de scanner des documents papier, d'en extraire automatiquement les informations et de creer des ordres de reparation internes.",
+        "verbatim_quote": "AI-assisted in-house service initiation: scan paper documents, automatic extraction, create repair orders",
+        "doc_id": "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_\u2014_Highlights_of_Innovations_(2023_FPS03)_01b01cbf"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "scan"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0047",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Qu'est-ce que le Manage Production Models dans S/4HANA 2023 FPS03 ?",
+      "ground_truth": {
+        "expected_claim": "L'app Manage Production Models – Materials permet de gerer les modeles de production avec BOM, shop floor routing et visualisation 3D.",
+        "verbatim_quote": "Manage Production Models – Materials: production model with BOM + shop floor routing + 3D visualization",
+        "doc_id": "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_\u2014_Highlights_of_Innovations_(2023_FPS03)_01b01cbf"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Production Models"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0048",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel est le service request identifier pour les demandes SAP Notes techniques dans SAP ECS pour PCE 2025 ?",
+      "ground_truth": {
+        "expected_claim": "Le service request identifier BASIC_1.5.04 est utilise pour demander a SAP ECS d'appliquer les SAP Notes techniques (composants BC-CST et BC-DB).",
+        "verbatim_quote": "service request identifier BASIC_1.5.04 for BC-CST and BC-DB technical notes",
+        "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "BASIC_1.5.04"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0049",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel est le prerequis de stockage HANA recommande pour la conversion vers S/4HANA Cloud Private Edition 2025 ?",
+      "ground_truth": {
+        "expected_claim": "L'espace recommande est 2x la taille de la base HANA pour les backups locaux pendant la migration.",
+        "verbatim_quote": "SAP HANA storage recommendation: space = 2x HANA database size for local backups during migration",
+        "doc_id": "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "2x"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0050",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelles instances Java sont incluses dans SAP S/4HANA Cloud Private Edition 2025 ?",
+      "ground_truth": {
+        "expected_claim": "Les instances Java incluses sont Adobe Document Services, Enterprise Services Repository, Advanced Adapter Engine Extended, Integration for Elster et Integration for Swift. Toutes les autres instances Java SAP ERP sont obsoletes.",
+        "verbatim_quote": "Adobe Document Services, Enterprise Services Repository, Advanced Adapter Engine Extended, Integration for Elster, Integration for Swift",
+        "doc_id": "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Adobe Document Services"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0051",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Qu'est-ce que le RISE with SAP system transition workbench ?",
+      "ground_truth": {
+        "expected_claim": "C'est un outil de transition restreint aux partenaires certifies 'Essential Level' minimum pour la competence SAP S/4HANA Cloud Private Edition et aux operations internes SAP ECS.",
+        "verbatim_quote": "RISE with SAP system transition workbench — restricted to partners Essential Level minimum",
+        "doc_id": "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Essential Level"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0052",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel est l'avantage de l'Extended Warehouse Management embarque dans S/4HANA par rapport au modele decouple ?",
+      "ground_truth": {
+        "expected_claim": "L'EWM embarque dans S/4HANA elimine la duplication de donnees et les efforts de reconciliation.",
+        "verbatim_quote": "Extended Warehouse Management embedded in S/4HANA — no data duplication & reconciliation efforts",
+        "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "duplication"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0053",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Combien de Lines of Business sont couvertes par SAP S/4HANA 1809 ?",
+      "ground_truth": {
+        "expected_claim": "10 Lines of Business : Sales & Marketing, Asset Management, Supply Chain, Services, Manufacturing, Finance, Procurement, Human Resource, R&D, Cross Topics.",
+        "verbatim_quote": "10 Lines of Business: Sales & Marketing, Asset Management, Supply Chain, Services, Manufacturing, Finance, Procurement, Human Resource, R&D, Cross Topics",
+        "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "10"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0054",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Que verifie la transaction /SAPAPO/OM13 pour liveCache ?",
+      "ground_truth": {
+        "expected_claim": "La transaction /SAPAPO/OM13 effectue un controle basique de la configuration liveCache. Les feux rouges doivent etre resolus immediatement.",
+        "verbatim_quote": "/SAPAPO/OM13 — Basic check of liveCache configuration; red traffic lights = resolve immediately",
+        "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "/SAPAPO/OM13"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0055",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "A partir de quelle version S/4HANA le workflow system user a-t-il change de nom ?",
+      "ground_truth": {
+        "expected_claim": "A partir de S/4HANA On-Premise 1709, le workflow system user a ete renomme de WFBATCH a SAP_WFRT.",
+        "verbatim_quote": "Starting with S/4HANA On-Premise 1709: workflow system user renamed from WFBATCH to SAP_WFRT",
+        "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "SAP_WFRT"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0056",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quels anciens jobs workflow doivent etre deplanifies apres la migration vers SAP_WFRT ?",
+      "ground_truth": {
+        "expected_claim": "Les anciens jobs a deplanifier sont SWEQSRV, SWWCLEAR, SWWCOND, SWWDHEX, SWWERRE, SWWRUNCNT et SWWWIM.",
+        "verbatim_quote": "Old jobs to deschedule: SWEQSRV, SWWCLEAR, SWWCOND, SWWDHEX, SWWERRE, SWWRUNCNT, SWWWIM",
+        "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "SWEQSRV"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0057",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel role est requis pour le user SAP_WFRT dans le workflow S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Le role SAP_BC_BMT_WFM_SERV_USER_PLV01 est requis pour SAP_WFRT.",
+        "verbatim_quote": "Required role for SAP_WFRT: SAP_BC_BMT_WFM_SERV_USER_PLV01",
+        "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "SAP_BC_BMT_WFM_SERV_USER_PLV01"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0058",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle SAP Note faut-il implementer avant l'upgrade pour le Situation Handling ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Note 3271299 doit etre implementee avant l'upgrade. SUM verifie l'interface IF_SIT2_CHECK_ZDM_RUNNING et aborte si absente.",
+        "verbatim_quote": "SAP Note 3271299 must be implemented before upgrade; SUM checks for IF_SIT2_CHECK_ZDM_RUNNING",
+        "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "3271299"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0059",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "A quelle frequence le Technical Job Repository schedule-t-il les jobs SAP_WORKFLOW par defaut ?",
+      "ground_truth": {
+        "expected_claim": "Le job R_JR_BTCJOBS_GENERATOR du Technical Job Repository s'execute toutes les heures par defaut et schedule tous les nouveaux jobs SAP_WORKFLOW*.",
+        "verbatim_quote": "R_JR_BTCJOBS_GENERATOR runs every hour by default and schedules all new SAP_WORKFLOW* jobs",
+        "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "every hour"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0060",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelles SAP Notes referencent les Always-Off et Always-On Business Functions pour les upgrades S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP Note 2240359 pour Always-Off Business Functions et SAP Note 2240360 pour Always-On Business Functions.",
+        "verbatim_quote": "SAP Note 2240359: Always-Off Business Functions; SAP Note 2240360: Always-On Business Functions",
+        "doc_id": "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "2240359"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0061",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Qu'est-ce que le Silent Data Migration Infrastructure (SDMI) ?",
+      "ground_truth": {
+        "expected_claim": "Le SDMI permet les upgrades zero-downtime en migrant les donnees de maniere silencieuse pendant l'upgrade.",
+        "verbatim_quote": "Silent Data Migration Infrastructure (SDMI): enables zero-downtime upgrades",
+        "doc_id": "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "zero-downtime"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0062",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel est le prerequis ABAP Platform pour SAP S/4HANA 2025 ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Note 3612209 contient les informations generales sur ABAP Platform 2025.",
+        "verbatim_quote": "SAP Note 3612209: ABAP Platform 2025 General Information",
+        "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "3612209"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0063",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Comment SAP S/4HANA utilise-t-il la recherche fuzzy HANA pour la classification commerciale ?",
+      "ground_truth": {
+        "expected_claim": "SAP S/4HANA utilise la recherche fuzzy HANA pour proposer des numeros de tarif douanier et codes de marchandises par recherche de similarite, avec les apps Activate Classification Proposals et Schedule Creation of Trade Classification Proposals.",
+        "verbatim_quote": "HANA fuzzy search for proposals for customs tariff numbers and commodity codes via similarity search",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "fuzzy"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0064",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quels sont les 12 steps du processus WIP management avec MES integration dans SAP EWM ?",
+      "ground_truth": {
+        "expected_claim": "Le processus en 12 etapes inclut : MES demande le staging, EWM cree une warehouse request, EWM cree des staging tasks pour WIP/WIP-HU, EWM confirme, notification au MES, MES deplace le WIP du PSA a la ligne de production, EWM fait le PGI du stock WIP, MES met a jour le statut WIP.",
+        "verbatim_quote": "12-step process: MES requests staging → EWM creates warehouse request → EWM creates staging tasks",
+        "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "staging"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0065",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel est le contenu du SAP SD Premium Assistant avec Joule ?",
+      "ground_truth": {
+        "expected_claim": "Le SD Premium Assistant explique les problemes et blocs (donnees incompletes, delivery blocks, credit blocks, billing blocks, trade compliance), fournit une analyse en temps reel du statut de fulfillment basee sur les follow-on documents.",
+        "verbatim_quote": "SD Premium Assistant for sales order fulfillment: explains issues and blocks, provides real-time fulfillment status analysis",
+        "doc_id": "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_\u2014_Highlights_of_Innovations_(2023_FPS03)_01b01cbf"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "SD Premium Assistant"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0066",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle version de SAP_UI est requise pour les Fiori apps avant la conversion S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP_UI 7.50 (USER INTERFACE TECHNOLOGY 7.50) est requis. Les Fiori apps non compatibles doivent etre desinstallees avant la conversion.",
+        "verbatim_quote": "SAP_UI 7.50",
+        "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "7.50"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0067",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel rapport permet de trouver les materiaux utilisant l'ATP checking group 01 avec collective requirements ?",
+      "ground_truth": {
+        "expected_claim": "Le rapport Z_MATERIALS_W_COLLECTIVE_REQS (a creer via SE38) permet de trouver ces materiaux.",
+        "verbatim_quote": "SE38 — create/run report Z_MATERIALS_W_COLLECTIVE_REQS",
+        "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Z_MATERIALS_W_COLLECTIVE_REQS"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0068",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelles SAP Notes concernent le dual-stack split requis avant conversion S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Les SAP Notes 1686144 et 1655335 concernent le dual-stack split.",
+        "verbatim_quote": "SAP Note 1686144 and 1655335: Dual-stack split",
+        "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "1686144"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0069",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel guide SAP recommande de creer en plus des operations guides standard ?",
+      "ground_truth": {
+        "expected_claim": "SAP recommande de creer un daily operations handbook specifique aux operations de production du client.",
+        "verbatim_quote": "This guide does not replace the daily operations handbook that we recommend you to create for your specific production operations",
+        "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "daily operations handbook"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0070",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel est le SAP product ID pour SAP S/4HANA Reinsurance for Assumed Risk ?",
+      "ground_truth": {
+        "expected_claim": "Le product ID est 7019930 pour Assumed Risk et 7019936 pour Ceded Risk.",
+        "verbatim_quote": "SAP S/4HANA Reinsurance for Assumed Risk (7019930) and Ceded Risk (7019936)",
+        "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "7019930"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0071",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quels protocoles sont utilises pour la communication WebDAV dans SAP ILM ?",
+      "ground_truth": {
+        "expected_claim": "WebDAV utilise le protocole HTTP avec authentification basique (user+password) ou SSL.",
+        "verbatim_quote": "WebDAV uses HTTP with basic authentication (user+password) or SSL",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "WebDAV"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0072",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle transaction permet d'activer les OData services dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "La transaction /IWFND/MAINT_SERVICE permet d'activer et maintenir les OData services.",
+        "verbatim_quote": "/IWFND/MAINT_SERVICE — Activate/Maintain Services",
+        "doc_id": "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "/IWFND/MAINT_SERVICE"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0073",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel objet d'autorisation controle l'acces aux pieces jointes du licence master dans le commerce international ?",
+      "ground_truth": {
+        "expected_claim": "L'objet d'autorisation S_GOS_ATT avec le champ BOROBJTYPE = ITRLIC controle l'acces aux pieces jointes du licence master.",
+        "verbatim_quote": "S_GOS_ATT, field BOROBJTYPE = ITRLIC for license master attachments",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "S_GOS_ATT"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0074",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel objet d'autorisation et quelles valeurs controlent le Fiori app Intrastat reporting ?",
+      "ground_truth": {
+        "expected_claim": "L'objet d'autorisation S_PROGNAM avec le champ P_PROGNAM, couple aux business catalogs SAP_SLL_BC_INTRASTAT_SEL avec les rapports RVEXST00 (Fiori F2507) et RMIMST00 (Fiori F2508).",
+        "verbatim_quote": "S_PROGNAM, field P_PROGNAM; catalogs SAP_SLL_BC_INTRASTAT_SEL with RVEXST00 (Fiori F2507) and RMIMST00 (Fiori F2508)",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "S_PROGNAM"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0075",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Comment fonctionne l'Advanced ATP (aATP) dans SAP S/4HANA 1809 ?",
+      "ground_truth": {
+        "expected_claim": "L'Advanced ATP inclut le backorder processing, l'app Fiori Release for Delivery, le fast availability check en masse, le product allocation check, et la selection automatisee considerant les usines alternatives et les materiaux substituables.",
+        "verbatim_quote": "Advanced ATP: backorder processing, FIORI App for Release for Delivery, mass-enabled fast availability check, product allocation check, automated selection considering alternative plants and substitutable materials",
+        "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "backorder"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0076",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel BAdI doit etre reimplemente pour les evaluations MRP dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Le BAdI MD_CHANGE_MRP_DATA doit etre reimplemente dans MD_ADD_ELEMENTS pour les evaluations MRP.",
+        "verbatim_quote": "BAdI MD_CHANGE_MRP_DATA must be re-implemented in MD_ADD_ELEMENTS",
+        "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "MD_CHANGE_MRP_DATA"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0077",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel rapport effectue la reconciliation des donnees liveCache dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "La transaction /SAPAPO/OM17 permet la reconciliation des donnees (Data Reconciliation).",
+        "verbatim_quote": "/SAPAPO/OM17 — Data Reconciliation",
+        "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "/SAPAPO/OM17"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0078",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Comment configurer le trace RFC pour le diagnostic dans EHS ?",
+      "ground_truth": {
+        "expected_claim": "Le trace RFC est dans dev_rfc.trc active par defaut. Pour activer le trace complet : definir RFC_TRACE=1 dans SAPRFC.INI. Voir SAP Note 778684 pour l'espace disque.",
+        "verbatim_quote": "RFC_TRACE=1 in SAPRFC.INI; SAP Note 778684",
+        "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "RFC_TRACE=1"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0079",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle est la SAP Note de restriction pour SAP S/4HANA Cloud Private Edition 2025 ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Note 3659273 est la Restriction Note pour SAP S/4HANA Cloud Private Edition 2025.",
+        "verbatim_quote": "SAP Note 3659273: SAP S/4HANA Cloud Private Edition 2025 Restriction Note",
+        "doc_id": "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "3659273"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0080",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quels codes statut existent pour les print requests WWI dans EHS ?",
+      "ground_truth": {
+        "expected_claim": "AA = Print request body exists, ZS = Print request created not yet processed, ZD = Print request ready for printing.",
+        "verbatim_quote": "AA = Print request body exists, ZS = Print request created, not yet processed, ZD = Print request ready for printing",
+        "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "ZS"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0081",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quels sont les modeles de licensing pour SAP S/4HANA Enterprise Management ?",
+      "ground_truth": {
+        "expected_claim": "La structure de licensing comprend Enterprise Management, Enhanced LoB, Industry-Specific LoB et Compatibility Packs.",
+        "verbatim_quote": "licensing structure: Enhanced LoB, Industry-Specific LoB, Compatibility Packs",
+        "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Enhanced LoB"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0082",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle SAP Note reference les mesures pour reduire le downtime technique lors d'un upgrade ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Note 2351294 contient les mesures pour reduire le downtime technique.",
+        "verbatim_quote": "SAP Note 2351294: Measures to reduce technical downtime",
+        "doc_id": "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "2351294"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0083",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "A quelle frequence le job /SCWM/R_QRFC_QUEUE_ALERT doit-il etre execute ?",
+      "ground_truth": {
+        "expected_claim": "Le job doit etre execute toutes les 30 a 120 minutes pour creer des alertes en cas d'echec de messages qRFC.",
+        "verbatim_quote": "/SCWM/R_QRFC_QUEUE_ALERT — Every 30-120 minutes — Create alert for failed qRFC messages",
+        "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "30"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0084",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Que fait le job SAP_WORKFLOW_RESTART et comment le desactiver ?",
+      "ground_truth": {
+        "expected_claim": "Le job SAP_WORKFLOW_RESTART s'execute une fois par jour pour redemarrer les workflows en statut erreur (visible dans SWPR). Il se desactive via SJOBREPO.",
+        "verbatim_quote": "SAP_WORKFLOW_RESTART runs once a day to restart error-status workflows; deactivate in SJOBREPO",
+        "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "SAP_WORKFLOW_RESTART"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0085",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quels log objects sont utilises pour la classification commerciale dans SAP S/4HANA 2022 ?",
+      "ground_truth": {
+        "expected_claim": "Le log object /SAPSLL/CLSMD est utilise avec les sub-objects /SAPSLL/CNT_ACT_CHK et /SAPSLL/CNT_CONS_CHK (Fiori F4888).",
+        "verbatim_quote": "log object /SAPSLL/CLSMD with sub-objects /SAPSLL/CNT_ACT_CHK and /SAPSLL/CNT_CONS_CHK (Fiori F4888)",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "/SAPSLL/CLSMD"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0086",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel est le Fiori app ID pour Schedule Recheck Documents dans le commerce international ?",
+      "ground_truth": {
+        "expected_claim": "Le Fiori app ID est F4285, utilisant le rapport /SAPSLL/TCD_RECHECK_MASS via le business catalog SAP_SLL_BC_COMPLDOC_MANAGE.",
+        "verbatim_quote": "Schedule Recheck Documents: catalog SAP_SLL_BC_COMPLDOC_MANAGE, report /SAPSLL/TCD_RECHECK_MASS (Fiori F4285)",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "F4285"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0087",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle SAP Note concerne l'erreur d'upgrade liee au champ BUFFERED superflu ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Note 2781530 concerne l'erreur d'upgrade liee au champ BUFFERED superflu.",
+        "verbatim_quote": "SAP Note 2781530: Superfluous field BUFFERED upgrade error",
+        "doc_id": "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "2781530"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0088",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle SAP Note concerne les restrictions des composants Java pour SAP S/4HANA 2025 ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Note 3612338 concerne les restrictions Java components pour SAP S/4HANA 2025.",
+        "verbatim_quote": "SAP Note 3612338: Java components for SAP S/4HANA 2025 Restrictions",
+        "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "3612338"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0089",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Comment la conversion vers S/4HANA est-elle testee dans un paysage systeme distribue ?",
+      "ground_truth": {
+        "expected_claim": "L'architecture recommandee utilise DEV (original) + DEV 2 (copie pour test) + PROD. Les changements sont collectes dans des transport requests pendant la test conversion.",
+        "verbatim_quote": "DEV (original) + DEV 2 (copy for test) + PROD; changes collected in transport requests",
+        "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "DEV 2"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0090",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle transaction permet de creer les entrees du fichier de planification pour MRP ?",
+      "ground_truth": {
+        "expected_claim": "La transaction MD20 permet de creer les entrees du fichier de planification avec les indicateurs Net change planning et Re-explode BOM.",
+        "verbatim_quote": "MD20 — Create planning file entries with Net change planning and Re-explode BOM indicators",
+        "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "MD20"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0091",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle URL permet d'acceder au Simplification Item Catalog pour S/4HANA 2025 ?",
+      "ground_truth": {
+        "expected_claim": "Le Simplification Item Catalog est accessible via https://me.sap.com/sic ou https://help.sap.com/s4hana_op_2025.",
+        "verbatim_quote": "Simplification Item Catalog: https://me.sap.com/sic",
+        "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "me.sap.com/sic"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0092",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel prerequis de package est necessaire avant l'adjustment SPAU lors d'un upgrade S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Au moins un package dans le customer namespace (Z*) doit exister avant la mise a jour pour l'adjustment SPAU.",
+        "verbatim_quote": "At least one package in the customer namespace (Z*) must exist before the update",
+        "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Z*"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0093",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Comment SAP gere-t-il les tests de penetration demandes par les clients dans RISE ?",
+      "ground_truth": {
+        "expected_claim": "SAP approuve les tests de penetration inities par les clients (Approve Customer-Initiated Penetration Tests) dans le cadre du Threat Management.",
+        "verbatim_quote": "Approve Customer-Initiated Penetration Tests",
+        "doc_id": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "Penetration"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0094",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle SAP Note documente l'ASU Toolbox Application Conversion Assistant ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Note 3008338 documente l'ASU Toolbox Application Conversion Assistant.",
+        "verbatim_quote": "SAP Note 3008338: ASU Toolbox Application Conversion Assistant",
+        "doc_id": "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "3008338"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0095",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quel business catalog faut-il ajouter dans PFCG pour l'app Custom Code Migration ?",
+      "ground_truth": {
+        "expected_claim": "Le business catalog SAP_BASIS_BC_CCM doit etre ajoute dans la transaction PFCG.",
+        "verbatim_quote": "Business catalog SAP_BASIS_BC_CCM to be added in transaction PFCG",
+        "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "SAP_BASIS_BC_CCM"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0096",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle connexion RFC est necessaire entre le systeme HR et E-Recruiting ?",
+      "ground_truth": {
+        "expected_claim": "Une connexion RFC du systeme HR (EA-HR) vers le systeme E-Recruiting (ERECRUIT) est requise, avec un service user anonyme dans le systeme ERECRUIT.",
+        "verbatim_quote": "RFC connection from HR system (EA-HR) to E-Recruiting system (ERECRUIT), with anonymous service user",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "ERECRUIT"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0097",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle transaction est utilisee pour la Labeling Workbench dans Global Label Management ?",
+      "ground_truth": {
+        "expected_claim": "La transaction CBGLWB (Labeling Workbench) est utilisee pour filtrer les print requests par etat.",
+        "verbatim_quote": "Transaction CBGLWB (Labeling Workbench, filter by state)",
+        "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "CBGLWB"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0098",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelles interfaces IDoc sont disponibles pour la distribution de donnees EHS ?",
+      "ground_truth": {
+        "expected_claim": "Les interfaces IDoc disponibles sont REPMAS (Reports), SUBMAS (Specification data), PHRMAS (Phrase data) et DANGEROUSGOOD (Dangerous goods).",
+        "verbatim_quote": "IDoc interfaces: REPMAS (Reports), SUBMAS (Specification data), PHRMAS (Phrase data), DANGEROUSGOOD (Dangerous goods)",
+        "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "REPMAS"
+      }
+    },
+    {
+      "question_id": "T1_HUM_0099",
+      "task": "T1_provenance",
+      "source": "human_derived",
+      "question": "Quelle SAP Note de restriction accompagne la release SAP S/4HANA 2022 ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Note 3230844 est la Restriction Note pour SAP S/4HANA 2022.",
+        "verbatim_quote": "SAP Note 3230844: SAP S/4HANA Restriction Note",
+        "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"
+      },
+      "grading_rules": {
+        "answer_must_contain_fact": "3230844"
+      }
+    }
+  ]
+}

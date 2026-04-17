@@ -1,461 +1,761 @@
 {
   "metadata": {
     "task": "T2",
-    "source": "human_expert_v2",
-    "corpus": "SAP Enterprise Documentation",
-    "count": 25,
-    "generated_at": "2026-03-29T14:00:00",
-    "note": "Questions rédigées manuellement par un expert, basées sur les 20 CONTRADICTS réels du KG. Questions qu'un consultant SAP poserait naturellement."
+    "source": "human_derived",
+    "corpus": "Regulatory Corpus (GDPR, EU AI Act, CCPA, NIST AI RMF, etc.)",
+    "count": 50,
+    "generated_at": "2026-04-11T10:30:00Z",
+    "note": "Questions de contradictions/tensions entre reglementations. Tensions reelles detectees entre cadres juridiques differents."
   },
   "questions": [
     {
-      "question_id": "T2_EXP_0001",
+      "question_id": "T2_REG_HUM_0001",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Comment SAP Dispute Management communique-t-il entre les systèmes ? Utilise-t-il des appels synchrones ou asynchrones ?",
+      "source": "human_derived",
+      "question": "Le RGPD et la CCPA ont-ils la meme approche du consentement pour la collecte de donnees personnelles ?",
       "ground_truth": {
-        "claim1": {"text": "SAP Dispute Management uses synchronous BAPI calls in a one-system scenario.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "claim2": {"text": "SAP Dispute Management uses asynchronous BAPI calls between the systems involved.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["SAP Dispute Management", "BAPI"]
+        "claim1": {"text": "Le RGPD exige un consentement prealable explicite (opt-in) comme l'une des bases legales du traitement, libre, specifique, eclaire et univoque.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA adopte une approche opt-out : les donnees peuvent etre collectees sans consentement prealable, mais le consommateur peut demander a l'entreprise de ne pas vendre ses informations personnelles.", "doc_id": "13_CCPA_Statute_0beb83cc"},
+        "tension_nature": "philosophical_difference",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "13_CCPA_Statute_0beb83cc"]
       }
     },
     {
-      "question_id": "T2_EXP_0002",
+      "question_id": "T2_REG_HUM_0002",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Quel protocole de communication est utilisé entre le système Accounts Receivable et le Dispute Case Processing : BAPI ou RFC ?",
+      "source": "human_derived",
+      "question": "Les amendes maximales du RGPD et de l'AI Act sont-elles comparables ?",
       "ground_truth": {
-        "claim1": {"text": "This destination is used for synchronous and asynchronous BAPI calls from the Accounts Receivable system to the Dispute Case Processing system.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "claim2": {"text": "RFC calls take place from the Accounts Receivable system to the Dispute Case Processing system and vice versa in the ALE scenario of SAP Dispute Management.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["Accounts Receivable system", "BAPI", "RFC", "Dispute Case Processing system"]
+        "claim1": {"text": "Le RGPD prevoit des amendes maximales de 20 millions d'euros ou 4% du chiffre d'affaires annuel mondial.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "L'AI Act prevoit des amendes maximales de 35 millions d'euros ou 7% du chiffre d'affaires annuel mondial pour les pratiques interdites.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "escalation",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
       }
     },
     {
-      "question_id": "T2_EXP_0003",
+      "question_id": "T2_REG_HUM_0003",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Dans quel cas les IDocs sont-ils envoyés au système Dispute Case Processing depuis Accounts Receivable ? Lors du clearing ou lors des paiements partiels ?",
+      "source": "human_derived",
+      "question": "L'approche de classification des risques de l'AI Act europeen et celle du NIST AI RMF sont-elles compatibles ?",
       "ground_truth": {
-        "claim1": {"text": "IDocs are sent to the Dispute Case Processing system from the Accounts Receivable system when items are cleared.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "claim2": {"text": "IDocs are sent to the Dispute Case Processing system from the Accounts Receivable system when partial payments are executed on items.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["Dispute Case Processing system", "IDocs"]
+        "claim1": {"text": "L'AI Act classe les systemes d'IA en quatre niveaux de risque fixes (inacceptable, haut, limite, minimal) avec des obligations reglementaires specifiques pour chaque niveau.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "claim2": {"text": "Le NIST AI RMF adopte une approche flexible et non prescriptive basee sur les fonctions Govern, Map, Measure, Manage, sans categories de risque predefinies.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5"},
+        "tension_nature": "philosophical_difference",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["01_EU_AI_Act_Final_2024_9f9d6bb7", "10_NIST_AI_Risk_Management_Framework_7576edb5"]
       }
     },
     {
-      "question_id": "T2_EXP_0004",
+      "question_id": "T2_REG_HUM_0004",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Où sont stockées les données personnelles pour Commodity Procurement and Commodity Sales ? Dans VLOGP ou dans PeriodEnd Valuation ?",
+      "source": "human_derived",
+      "question": "Le RGPD et la CCPA definissent-ils de la meme maniere la portee territoriale de leur application ?",
       "ground_truth": {
-        "claim1": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the Versioned Persistency of Logistics Pricing Data (VLOGP).", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "claim2": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the PeriodEnd Valuation (PEV).", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["Commodity Procurement and Commodity Sales", "VLOGP", "PEV"]
+        "claim1": {"text": "Le RGPD s'applique a tout traitement de donnees de personnes situees dans l'UE, quel que soit le lieu d'etablissement du responsable du traitement.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA s'applique uniquement aux entreprises operant en Californie et collectant des donnees de residents californiens, avec des seuils de revenus et de volume de donnees.", "doc_id": "13_CCPA_Statute_0beb83cc"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "13_CCPA_Statute_0beb83cc"]
       }
     },
     {
-      "question_id": "T2_EXP_0005",
+      "question_id": "T2_REG_HUM_0005",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Les données personnelles du Commodity Procurement sont-elles gérées via BRFplus Decision Tables ou via Pricing Condition Records dans CPE Formula Assembly ?",
+      "source": "human_derived",
+      "question": "Le droit a l'effacement du RGPD et le droit de suppression de la CCPA sont-ils equivalents ?",
       "ground_truth": {
-        "claim1": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the BRFplus Decision Table Entries for CPE Formula Assembly.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "claim2": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in Pricing Condition Records in CPE Formula Assembly.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["Commodity Procurement and Commodity Sales", "BRFplus", "CPE Formula Assembly"]
+        "claim1": {"text": "Le RGPD accorde un droit a l'effacement etendu (droit a l'oubli) incluant l'obligation pour le responsable de notifier les destinataires, avec des exceptions limitees.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA accorde un droit de suppression avec des exceptions plus larges, notamment pour les obligations contractuelles et les usages internes compatibles avec les attentes du consommateur.", "doc_id": "14_CCPA_2026_Effective_8d57eba9"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "14_CCPA_2026_Effective_8d57eba9"]
       }
     },
     {
-      "question_id": "T2_EXP_0006",
+      "question_id": "T2_REG_HUM_0006",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Comment la gestion des données personnelles a-t-elle évolué entre le Security Guide 2022 et 2023 pour le module Commodity Procurement ?",
+      "source": "human_derived",
+      "question": "La version du Parlement europeen de l'AI Act et la version finale different-elles sur la notion de 'modeles de fondation' ?",
       "ground_truth": {
-        "claim1": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the PeriodEnd Valuation (PEV).", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "claim2": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the Versioned Persistency of Logistics Pricing Data (VLOGP).", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["Commodity Procurement and Commodity Sales"]
+        "claim1": {"text": "Les amendements du Parlement europeen (2023) introduisent des obligations specifiques pour les 'foundation models' avec une definition large.", "doc_id": "05_EU_Parliament_AI_Act_Amendments_2023_1ea9aff7"},
+        "claim2": {"text": "La version finale (2024) remplace le concept de 'foundation models' par 'general-purpose AI models' (GPAI) avec des obligations differenciees selon le risque systemique.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["05_EU_Parliament_AI_Act_Amendments_2023_1ea9aff7", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
       }
     },
     {
-      "question_id": "T2_EXP_0007",
+      "question_id": "T2_REG_HUM_0007",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Quel est le nom officiel du produit : SAP S/4HANA Cloud Private Edition ou SAP Cloud ERP Private Edition ?",
+      "source": "human_derived",
+      "question": "Le RGPD et l'AI Act abordent-ils differemment la question du profilage automatise ?",
       "ground_truth": {
-        "claim1": {"text": "SAP S/4HANA Cloud Private Edition is the only analytics solution to bring together BI, Planning, and Predictive in the cloud", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
-        "claim2": {"text": "SAP Cloud ERP Private Edition is the only analytics solution to bring together BI, Planning, and Predictive in the cloud", "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["SAP S/4HANA Cloud Private Edition", "SAP Cloud ERP Private Edition"]
+        "claim1": {"text": "Le RGPD interdit les decisions fondees exclusivement sur un traitement automatise produisant des effets juridiques, sauf exceptions (contrat, loi, consentement explicite).", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "L'AI Act impose des obligations supplementaires de surveillance humaine et de transparence pour les systemes d'IA a haut risque utilises pour le profilage, y compris dans l'emploi et les services financiers.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "complementarity",
+        "has_real_tension": false
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
       }
     },
     {
-      "question_id": "T2_EXP_0008",
+      "question_id": "T2_REG_HUM_0008",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Le produit analytics qui combine BI, Planning et Predictive dans le cloud s'appelle-t-il encore S/4HANA Cloud Private Edition dans les documents récents ?",
+      "source": "human_derived",
+      "question": "La CCPA originale et le CPRA modifient-ils le traitement des informations personnelles sensibles ?",
       "ground_truth": {
-        "claim1": {"text": "SAP S/4HANA Cloud Private Edition is the only analytics solution to bring together BI, Planning, and Predictive in the cloud", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
-        "claim2": {"text": "SAP Cloud ERP Private Edition is only available in SAP S/4HANA Private Cloud Edition", "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["Planning", "Business Intelligence (BI)"]
+        "claim1": {"text": "La CCPA originale ne distingue pas les informations personnelles sensibles des autres categories.", "doc_id": "13_CCPA_Statute_0beb83cc"},
+        "claim2": {"text": "Le CPRA introduit la categorie d'informations personnelles sensibles (sensitive personal information) avec un droit specifique de limiter leur utilisation et divulgation.", "doc_id": "15_CPRA_Act_e9f88d3e"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["13_CCPA_Statute_0beb83cc", "15_CPRA_Act_e9f88d3e"]
       }
     },
     {
-      "question_id": "T2_EXP_0009",
+      "question_id": "T2_REG_HUM_0009",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "SAP Field Service Management s'intègre-t-il avec SAP ECC ou avec SAP S/4HANA via Cloud Integration ?",
+      "source": "human_derived",
+      "question": "L'approche de l'Inde et de l'UE en matiere de regulation de l'IA different-elles fondamentalement ?",
       "ground_truth": {
-        "claim1": {"text": "SAP Field Service Management enables field service organizations to integrate with SAP ECC software.", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
-        "claim2": {"text": "SAP Field Service Management is integrated with Service using SAP Cloud Integration and SAP Cloud Connector.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["SAP Field Service Management", "SAP ECC", "SAP Cloud Integration"]
+        "claim1": {"text": "L'UE adopte une approche reglementaire contraignante avec l'AI Act, imposant des obligations legales assorties de sanctions financieres importantes.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "claim2": {"text": "L'Inde adopte une approche strategique non contraignante via le rapport NITI Aayog, privilegiant l'innovation et les partenariats public-prive avec le concept #AIforAll.", "doc_id": "16_India_AI_Strategy_NITI_Aayog_da5404db"},
+        "tension_nature": "philosophical_difference",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["01_EU_AI_Act_Final_2024_9f9d6bb7", "16_India_AI_Strategy_NITI_Aayog_da5404db"]
       }
     },
     {
-      "question_id": "T2_EXP_0010",
+      "question_id": "T2_REG_HUM_0010",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Quels composants SAP supportent les logon tickets pour le Single Sign-On via navigateur web ?",
+      "source": "human_derived",
+      "question": "Les guides Bird & Bird et TwoBirds donnent-ils les memes recommandations pratiques pour la conformite a l'AI Act ?",
       "ground_truth": {
-        "claim1": {"text": "ISF supports the use of logon tickets for SSO when using a Web browser as the front-end client.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "claim2": {"text": "SAP S/4HANA supports the use of logon tickets for SSO when using a Web browser as the front-end client.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["ISF", "SSO", "SAP S/4HANA"]
+        "claim1": {"text": "Le guide Bird & Bird propose une analyse juridique detaillee des obligations par categorie d'acteur (fournisseur, deployeur, importateur).", "doc_id": "bird_bird_ai_act_guide_4b8be131"},
+        "claim2": {"text": "Le guide TwoBirds 2026 fournit une mise a jour tenant compte de l'echelonnement des delais d'application et des premieres orientations de l'AI Office.", "doc_id": "20_TwoBirds_EU_AI_Act_Guide_2026_9b8e7105"},
+        "tension_nature": "complementarity",
+        "has_real_tension": false
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["bird_bird_ai_act_guide_4b8be131", "20_TwoBirds_EU_AI_Act_Guide_2026_9b8e7105"]
       }
     },
     {
-      "question_id": "T2_EXP_0011",
+      "question_id": "T2_REG_HUM_0011",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Le support SSO par logon tickets est-il spécifique à ISF ou à l'ensemble de SAP S/4HANA ?",
+      "source": "human_derived",
+      "question": "Le RGPD et la CCPA traitent-ils differemment les donnees des employes ?",
       "ground_truth": {
-        "claim1": {"text": "ISF supports the use of logon tickets for SSO when using a Web browser as the front-end client.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "claim2": {"text": "SAP S/4HANA supports the use of logon tickets for SSO when using a Web browser as the front-end client.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["ISF", "SSO"]
+        "claim1": {"text": "Le RGPD s'applique pleinement aux donnees des employes avec les memes droits et protections que pour tout traitement de donnees personnelles.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA originale exemptait largement les informations personnelles des employes de la plupart de ses dispositions, exemption progressivement reduite par le CPRA.", "doc_id": "14_CCPA_2026_Effective_8d57eba9"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "14_CCPA_2026_Effective_8d57eba9"]
       }
     },
     {
-      "question_id": "T2_EXP_0012",
+      "question_id": "T2_REG_HUM_0012",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Cross-Application Time Sheet (CA-TS) et SAP E-Recruiting supportent-ils tous les deux le SSO par logon tickets ?",
+      "source": "human_derived",
+      "question": "L'EDPB et l'AEPD ont-ils des positions differentes sur l'utilisation de l'IA pour le traitement de donnees personnelles ?",
       "ground_truth": {
-        "claim1": {"text": "Cross-Application Time Sheet (CA-TS) supports the use of logon tickets for SSO when using a Web browser as the frontend client.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "claim2": {"text": "SAP E-Recruiting supports the use of logon tickets for SSO when using a Web browser as the frontend client.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["CA-TS", "SSO", "E-Recruiting"]
+        "claim1": {"text": "L'EDPB insiste sur les risques du web scraping et des hallucinations des LLMs comme menaces majeures pour la vie privee.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe"},
+        "claim2": {"text": "Le guide AEPD met davantage l'accent sur les mesures pratiques de mise en conformite (AIPD, privacy by design, transparence algorithmique) pour permettre l'utilisation de l'IA.", "doc_id": "aepd_gdpr_ai_guide_eba2beca"},
+        "tension_nature": "nuance",
+        "has_real_tension": false
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["edpb_ai_privacy_risks_llms_f74e4bbe", "aepd_gdpr_ai_guide_eba2beca"]
       }
     },
     {
-      "question_id": "T2_EXP_0013",
+      "question_id": "T2_REG_HUM_0013",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Dans le scénario SUMA, la procédure de planning du primary control cycle est-elle indépendante ou identique à celle du secondary control cycle ?",
+      "source": "human_derived",
+      "question": "La notion de 'donnees personnelles' du RGPD et celle d''informations personnelles' de la CCPA couvrent-elles le meme perimetre ?",
       "ground_truth": {
-        "claim1": {"text": "The type of planning procedure assigned to the primary control cycle is independent of the secondary control cycle's planning procedure.", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"},
-        "claim2": {"text": "Planning procedure assigned to the primary control cycle and secondary control cycles are the same in SUMA scenario.", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["primary control cycle", "SUMA", "control cycle"]
+        "claim1": {"text": "Le RGPD definit les donnees a caractere personnel comme toute information se rapportant a une personne physique identifiee ou identifiable.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA definit les informations personnelles comme incluant aussi les informations liees a un menage (household), et non seulement a une personne physique.", "doc_id": "13_CCPA_Statute_0beb83cc"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "13_CCPA_Statute_0beb83cc"]
       }
     },
     {
-      "question_id": "T2_EXP_0014",
+      "question_id": "T2_REG_HUM_0014",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Comment fonctionne le replenishment planning pour un primary control cycle avec takt-based planning ? Le two-level replenishment est-il possible ?",
+      "source": "human_derived",
+      "question": "La version parlementaire et la version finale de l'AI Act different-elles sur les exemptions pour les forces de l'ordre ?",
       "ground_truth": {
-        "claim1": {"text": "For a primary control cycle with takt-based planning procedure, two-level replenishment planning through supermarket is possible.", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"},
-        "claim2": {"text": "Planning procedure assigned to the primary control cycle and secondary control cycles are the same in SUMA scenario.", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["primary control cycle", "SUMA"]
+        "claim1": {"text": "Les amendements du Parlement europeen proposaient une interdiction totale de la reconnaissance biometrique a distance en temps reel dans les espaces publics, sans exception pour les forces de l'ordre.", "doc_id": "05_EU_Parliament_AI_Act_Amendments_2023_1ea9aff7"},
+        "claim2": {"text": "La version finale de l'AI Act prevoit des exceptions limitees pour les forces de l'ordre (recherche de victimes, prevention de menaces terroristes, localisation de suspects) avec autorisation judiciaire prealable.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["05_EU_Parliament_AI_Act_Amendments_2023_1ea9aff7", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
       }
     },
     {
-      "question_id": "T2_EXP_0015",
+      "question_id": "T2_REG_HUM_0015",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Quelles sont les différences entre les Security Guides 2022 et 2023 concernant la communication dans SAP Dispute Management ?",
+      "source": "human_derived",
+      "question": "Le NIST AI RMF et l'AI Act ont-ils une vision differente de la gouvernance de l'IA ?",
       "ground_truth": {
-        "claim1": {"text": "SAP Dispute Management uses synchronous BAPI calls in a one-system scenario.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "claim2": {"text": "RFC calls take place from the Accounts Receivable system to the Dispute Case Processing system and vice versa in the ALE scenario of SAP Dispute Management.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["SAP Dispute Management", "BAPI", "RFC"]
+        "claim1": {"text": "Le NIST AI RMF propose une fonction Govern axee sur la culture organisationnelle, les processus internes et la participation des parties prenantes.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5"},
+        "claim2": {"text": "L'AI Act impose une gouvernance par des autorites nationales de surveillance du marche et le Bureau europeen de l'IA (AI Office), avec des pouvoirs d'investigation et de sanction.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "philosophical_difference",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["10_NIST_AI_Risk_Management_Framework_7576edb5", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
       }
     },
     {
-      "question_id": "T2_EXP_0016",
+      "question_id": "T2_REG_HUM_0016",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "La transaction CMM_DEL_DOC_VERSIONS est-elle liée à VLOGP ou à PeriodEnd Valuation pour Commodity Procurement ?",
+      "source": "human_derived",
+      "question": "Le RGPD et la CCPA imposent-ils les memes obligations aux sous-traitants ?",
       "ground_truth": {
-        "claim1": {"text": "Transaction CMM_DEL_DOC_VERSIONS is used to display information about stored personal data in the versioned persistency of logistics pricing data (VLOGP) of Commodity Procurement and Commodity Sales.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "claim2": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the PeriodEnd Valuation (PEV).", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["CMM_DEL_DOC_VERSIONS", "VLOGP", "PEV"]
+        "claim1": {"text": "Le RGPD impose des obligations directes aux sous-traitants (processors), incluant la tenue d'un registre, la notification des violations, et la designation d'un DPO si necessaire.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA impose des obligations aux service providers essentiellement contractuelles : interdiction d'utiliser les donnees a d'autres fins que le service, sans obligations directes equivalentes.", "doc_id": "13_CCPA_Statute_0beb83cc"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "13_CCPA_Statute_0beb83cc"]
       }
     },
     {
-      "question_id": "T2_EXP_0017",
+      "question_id": "T2_REG_HUM_0017",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Quel est le sens des appels entre Accounts Receivable et Dispute Case Processing ? Unidirectionnel ou bidirectionnel ?",
+      "source": "human_derived",
+      "question": "Les deux versions de l'AI Act dans le corpus (texte final et version Parlement) sont-elles coherentes sur le seuil de risque systemique des GPAI ?",
       "ground_truth": {
-        "claim1": {"text": "This destination is used for synchronous and asynchronous BAPI calls from the Accounts Receivable system to the Dispute Case Processing system.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "claim2": {"text": "There are calls from the Dispute Case Processing system to the system for Accounts Receivable Accounting.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["Accounts Receivable system", "Dispute Case Processing system"]
+        "claim1": {"text": "La version finale definit le risque systemique par un seuil de puissance de calcul de 10^25 FLOPS.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "claim2": {"text": "La version du Parlement adoptee en 2024 reprend le meme seuil de 10^25 FLOPS pour les modeles a risque systemique.", "doc_id": "26_EU_AI_Act_Parliament_Adopted_51eb24c1"},
+        "tension_nature": "alignment",
+        "has_real_tension": false
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["01_EU_AI_Act_Final_2024_9f9d6bb7", "26_EU_AI_Act_Parliament_Adopted_51eb24c1"]
       }
     },
     {
-      "question_id": "T2_EXP_0018",
+      "question_id": "T2_REG_HUM_0018",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "SAP Field Service Management nécessite-t-il SAP Cloud Connector pour l'intégration ou peut-il se connecter directement à ECC ?",
+      "source": "human_derived",
+      "question": "Le RGPD et l'AI Act abordent-ils differemment la question de la transparence algorithmique ?",
       "ground_truth": {
-        "claim1": {"text": "SAP Field Service Management enables field service organizations to integrate with SAP ECC software.", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
-        "claim2": {"text": "SAP Field Service Management is integrated with Service using SAP Cloud Integration and SAP Cloud Connector.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["SAP Field Service Management", "SAP Cloud Connector"]
+        "claim1": {"text": "Le RGPD exige la transparence sous forme d'informations sur la logique sous-jacente et les consequences envisagees pour les decisions automatisees (article 22).", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "L'AI Act va plus loin en exigeant des instructions d'utilisation detaillees, la documentation technique complete, et un marquage lisible par machine du contenu genere par IA.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "complementarity",
+        "has_real_tension": false
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
       }
     },
     {
-      "question_id": "T2_EXP_0019",
+      "question_id": "T2_REG_HUM_0019",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Comment les données personnelles sont-elles gérées entre les versions du Security Guide pour le module Commodity Sales ? Y a-t-il eu des changements ?",
+      "source": "human_derived",
+      "question": "La CCPA et le RGPD traitent-ils differemment la vente de donnees personnelles ?",
       "ground_truth": {
-        "claim1": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the BRFplus Decision Table Entries for CPE Formula Assembly.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "claim2": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the PeriodEnd Valuation (PEV).", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["Commodity Procurement and Commodity Sales"]
+        "claim1": {"text": "La CCPA definit specifiquement la 'sale' de donnees et accorde un droit d'opt-out de la vente et du partage des informations personnelles.", "doc_id": "13_CCPA_Statute_0beb83cc"},
+        "claim2": {"text": "Le RGPD n'a pas de concept equivalent de 'vente de donnees'. Tout transfert a un tiers requiert une base legale et le consentement, independamment de la contrepartie financiere.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "tension_nature": "conceptual_difference",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["13_CCPA_Statute_0beb83cc", "Full_GDPR_Text_bd84e63f"]
       }
     },
     {
-      "question_id": "T2_EXP_0020",
+      "question_id": "T2_REG_HUM_0020",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Quelle est la direction des communications IDoc dans le scénario ALE du Dispute Management ? Du système AR vers DCP ou l'inverse ?",
+      "source": "human_derived",
+      "question": "L'EDPB et la version finale de l'AI Act sont-ils alignes sur le traitement des donnees biometriques par l'IA ?",
       "ground_truth": {
-        "claim1": {"text": "IDocs are sent to the Dispute Case Processing system from the Accounts Receivable system when items are cleared.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "claim2": {"text": "IDocs are sent to the Dispute Case Processing system from the Accounts Receivable system when the clearing of items is reset.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["IDocs", "Dispute Case Processing system", "ALE"]
+        "claim1": {"text": "L'EDPB analyse les risques specifiques des LLMs pour les donnees biometriques, insistant sur les risques de re-identification et la necessite d'une base legale solide.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe"},
+        "claim2": {"text": "L'AI Act interdit la categorisation biometrique basee sur des donnees sensibles et restreint fortement la reconnaissance biometrique a distance en temps reel.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "complementarity",
+        "has_real_tension": false
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["edpb_ai_privacy_risks_llms_f74e4bbe", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
       }
     },
     {
-      "question_id": "T2_EXP_0021",
+      "question_id": "T2_REG_HUM_0021",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Y a-t-il des incohérences dans la documentation SAP concernant les méthodes d'intégration de SAP Dispute Management ?",
+      "source": "human_derived",
+      "question": "Le RGPD et la CCPA imposent-ils les memes delais pour repondre aux demandes des personnes/consommateurs ?",
       "ground_truth": {
-        "claim1": {"text": "SAP Dispute Management uses synchronous BAPI calls in a one-system scenario.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "claim2": {"text": "SAP Dispute Management uses asynchronous BAPI calls between the systems involved.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["SAP Dispute Management"]
+        "claim1": {"text": "Le RGPD impose un delai d'un mois, prorogeable de deux mois supplementaires pour les demandes complexes.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA impose un delai de 45 jours, prorogeable de 45 jours supplementaires si necessaire.", "doc_id": "14_CCPA_2026_Effective_8d57eba9"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "14_CCPA_2026_Effective_8d57eba9"]
       }
     },
     {
-      "question_id": "T2_EXP_0022",
+      "question_id": "T2_REG_HUM_0022",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Le renommage de S/4HANA Cloud Private Edition en Cloud ERP Private Edition a-t-il un impact sur les fonctionnalités analytics documentées ?",
+      "source": "human_derived",
+      "question": "L'approche indienne et celle du NIST sur la gestion des risques de l'IA sont-elles similaires ?",
       "ground_truth": {
-        "claim1": {"text": "SAP S/4HANA Cloud Private Edition is the only analytics solution to bring together BI, Planning, and Predictive in the cloud", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
-        "claim2": {"text": "SAP Cloud ERP Private Edition is the only analytics solution to bring together BI, Planning, and Predictive in the cloud", "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["SAP S/4HANA Cloud Private Edition", "SAP Cloud ERP Private Edition", "BI", "Planning"]
+        "claim1": {"text": "Le NIST propose un cadre structure de gestion des risques en quatre fonctions (Govern, Map, Measure, Manage) avec une granularite fine.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5"},
+        "claim2": {"text": "La strategie indienne adopte une approche sectorielle des risques, axee sur les cinq secteurs prioritaires (sante, agriculture, education, villes intelligentes, transport) plutot qu'un cadre transversal.", "doc_id": "16_India_AI_Strategy_NITI_Aayog_da5404db"},
+        "tension_nature": "philosophical_difference",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["10_NIST_AI_Risk_Management_Framework_7576edb5", "16_India_AI_Strategy_NITI_Aayog_da5404db"]
       }
     },
     {
-      "question_id": "T2_EXP_0023",
+      "question_id": "T2_REG_HUM_0023",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Quels modules SAP utilisent le SSO via logon tickets pour l'accès navigateur ? La liste est-elle la même entre les versions du Security Guide ?",
+      "source": "human_derived",
+      "question": "Le RGPD et l'EDPB sont-ils alignes sur la base legale pour l'entrainement de modeles d'IA ?",
       "ground_truth": {
-        "claim1": {"text": "ISF supports the use of logon tickets for SSO when using a Web browser as the front-end client.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "claim2": {"text": "SAP E-Recruiting supports the use of logon tickets for SSO when using a Web browser as the frontend client.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["ISF", "E-Recruiting", "SSO"]
+        "claim1": {"text": "Le RGPD enumere six bases legales possibles pour tout traitement, sans disposition specifique a l'IA.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "L'EDPB analyse specifiquement l'applicabilite de l'interet legitime (article 6(1)(f)) pour l'entrainement de LLMs, avec des conditions et limitations pratiques detaillees.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe"},
+        "tension_nature": "clarification",
+        "has_real_tension": false
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "edpb_ai_privacy_risks_llms_f74e4bbe"]
       }
     },
     {
-      "question_id": "T2_EXP_0024",
+      "question_id": "T2_REG_HUM_0024",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Pour le scénario SUMA dans SAP Production Planning, le planning du control cycle primaire et secondaire doit-il être aligné ?",
+      "source": "human_derived",
+      "question": "La CCPA version 2026 et le CPRA ont-ils des dispositions differentes sur la prise de decision automatisee ?",
       "ground_truth": {
-        "claim1": {"text": "The type of planning procedure assigned to the primary control cycle is independent of the secondary control cycle's planning procedure.", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"},
-        "claim2": {"text": "Planning procedure assigned to the primary control cycle and secondary control cycles are the same in SUMA scenario.", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["SUMA", "primary control cycle", "secondary control cycles"]
+        "claim1": {"text": "La CCPA 2026 effective inclut des droits d'opt-out de la prise de decision automatisee et du profilage avec des exigences de transparence.", "doc_id": "14_CCPA_2026_Effective_8d57eba9"},
+        "claim2": {"text": "Le CPRA etablit les fondements de ces droits en creant la California Privacy Protection Agency avec pouvoir reglementaire pour definir les regles specifiques.", "doc_id": "15_CPRA_Act_e9f88d3e"},
+        "tension_nature": "evolution",
+        "has_real_tension": false
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["14_CCPA_2026_Effective_8d57eba9", "15_CPRA_Act_e9f88d3e"]
       }
     },
     {
-      "question_id": "T2_EXP_0025",
+      "question_id": "T2_REG_HUM_0025",
       "task": "T2_contradictions",
-      "source": "human_expert_v2",
-      "question": "Quels changements y a-t-il eu entre les Security Guides 2022 et 2023 pour le stockage des données personnelles dans le module Commodity ?",
+      "source": "human_derived",
+      "question": "L'AI Act et le RGPD donnent-ils des definitions differentes de la notion de 'fournisseur' et de 'responsable du traitement' pour les systemes d'IA ?",
       "ground_truth": {
-        "claim1": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the Versioned Persistency of Logistics Pricing Data (VLOGP).", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
-        "claim2": {"text": "Commodity Procurement and Commodity Sales provide information about stored personal data in the BRFplus Decision Table Entries for CPE Formula Assembly.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
-        "tension_nature": "CONTRADICTS",
-        "entities": ["Commodity Procurement and Commodity Sales", "VLOGP", "BRFplus"]
+        "claim1": {"text": "Le RGPD definit le responsable du traitement comme celui qui determine les finalites et les moyens du traitement des donnees personnelles.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "L'AI Act definit le fournisseur (provider) comme celui qui developpe ou fait developper un systeme d'IA, un role qui ne correspond pas necessairement a celui de responsable du traitement.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "conceptual_difference",
+        "has_real_tension": true
       },
       "grading_rules": {
-        "must_surface_both_sides": true,
-        "must_not_arbitrate_silently": true,
-        "must_cite_both_sources": true,
-        "expected_tension_type": "CONTRADICTS"
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0026",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les penalites de la CCPA et celles du RGPD pour les violations de donnees sont-elles du meme ordre de grandeur ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD prevoit des amendes administratives pouvant atteindre 20 millions d'euros ou 4% du CA mondial annuel.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA prevoit des penalites civiles de 2 500 dollars par violation non intentionnelle et 7 500 dollars par violation intentionnelle.", "doc_id": "13_CCPA_Statute_0beb83cc"},
+        "tension_nature": "scale_difference",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "13_CCPA_Statute_0beb83cc"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0027",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "L'AI Act et les guidelines EDPB sont-ils coherents sur la gestion des risques des systemes d'IA generative ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act impose des obligations de transparence et de marquage du contenu genere, avec un regime specifique pour les GPAI a risque systemique.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "claim2": {"text": "L'EDPB souleve des preoccupations supplementaires non couvertes par l'AI Act, comme les risques specifiques de memorisation et regurgitation de donnees personnelles par les LLMs.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe"},
+        "tension_nature": "complementarity",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["01_EU_AI_Act_Final_2024_9f9d6bb7", "edpb_ai_privacy_risks_llms_f74e4bbe"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0028",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le RGPD et la CCPA traitent-ils differemment le droit d'acces aux donnees collectees ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD accorde un droit d'acces complet aux donnees personnelles, y compris la logique sous-jacente des decisions automatisees.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA accorde un droit de savoir (right to know) portant sur les categories et les elements specifiques d'informations personnelles collectees, avec un historique limite aux 12 derniers mois.", "doc_id": "14_CCPA_2026_Effective_8d57eba9"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "14_CCPA_2026_Effective_8d57eba9"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0029",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "L'AI Act et l'EDPB ont-ils la meme definition de ce qui constitue un systeme d'IA a risque ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act utilise une approche categorie/annexe pour definir les systemes a haut risque (Annexe III avec 8 domaines specifiques).", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "claim2": {"text": "L'EDPB evalue les risques en termes d'impact sur les droits et libertes des personnes concernees, sans categories predefinies, suivant l'approche du RGPD.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe"},
+        "tension_nature": "methodological_difference",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["01_EU_AI_Act_Final_2024_9f9d6bb7", "edpb_ai_privacy_risks_llms_f74e4bbe"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0030",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le RGPD et la CCPA imposent-ils les memes conditions pour le traitement des donnees des enfants ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD fixe l'age du consentement a 16 ans (abaissable a 13 ans par les Etats membres) pour les services de la societe de l'information, avec autorisation parentale en dessous.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA interdit la vente de donnees des moins de 16 ans sans opt-in, et exige le consentement parental pour les moins de 13 ans, avec des amendes triplees pour les violations concernant les enfants.", "doc_id": "13_CCPA_Statute_0beb83cc"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "13_CCPA_Statute_0beb83cc"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0031",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les lignes directrices de l'EDPB sur le DSA/RGPD et celles sur les LLMs abordent-elles les memes enjeux de transparence ?",
+      "ground_truth": {
+        "claim1": {"text": "Les guidelines DSA/RGPD abordent la transparence des plateformes en ligne, le profilage a des fins publicitaires, et les recommandations algorithmiques.", "doc_id": "edpb_2025_guidelines_dsa_gdpr_interplay_dd99cf79"},
+        "claim2": {"text": "Les guidelines sur les LLMs abordent la transparence dans le contexte specifique de l'entrainement des modeles, de la collecte de donnees et de la generation de contenu.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe"},
+        "tension_nature": "complementarity",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["edpb_2025_guidelines_dsa_gdpr_interplay_dd99cf79", "edpb_ai_privacy_risks_llms_f74e4bbe"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0032",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "La notion de 'surveillance humaine' dans l'AI Act est-elle coherente avec le droit de ne pas etre soumis a une decision automatisee du RGPD ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD accorde le droit de ne pas faire l'objet d'une decision fondee exclusivement sur un traitement automatise, impliquant une intervention humaine significative.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "L'AI Act definit la surveillance humaine comme la capacite de comprendre, surveiller et interrompre le systeme, mais n'exige pas necessairement que la decision finale soit humaine.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0033",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le NIST AI RMF et l'AI Act proposent-ils des approches similaires de la 'fiabilite' (trustworthiness) de l'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le NIST identifie sept caracteristiques de trustworthiness incluant la validite, la securite, la transparence, l'equite et le respect de la vie privee, dans une approche holistique.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5"},
+        "claim2": {"text": "L'AI Act se concentre sur la conformite legale avec des exigences specifiques (precision, robustesse, cybersecurite) plutot que sur un concept integral de fiabilite.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "conceptual_difference",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["10_NIST_AI_Risk_Management_Framework_7576edb5", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0034",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "L'AI Act et le RGPD imposent-ils les memes obligations de notification aux autorites en cas d'incident ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD impose une notification de violation de donnees dans les 72 heures a l'autorite de controle.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "L'AI Act impose aux fournisseurs de signaler les incidents graves et dysfonctionnements aux autorites de surveillance du marche, sans delai fixe de 72 heures.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0035",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "La CCPA et le RGPD ont-ils les memes mecanismes d'application (enforcement) ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD est applique par des autorites de controle independantes dans chaque Etat membre, avec un mecanisme de coherence transfrontalier.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA est principalement appliquee par le procureur general de Californie et la California Privacy Protection Agency (CPPA), avec un droit d'action prive limite aux violations de donnees.", "doc_id": "14_CCPA_2026_Effective_8d57eba9"},
+        "tension_nature": "structural_difference",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "14_CCPA_2026_Effective_8d57eba9"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0036",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "L'AI Act impose-t-il une AIPD specifique alors que le RGPD a deja sa propre analyse d'impact ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD exige une analyse d'impact relative a la protection des donnees (AIPD/DPIA) pour les traitements a risque eleve.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "L'AI Act exige des deployers de systemes a haut risque une evaluation de l'impact sur les droits fondamentaux (FRIA), distincte de l'AIPD du RGPD.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "overlap",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0037",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les deux versions de texte CCPA dans le corpus sont-elles coherentes sur les droits des consommateurs ?",
+      "ground_truth": {
+        "claim1": {"text": "Le statut CCPA original (2018) definit les droits fondamentaux : droit de savoir, droit de supprimer, droit d'opt-out de la vente.", "doc_id": "13_CCPA_Statute_0beb83cc"},
+        "claim2": {"text": "La CCPA 2026 effective integre les modifications du CPRA avec des droits supplementaires : droit de corriger, droit de limiter l'utilisation des informations sensibles.", "doc_id": "14_CCPA_2026_Effective_8d57eba9"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["13_CCPA_Statute_0beb83cc", "14_CCPA_2026_Effective_8d57eba9"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0038",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le RGPD et la CCPA traitent-ils differemment les donnees rendues anonymes ou des-identifiees ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD exclut de son champ d'application les donnees anonymisees (rendues impossible a re-identifier), avec un standard strict d'anonymisation.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA definit les 'deidentified information' avec un standard technique et organisationnel plus detaille, incluant des garanties contractuelles et des processus de verification.", "doc_id": "14_CCPA_2026_Effective_8d57eba9"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "14_CCPA_2026_Effective_8d57eba9"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0039",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "L'AI Act impose-t-il des obligations de droit d'auteur pour les modeles GPAI differentes de ce que prevoit le droit existant ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act exige que les fournisseurs de GPAI mettent en place une politique de respect du droit d'auteur et publient un resume suffisamment detaille du contenu utilise pour l'entrainement.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "claim2": {"text": "Les amendements du Parlement avaient propose des obligations de transparence encore plus strictes sur les donnees d'entrainement des modeles de fondation.", "doc_id": "05_EU_Parliament_AI_Act_Amendments_2023_1ea9aff7"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["01_EU_AI_Act_Final_2024_9f9d6bb7", "05_EU_Parliament_AI_Act_Amendments_2023_1ea9aff7"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0040",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "L'EDPB dans son rapport annuel et dans ses guidelines sur les LLMs adopte-t-il un ton similaire vis-a-vis de l'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le rapport annuel 2024 de l'EDPB presente les realisations institutionnelles et la cooperation entre autorites, dans un ton factuel.", "doc_id": "edpb_2025_annual_report_2024_030da253"},
+        "claim2": {"text": "Les guidelines sur les LLMs adoptent un ton plus prescriptif, identifiant des risques specifiques et formulant des recommandations detaillees pour les responsables du traitement.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe"},
+        "tension_nature": "tone_difference",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["edpb_2025_annual_report_2024_030da253", "edpb_ai_privacy_risks_llms_f74e4bbe"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0041",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "La CCPA et le RGPD different-ils sur la notion de consentement pour les transferts de donnees a des tiers ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD exige une base legale valide pour tout transfert a un tiers, le consentement devant etre explicite pour les donnees sensibles ou les transferts internationaux.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA impose un droit d'opt-out a posteriori plutot qu'un consentement prealable, sauf pour les enfants de moins de 16 ans ou le partage d'informations sensibles.", "doc_id": "14_CCPA_2026_Effective_8d57eba9"},
+        "tension_nature": "philosophical_difference",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "14_CCPA_2026_Effective_8d57eba9"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0042",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "L'AI Act et le NIST AI RMF traitent-ils differemment la question des biais dans les systemes d'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'AI Act impose des obligations legales de gouvernance des donnees pour prevenir les biais dans les systemes a haut risque, avec un accent sur les donnees d'entrainement representatives.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "claim2": {"text": "Le NIST AI RMF adopte une approche plus large des biais, distinguant les biais statistiques, computationnels, humains et systemiques, sans imposer d'obligations legales specifiques.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5"},
+        "tension_nature": "methodological_difference",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["01_EU_AI_Act_Final_2024_9f9d6bb7", "10_NIST_AI_Risk_Management_Framework_7576edb5"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0043",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le RGPD et la CCPA imposent-ils les memes obligations de notification en cas de violation de donnees ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD impose une notification a l'autorite de controle dans les 72 heures et une notification aux personnes concernees en cas de risque eleve.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "La CCPA prevoit un droit d'action prive pour les violations de donnees non protegees, mais ne definit pas de delai specifique de notification dans le corps de la loi.", "doc_id": "13_CCPA_Statute_0beb83cc"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "13_CCPA_Statute_0beb83cc"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0044",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "L'AI Act et le RGPD traitent-ils differemment les exemptions pour la recherche scientifique ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD prevoit des derogations pour la recherche scientifique avec des garanties appropriees, permettant le traitement ulterieur de donnees.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "L'AI Act prevoit des exemptions pour les systemes d'IA utilises exclusivement a des fins de recherche et developpement scientifique avant mise sur le marche.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "complementarity",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0045",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les deux textes de l'AI Act dans le corpus (version finale et version Parlement adoptee) sont-ils identiques sur les obligations des deployeurs ?",
+      "ground_truth": {
+        "claim1": {"text": "La version finale definit les obligations des deployeurs incluant l'utilisation conforme aux instructions, la surveillance humaine, et l'analyse d'impact sur les droits fondamentaux.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "claim2": {"text": "La version du Parlement adoptee contient des formulations similaires sur les deployers avec des precisions additionnelles sur certains cas d'usage.", "doc_id": "26_EU_AI_Act_Parliament_Adopted_51eb24c1"},
+        "tension_nature": "nuance",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["01_EU_AI_Act_Final_2024_9f9d6bb7", "26_EU_AI_Act_Parliament_Adopted_51eb24c1"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0046",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "L'Inde et l'UE accordent-elles la meme priorite a l'innovation vs la regulation dans leur approche de l'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "L'UE avec l'AI Act priorise la protection des droits fondamentaux et la securite, avec un cadre reglementaire contraignant qui precede la mise sur le marche.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "claim2": {"text": "L'Inde avec la strategie NITI Aayog priorise le deploiement rapide de l'IA dans les secteurs cles pour le developpement, avec une regulation minimale pour ne pas freiner l'innovation.", "doc_id": "16_India_AI_Strategy_NITI_Aayog_da5404db"},
+        "tension_nature": "philosophical_difference",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["01_EU_AI_Act_Final_2024_9f9d6bb7", "16_India_AI_Strategy_NITI_Aayog_da5404db"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0047",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le RGPD et l'AI Act abordent-ils differemment la question des donnees d'entrainement des modeles d'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le RGPD applique ses principes generaux (base legale, minimisation, finalite) sans distinction specifique pour les donnees d'entrainement de l'IA.", "doc_id": "Full_GDPR_Text_bd84e63f"},
+        "claim2": {"text": "L'AI Act impose des exigences specifiques de gouvernance des donnees d'entrainement, validation et test pour les systemes a haut risque, incluant la representativite et l'absence de biais.", "doc_id": "01_EU_AI_Act_Final_2024_9f9d6bb7"},
+        "tension_nature": "complementarity",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["Full_GDPR_Text_bd84e63f", "01_EU_AI_Act_Final_2024_9f9d6bb7"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0048",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le NIST AI RMF et l'EDPB ont-ils la meme definition de la vie privee dans le contexte de l'IA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le NIST definit la vie privee comme une composante de la trustworthiness, couvrant les normes sociales de traitement des PII, les attentes raisonnables et les valeurs.", "doc_id": "10_NIST_AI_Risk_Management_Framework_7576edb5"},
+        "claim2": {"text": "L'EDPB applique la definition stricte du RGPD centree sur les donnees a caractere personnel, les droits des personnes concernees et les obligations des responsables du traitement.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe"},
+        "tension_nature": "conceptual_difference",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["10_NIST_AI_Risk_Management_Framework_7576edb5", "edpb_ai_privacy_risks_llms_f74e4bbe"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0049",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le guide AEPD et les guidelines EDPB sur les LLMs donnent-ils les memes recommandations pour l'evaluation d'impact ?",
+      "ground_truth": {
+        "claim1": {"text": "Le guide AEPD recommande une AIPD integrant l'audit algorithmique, la transparence et la protection des donnees des la conception.", "doc_id": "aepd_gdpr_ai_guide_eba2beca"},
+        "claim2": {"text": "L'EDPB dans ses guidelines LLMs detaille les risques specifiques a evaluer pour les LLMs : web scraping, hallucinations, memorisation, risques de re-identification.", "doc_id": "edpb_ai_privacy_risks_llms_f74e4bbe"},
+        "tension_nature": "complementarity",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["aepd_gdpr_ai_guide_eba2beca", "edpb_ai_privacy_risks_llms_f74e4bbe"]
+      }
+    },
+    {
+      "question_id": "T2_REG_HUM_0050",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "La CCPA version statute et la CCPA version 2026 effective sont-elles coherentes sur les seuils d'application ?",
+      "ground_truth": {
+        "claim1": {"text": "Le statut CCPA original prevoit un seuil de 25 millions de dollars de CA ou le traitement de donnees de 50 000+ consommateurs.", "doc_id": "13_CCPA_Statute_0beb83cc"},
+        "claim2": {"text": "La CCPA 2026 effective (modifiee par le CPRA) eleve le seuil de nombre de consommateurs a 100 000 menages ou appareils.", "doc_id": "14_CCPA_2026_Effective_8d57eba9"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["13_CCPA_Statute_0beb83cc", "14_CCPA_2026_Effective_8d57eba9"]
       }
     }
   ]
