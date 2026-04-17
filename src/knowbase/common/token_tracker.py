@@ -68,6 +68,23 @@ class TokenTracker:
         # Burst (EC2 Spot vLLM)
         "burst/Qwen/Qwen3-14B-AWQ": ModelPricing("burst/Qwen/Qwen3-14B-AWQ", 0.0002, 0.0002, "burst"),
         "burst/Qwen/Qwen2.5-14B-Instruct-AWQ": ModelPricing("burst/Qwen/Qwen2.5-14B-Instruct-AWQ", 0.0002, 0.0002, "burst"),
+
+        # DeepInfra (cloud inference, prix per 1k tokens)
+        # Source : https://deepinfra.com/pricing (2026-04)
+        # Les keys utilisent le prefix 'deepinfra/' comme logge par llm_router (ligne 1491)
+        "deepinfra/Qwen/Qwen2.5-72B-Instruct": ModelPricing("deepinfra/Qwen/Qwen2.5-72B-Instruct", 0.00012, 0.00039, "deepinfra"),
+        "deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507": ModelPricing("deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507", 0.000071, 0.00010, "deepinfra"),
+        "deepinfra/Qwen/Qwen3-14B": ModelPricing("deepinfra/Qwen/Qwen3-14B", 0.00004, 0.00012, "deepinfra"),
+        "deepinfra/Qwen/Qwen2.5-7B-Instruct": ModelPricing("deepinfra/Qwen/Qwen2.5-7B-Instruct", 0.00002, 0.00006, "deepinfra"),
+        # Ollama local (compute CPU/GPU local, pas de cout API)
+        "ollama/qwen2.5:14b": ModelPricing("ollama/qwen2.5:14b", 0.0, 0.0, "ollama"),
+        "ollama/qwen2.5:7b": ModelPricing("ollama/qwen2.5:7b", 0.0, 0.0, "ollama"),
+        # vLLM burst (EC2 spot, cost suivi separement via AWS API)
+        "vllm/Qwen/Qwen2.5-14B-Instruct-AWQ": ModelPricing("vllm/Qwen/Qwen2.5-14B-Instruct-AWQ", 0.0002, 0.0002, "vllm"),
+        # Anthropic via Claude API directement (prix per 1k tokens)
+        "claude-haiku-4-5-20251001": ModelPricing("claude-haiku-4-5-20251001", 0.001, 0.005, "anthropic"),
+        "claude-sonnet-4-6": ModelPricing("claude-sonnet-4-6", 0.003, 0.015, "anthropic"),
+        "claude-opus-4-7": ModelPricing("claude-opus-4-7", 0.015, 0.075, "anthropic"),
     }
 
     def __init__(self, log_file: Optional[Path] = None):

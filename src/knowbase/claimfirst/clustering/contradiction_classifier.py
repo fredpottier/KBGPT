@@ -219,7 +219,9 @@ class ContradictionClassifier:
                 count=len(llm_inputs), pairs_json=pairs_json
             )
 
-            from knowbase.common.llm_router import complete_metadata_extraction
+            # Note : utilise knowledge_extraction (Qwen2.5-72B via DeepInfra) plutot que
+            # metadata_extraction (gpt-4o, sujet aux 429). PR1 investigation B.
+            from knowbase.common.llm_router import complete_knowledge_extraction
 
             messages = [
                 {"role": "system", "content": CLASSIFIER_SYSTEM.strip()},
@@ -227,8 +229,9 @@ class ContradictionClassifier:
             ]
 
             try:
-                response = complete_metadata_extraction(
+                response = complete_knowledge_extraction(
                     messages=messages,
+                    temperature=0.1,
                     max_tokens=2000,
                 )
                 parsed = self._parse_response(response, len(llm_pairs))

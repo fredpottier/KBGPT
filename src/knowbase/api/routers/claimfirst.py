@@ -15,6 +15,7 @@ Date: 2026-02-03
 """
 
 import logging
+import os
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 
@@ -140,6 +141,36 @@ class ClaimFirstStatsResponse(BaseModel):
 
 
 # =============================================================================
+# Tension Classification Schemas (PR1 — rescue classifier orphelin)
+# =============================================================================
+
+
+class TensionStatsSnapshot(BaseModel):
+    """Snapshot des statistiques de contradictions à un instant donné."""
+    total: int = 0
+    reviewed: int = 0
+    unreviewed: int = 0
+    by_nature: Dict[str, int] = Field(default_factory=dict)
+    by_level: Dict[str, int] = Field(default_factory=dict)
+
+
+class ClassifyTensionsResponse(BaseModel):
+    """Rapport avant/après d'une passe de classification des contradictions."""
+    before: TensionStatsSnapshot
+    after: TensionStatsSnapshot
+    processed: int = Field(0, description="Nombre de paires traitées dans cette passe")
+    batches: int = Field(0, description="Nombre de batches LLM exécutés")
+    elapsed_seconds: float = 0.0
+    delta_reviewed: int = Field(0, description="Augmentation du compteur reviewed")
+    top_natures: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Top 5 tension_nature par count sur le snapshot après",
+    )
+    hard_contradictions: int = Field(0, description="Count tension_level='hard' après passage")
+    soft_contradictions: int = Field(0, description="Count tension_level='soft' après passage")
+
+
+# =============================================================================
 # Temporal Query Schemas (Applicability Axis)
 # =============================================================================
 
@@ -259,7 +290,7 @@ async def get_claimfirst_status(
             node_queries = {
                 "claims": "MATCH (n:Claim {tenant_id: $tid}) RETURN count(n) as c",
                 "entities": "MATCH (n:EntityClaimFirst {tenant_id: $tid}) RETURN count(n) as c",
-                "facets": "MATCH (n:Facet {tenant_id: $tid}) RETURN count(n) as c",
+                "facets": "MATCH (n:Facet {tenant_id: $tid}) WHERE n.lifecycle IS NULL OR n.lifecycle <> 'deprecated' RETURN count(n) as c",
                 "clusters": "MATCH (n:ClaimCluster {tenant_id: $tid}) RETURN count(n) as c",
                 # Subject Resolution (INV-8, INV-9)
                 "doc_contexts": "MATCH (n:DocumentContext {tenant_id: $tid}) RETURN count(n) as c",
@@ -703,10 +734,11 @@ async def get_claimfirst_stats(
             except Exception:
                 pass
 
-            # Facets by kind
+            # Facets by kind (exclut les deprecated)
             try:
                 result = session.run("""
                     MATCH (f:Facet {tenant_id: $tid})
+                    WHERE f.lifecycle IS NULL OR f.lifecycle <> 'deprecated'
                     RETURN f.facet_kind as kind, count(f) as cnt
                 """, tid=tenant_id)
                 for record in result:
@@ -826,6 +858,123 @@ async def process_all_documents(
         status="queued",
         total=len(doc_ids),
     )
+
+
+# =============================================================================
+# Tension Classification Endpoint (PR1 — rescue classifier orphelin)
+# =============================================================================
+
+
+@router.post(
+    "/classify-tensions",
+    response_model=ClassifyTensionsResponse,
+    summary="Classifie les contradictions existantes (backfill)",
+    description="""
+    Passe le `ContradictionClassifier` sur les relations `CONTRADICTS` non classifiées
+    (`tension_level IS NULL`). Enrichit les arêtes avec `tension_level`,
+    `tension_nature`, `explanation`, et les flags de diffusion.
+
+    **Cas d'usage** : rattrapage initial sur les CONTRADICTS créées avant le branchement
+    du classifier dans le pipeline. Idempotent (ne repasse pas sur les reviewed).
+
+    **Attention** : synchrone, peut prendre plusieurs minutes selon le volume.
+    """,
+)
+async def classify_tensions(
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+    batch_size: int = Query(default=5, ge=1, le=20, description="Taille des batches LLM"),
+    limit: int = Query(default=300, ge=1, le=1000, description="Nombre max de paires à traiter"),
+) -> ClassifyTensionsResponse:
+    """Backfill de classification des contradictions."""
+    import time
+    from neo4j import GraphDatabase
+
+    from knowbase.claimfirst.clustering.contradiction_classifier import (
+        ContradictionClassifier,
+    )
+
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+    neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+    neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+
+    driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+    try:
+        classifier = ContradictionClassifier(driver, batch_size=batch_size)
+
+        # Snapshot avant
+        before_raw = classifier.get_stats(tenant_id=tenant_id)
+        before = TensionStatsSnapshot(
+            total=before_raw.get("total", 0),
+            reviewed=before_raw.get("reviewed", 0),
+            unreviewed=before_raw.get("unreviewed", 0),
+            by_nature=before_raw.get("by_nature", {}),
+            by_level=before_raw.get("by_level", {}),
+        )
+
+        logger.info(
+            f"[ClaimFirst] classify-tensions lancé par {admin.get('email', 'admin')}: "
+            f"{before.unreviewed} paires à classifier (limit={limit})"
+        )
+
+        # Override temporaire du limit de load_unreviewed_pairs via classify_all qui
+        # utilise 200 par défaut. Ici on expose un param explicite pour flexibilité.
+        start = time.time()
+        all_pairs = classifier.load_unreviewed_pairs(tenant_id=tenant_id, limit=limit)
+        processed = 0
+        batch_count = 0
+        if all_pairs:
+            for i in range(0, len(all_pairs), batch_size):
+                batch = all_pairs[i : i + batch_size]
+                classifier.classify_batch(batch, dry_run=False)
+                processed += len(batch)
+                batch_count += 1
+        elapsed = time.time() - start
+
+        # Snapshot après
+        after_raw = classifier.get_stats(tenant_id=tenant_id)
+        after = TensionStatsSnapshot(
+            total=after_raw.get("total", 0),
+            reviewed=after_raw.get("reviewed", 0),
+            unreviewed=after_raw.get("unreviewed", 0),
+            by_nature=after_raw.get("by_nature", {}),
+            by_level=after_raw.get("by_level", {}),
+        )
+
+        # Top 5 natures (excluant unclassified et unknown qui polluent l'affichage)
+        top_natures_raw = sorted(
+            after.by_nature.items(),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        top_natures = [
+            {"nature": nat, "count": cnt}
+            for nat, cnt in top_natures_raw[:5]
+        ]
+
+        response = ClassifyTensionsResponse(
+            before=before,
+            after=after,
+            processed=processed,
+            batches=batch_count,
+            elapsed_seconds=round(elapsed, 2),
+            delta_reviewed=after.reviewed - before.reviewed,
+            top_natures=top_natures,
+            hard_contradictions=after.by_level.get("hard", 0),
+            soft_contradictions=after.by_level.get("soft", 0),
+        )
+
+        logger.info(
+            f"[ClaimFirst] classify-tensions terminé: {processed} traitées en {elapsed:.1f}s, "
+            f"delta_reviewed={response.delta_reviewed}, hard={response.hard_contradictions}, "
+            f"soft={response.soft_contradictions}"
+        )
+
+        return response
+
+    finally:
+        driver.close()
 
 
 # =============================================================================
