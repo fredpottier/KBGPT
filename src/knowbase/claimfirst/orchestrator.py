@@ -149,6 +149,7 @@ class ClaimFirstOrchestrator:
             max_entity_words=6,  # Noms marketing SAP font parfois 6 mots
         )
         self.entity_canonicalizer = EntityCanonicalizer(tenant_id=tenant_id)
+        self.noun_chunk_extractor = None  # Lazy init (spaCy models loaded on first use)
         self.passage_linker = PassageLinker()
         self.entity_linker = EntityLinker()
         self.facet_matcher = FacetMatcher()
@@ -231,6 +232,21 @@ class ClaimFirstOrchestrator:
             f"status={doc_context.resolution_status.value}"
         )
 
+        # Phase 0.5c : Detection de langue du document via fasttext
+        # Utilise les 3 premiers passages (texte long = detection fiable)
+        if not doc_context.language:
+            try:
+                from knowbase.common.language_detector import detect_language
+
+                sample_text = " ".join(p.text for p in passages[:3] if p.text)[:2000]
+                if sample_text:
+                    lang = detect_language(sample_text, min_confidence=0.70)
+                    if lang:
+                        doc_context.language = lang
+                        logger.info(f"  → Language detected: {lang}")
+            except Exception as e:
+                logger.debug(f"  → Language detection failed (non-blocking): {e}")
+
         # Phase 0.5b: Valider les nouveaux sujets via LLM (quality gate)
         new_created = [a for a in new_anchors if a.subject_id not in existing_subject_ids]
         if new_created:
@@ -287,6 +303,21 @@ class ClaimFirstOrchestrator:
             )
         else:
             logger.info("  → ComparableSubject: abstained or not resolved")
+
+        # Phase 0.56: Fallback promotion status
+        # Si primary_subject + subject_ids sont populés mais status reste UNRESOLVED
+        # (ComparableSubject a abstenu), promouvoir à RESOLVED. Un doc avec sujet
+        # identifié par le LLM ne devrait pas etre classe "unresolved".
+        if (
+            doc_context.primary_subject
+            and doc_context.subject_ids
+            and doc_context.resolution_status == ResolutionStatus.UNRESOLVED
+        ):
+            doc_context.resolution_status = ResolutionStatus.RESOLVED
+            logger.info(
+                "  → Phase 0.56: promoted to RESOLVED "
+                "(primary_subject + subject_ids present)"
+            )
 
         # Phase 0.6: Build applicability frame (evidence-locked, replaces AxisDetector)
         logger.info("[OSMOSE:ClaimFirst] Phase 0.6: Building applicability frame...")
@@ -388,6 +419,67 @@ class ClaimFirstOrchestrator:
             tenant_id=tenant_id,
         )
         logger.info(f"  → {len(entities)} entities extracted")
+
+        # Phase 2.1: NounChunk extraction (domain-agnostic, text-anchored)
+        # Complète l'EntityExtractor regex avec des noun chunks spaCy pour
+        # les claims sans entité — résout le problème des corpus non-techniques.
+        logger.info("[OSMOSE:ClaimFirst] Phase 2.1: NounChunk entity extraction...")
+        claims_without_entity = [
+            c for c in claims
+            if c.claim_id not in claim_entity_map or not claim_entity_map[c.claim_id]
+        ]
+        if claims_without_entity:
+            try:
+                from knowbase.claimfirst.extractors.noun_chunk_extractor import NounChunkExtractor
+
+                if self.noun_chunk_extractor is None:
+                    # Charger les domain_terms du pack actif
+                    domain_terms = set()
+                    try:
+                        from knowbase.domain_packs.registry import get_pack_registry
+                        registry = get_pack_registry()
+                        for pack in registry.get_active_packs(tenant_id):
+                            import json as _json
+                            from pathlib import Path
+                            for ctx_path in [
+                                Path(__file__).parent.parent / "domain_packs" / pack.name / "context_defaults.json",
+                                Path(f"/data/packs/{pack.name}/context_defaults.json"),
+                            ]:
+                                if ctx_path.exists():
+                                    ctx = _json.loads(ctx_path.read_text(encoding="utf-8"))
+                                    domain_terms.update(ctx.get("domain_terms", []))
+                                    domain_terms.update(ctx.get("common_acronyms", {}).keys())
+                                    break
+                    except Exception:
+                        pass
+
+                    self.noun_chunk_extractor = NounChunkExtractor(domain_terms=domain_terms)
+
+                # Construire l'index des entités déjà extraites
+                existing_index = {e.normalized_name: e.entity_id for e in entities}
+
+                nc_entities, nc_links = self.noun_chunk_extractor.extract_from_claims(
+                    claims=claims_without_entity,
+                    tenant_id=tenant_id,
+                    existing_entity_index=existing_index,
+                )
+
+                # Fusionner avec les résultats existants
+                entities.extend(nc_entities)
+                for claim_id, entity_id in nc_links:
+                    if claim_id not in claim_entity_map:
+                        claim_entity_map[claim_id] = []
+                    claim_entity_map[claim_id].append(entity_id)
+
+                logger.info(
+                    f"  → {len(nc_entities)} new noun-chunk entities, "
+                    f"{len(nc_links)} new links "
+                    f"(from {len(claims_without_entity)} orphan claims)"
+                )
+            except Exception as e:
+                logger.warning(f"  → NounChunk extraction skipped: {e}")
+        else:
+            logger.info("  → 0 orphan claims, noun-chunk extraction skipped")
 
         # Phase 2.5: Canonicaliser les Entities (LLM-based fusion)
         logger.info("[OSMOSE:ClaimFirst] Phase 2.5: Canonicalizing entities...")
@@ -518,6 +610,26 @@ class ClaimFirstOrchestrator:
         if renamed_count > 0:
             logger.info(f"  → {renamed_count} entités renommées via canonical aliases")
 
+        # Phase 4.7: Filtre entites non-linkees
+        # Supprime les Entity crees (NounChunk + Extractor) qui ne sont referencees
+        # par AUCUN claim_entity_link — sinon elles deviennent orphelines en base
+        # (mention_count incremente mais pas de ABOUT persiste).
+        linked_entity_ids = {eid for _, eid in claim_entity_links}
+        before_filter = len(entities)
+        entities = [e for e in entities if e.entity_id in linked_entity_ids]
+        removed = before_filter - len(entities)
+        if removed > 0:
+            # Nettoyer aussi claim_entity_map pour coherence avec Phase 5/6 qui
+            # l'utilisent (cluster + relation detectors resolvent eid contre entities)
+            claim_entity_map = {
+                cid: [eid for eid in eids if eid in linked_entity_ids]
+                for cid, eids in claim_entity_map.items()
+            }
+            logger.info(
+                f"  → Phase 4.7: {removed} entites non-linkees filtrees "
+                f"(evite orphelines en base)"
+            )
+
         # Phase 5: Clustering (si plusieurs claims)
         logger.info("[OSMOSE:ClaimFirst] Phase 5: Clustering...")
         clusters: List[ClaimCluster] = []
@@ -644,6 +756,46 @@ class ClaimFirstOrchestrator:
             logger.info("[OSMOSE:ClaimFirst] Phase 7: Persisting to Neo4j...")
             persist_stats = self.persister.persist(result)
             logger.info(f"  → {persist_stats}")
+
+        # Phase 7.5: Classification des tensions (tension_level + tension_nature)
+        # Appelle ContradictionClassifier sur les CONTRADICTS fraichement persistees
+        # (filtre reviewed=false). Non-bloquant : une erreur n'arrete pas l'import.
+        if self.persist_enabled and self.neo4j_driver and result.relations:
+            has_contradicts = any(
+                getattr(r, "relation_type", None) == "CONTRADICTS"
+                for r in result.relations
+            )
+            if has_contradicts:
+                try:
+                    from knowbase.claimfirst.clustering.contradiction_classifier import (
+                        ContradictionClassifier,
+                    )
+
+                    logger.info(
+                        "[OSMOSE:ClaimFirst] Phase 7.5: Classifying tensions..."
+                    )
+                    classifier = ContradictionClassifier(
+                        self.neo4j_driver, batch_size=5
+                    )
+                    classif_stats = classifier.classify_all(
+                        tenant_id=result.tenant_id
+                    )
+                    if classif_stats.get("total", 0) > 0:
+                        by_level = classif_stats.get("by_level", {})
+                        logger.info(
+                            f"  -> {classif_stats['classified']} tensions classified "
+                            f"in {classif_stats['batches']} batches "
+                            f"(hard={by_level.get('hard', 0)}, "
+                            f"soft={by_level.get('soft', 0)}, "
+                            f"unknown={by_level.get('unknown', 0)})"
+                        )
+                    else:
+                        logger.info("  -> no unreviewed tensions")
+                except Exception as e:
+                    logger.warning(
+                        f"[OSMOSE:ClaimFirst] Tension classification failed "
+                        f"(non-blocking): {e}"
+                    )
 
         # Phase 8: Persist chunks to Qdrant Layer R
         # ADR: Unite de preuve vs Unite de lecture.

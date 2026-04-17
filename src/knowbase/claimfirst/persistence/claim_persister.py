@@ -181,11 +181,18 @@ class ClaimPersister:
             # 8. Relations Claim → Entity (ABOUT) (batch UNWIND)
             self._persist_about_batch(
                 session, result.claim_entity_links,
+                entities=result.entities,
                 link_methods=result.claim_entity_link_methods or None,
             )
 
             # 8b. CanonicalEntity + SAME_CANON_AS (post-entités, post-ABOUT)
             self._persist_canonical_links(session, result.entities)
+
+            # 8c. Anti-drift : attacher les NOUVELLES Entity a des CanonicalEntity
+            # existantes via alias match (Entity créée apres canonicalisation batch
+            # ne doit pas etre orpheline du canonical system).
+            # Match exact sur canonical_name + aliases connus des Entity deja linkees.
+            self._match_new_entities_to_existing_canonicals(session, result.entities)
 
             # 9. Relations Claim → Facet (BELONGS_TO_FACET) (batch UNWIND)
             self._persist_has_facet_batch(session, result.claim_facet_links)
@@ -308,6 +315,7 @@ class ClaimPersister:
             "qualifier_candidates_json": json.dumps(context.qualifier_candidates) if context.qualifier_candidates else "{}",
             "document_type": context.document_type,
             "temporal_scope": context.temporal_scope,
+            "language": context.language,
             "extraction_method": context.extraction_method,
             "created_at": context.created_at.isoformat(),
         }
@@ -1060,6 +1068,79 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
             f"{self.stats['same_canon_as_created']} SAME_CANON_AS"
         )
 
+    def _match_new_entities_to_existing_canonicals(
+        self, session, entities: List[Entity]
+    ) -> None:
+        """
+        Anti-drift incremental : relie les Entity non encore linkees a un
+        CanonicalEntity si leur normalized_name correspond exactement au
+        canonical_name OU a un alias d'une Entity deja linkee au meme
+        CanonicalEntity.
+
+        Cas couvert : une canonicalisation batch (cross-doc ou embedding+LLM)
+        a defini un CanonicalEntity "personal data" qui absorbe "personal
+        information". Un nouveau doc importé qui mentionne "personal
+        information" creerait une Entity orpheline du canonical — ce match
+        la rattache automatiquement.
+
+        Strategie :
+        1. Match exact sur CanonicalEntity.canonical_name (cheap)
+        2. Match via alias d'une Entity voisine du meme CE (via Entity.aliases)
+        """
+        if not entities:
+            return
+
+        tenant_id = entities[0].tenant_id
+        normalized_names = [e.normalized_name for e in entities]
+
+        # Match 1 : normalized_name == canonical_name d'un CE existant
+        result_1 = session.run(
+            """
+            UNWIND $names AS name
+            MATCH (e:Entity {normalized_name: name, tenant_id: $tid})
+            WHERE NOT (e)-[:SAME_CANON_AS]->(:CanonicalEntity)
+            MATCH (ce:CanonicalEntity {tenant_id: $tid})
+            WHERE toLower(ce.canonical_name) = toLower(name)
+            MERGE (e)-[r:SAME_CANON_AS]->(ce)
+            ON CREATE SET r.method = 'incremental_canonical_name',
+                          r.confidence = 0.95,
+                          r.created_at = datetime()
+            RETURN count(r) AS linked
+            """,
+            names=normalized_names,
+            tid=tenant_id,
+        )
+        linked_1 = result_1.single()["linked"] or 0
+
+        # Match 2 : normalized_name correspond a un alias d'une Entity deja linkee
+        # Scenario : canonicalisation a stocke "personal information" dans Entity("personal data").aliases
+        # La nouvelle Entity("personal information") doit pointer vers le meme CE.
+        result_2 = session.run(
+            """
+            UNWIND $names AS name
+            MATCH (new_e:Entity {normalized_name: name, tenant_id: $tid})
+            WHERE NOT (new_e)-[:SAME_CANON_AS]->(:CanonicalEntity)
+            MATCH (existing:Entity {tenant_id: $tid})-[:SAME_CANON_AS]->(ce:CanonicalEntity)
+            WHERE name IN [a IN coalesce(existing.aliases, []) | toLower(a)]
+               OR name IN [a IN coalesce(existing.aliases, []) | a]
+            MERGE (new_e)-[r:SAME_CANON_AS]->(ce)
+            ON CREATE SET r.method = 'incremental_alias_match',
+                          r.confidence = 0.90,
+                          r.created_at = datetime()
+            RETURN count(DISTINCT r) AS linked
+            """,
+            names=normalized_names,
+            tid=tenant_id,
+        )
+        linked_2 = result_2.single()["linked"] or 0
+
+        if linked_1 + linked_2 > 0:
+            self.stats["same_canon_as_created"] += linked_1 + linked_2
+            logger.info(
+                f"[OSMOSE:ClaimPersister] Anti-drift canonical match: "
+                f"{linked_1} via canonical_name, {linked_2} via alias"
+            )
+
     def _persist_facets_batch(self, session, facets: List[Facet]) -> None:
         """Persiste les Facets en batch via UNWIND."""
         if not facets:
@@ -1128,20 +1209,34 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
         self,
         session,
         links: List[Tuple[str, str]],
+        entities: Optional[List] = None,
         link_methods: Optional[Dict] = None,
     ) -> None:
         """Crée les relations Claim → Entity (ABOUT) en batch.
 
+        Résout les Entity par normalized_name (pas entity_id) pour garantir
+        le lien même si le node Entity a été créé par un document précédent
+        avec un entity_id différent.
+
         Args:
             links: Liste de tuples (claim_id, entity_id)
+            entities: Liste d'Entity objects pour résoudre entity_id → normalized_name
             link_methods: Optionnel, dict {(claim_id, entity_id): method_string}
                           pour tagger la relation ABOUT avec sa source
         """
         if not links:
             return
+
+        # Construire le mapping entity_id → normalized_name
+        eid_to_norm: Dict[str, str] = {}
+        if entities:
+            for e in entities:
+                eid_to_norm[e.entity_id] = e.normalized_name
+
         batch = []
         for cid, eid in links:
-            item = {"claim_id": cid, "entity_id": eid}
+            norm = eid_to_norm.get(eid)
+            item = {"claim_id": cid, "entity_id": eid, "normalized_name": norm}
             if link_methods:
                 method = link_methods.get((cid, eid))
                 if method:
@@ -1151,7 +1246,14 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
         session.run("""
             UNWIND $batch AS item
             MATCH (c:Claim {claim_id: item.claim_id})
-            MATCH (e:Entity {entity_id: item.entity_id})
+            WITH c, item
+            MATCH (e:Entity)
+            WHERE (item.normalized_name IS NOT NULL
+                   AND e.normalized_name = item.normalized_name
+                   AND e.tenant_id = c.tenant_id)
+               OR (item.normalized_name IS NULL
+                   AND e.entity_id = item.entity_id)
+            WITH c, e, item LIMIT 1
             MERGE (c)-[r:ABOUT]->(e)
             ON CREATE SET r.method = CASE WHEN item.method IS NOT NULL THEN item.method ELSE 'core' END
         """, batch=batch)

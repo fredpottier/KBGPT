@@ -142,6 +142,12 @@ class DocumentContext(BaseModel):
         description="Portée temporelle: 'as of 2021', 'Q1 2024'..."
     )
 
+    language: Optional[str] = Field(
+        default=None,
+        description="Code ISO 639-1 detecte du document (en, fr, de, ...). "
+                    "Detecte via fasttext lid.176 sur les premiers passages."
+    )
+
     # Source de l'extraction
     extraction_method: str = Field(
         default="llm",
