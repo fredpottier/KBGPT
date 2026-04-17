@@ -465,7 +465,8 @@ async def _eval_metric_parallel(
     done_count = 0
     fallback_count = 0
 
-    SAMPLE_TIMEOUT = 120  # secondes max par sample (30s trop court — 54% timeout)
+    # Configurable via RAGAS_SAMPLE_TIMEOUT (defaut 300s pour judges 14B locaux)
+    SAMPLE_TIMEOUT = int(os.getenv("RAGAS_SAMPLE_TIMEOUT", "300"))
 
     async def eval_one(idx: int, kwargs: dict):
         nonlocal done_count, fallback_count
@@ -592,6 +593,20 @@ def _get_ragas_providers():
                 timeout=120.0,  # Ollama est plus lent que gpt-4o-mini
             )
         logger.info(f"[RAGAS] Using Ollama judge: {ragas_model} at {ollama_url}")
+    elif judge_provider == "llamacpp":
+        # Mode local : llama.cpp server (ghcr.io/ggml-org/llama.cpp:server-cuda)
+        # expose une API OpenAI-compatible sur /v1 sans les limitations d'Ollama
+        # (batch eficient, pas de timeout sur modeles >13B).
+        llamacpp_url = os.getenv("LLAMACPP_URL", "http://prometheus-judge:8000")
+        ragas_model = os.getenv("RAGAS_JUDGE_MODEL", "m-prometheus-14b")
+        if _ragas_client is None:
+            _ragas_client = AsyncOpenAI(
+                base_url=f"{llamacpp_url}/v1",
+                api_key="local",
+                max_retries=3,
+                timeout=300.0,  # 5min pour judge 14B sous contention GPU
+            )
+        logger.info(f"[RAGAS] Using llama.cpp judge: {ragas_model} at {llamacpp_url}")
     else:
         # Mode cloud : OpenAI standard
         ragas_model = os.getenv("RAGAS_JUDGE_MODEL", "gpt-4o-mini")
@@ -603,8 +618,8 @@ def _get_ragas_providers():
 
     llm = llm_factory(ragas_model, client=_ragas_client)
 
-    # Embeddings : local e5-large en mode Ollama, OpenAI sinon
-    if judge_provider == "ollama":
+    # Embeddings : local e5-large en mode local (ollama/llamacpp), OpenAI sinon
+    if judge_provider in ("ollama", "llamacpp"):
         try:
             from langchain_community.embeddings import HuggingFaceEmbeddings as LCHFEmb
             from ragas.embeddings import LangchainEmbeddingsWrapper

@@ -101,11 +101,14 @@ services:
       KNOWBASE_DATA_DIR: /data
       REDIS_URL: redis://redis:6379/0
       OSMOSIS_API_URL: http://app:8000
-      T2T5_JUDGE_PROVIDER: ollama
+      # Judges centralises — switch d'Ollama vers llama.cpp self-hosted
+      # (container prometheus-judge, GPU, stable vs Ollama timeout 14B)
+      T2T5_JUDGE_PROVIDER: llamacpp
       T2T5_JUDGE_MODEL_NAME: m-prometheus-14b
-      RAGAS_JUDGE_PROVIDER: ollama
+      RAGAS_JUDGE_PROVIDER: llamacpp
       RAGAS_JUDGE_MODEL: m-prometheus-14b
-      OLLAMA_URL: http://host.docker.internal:11434
+      LLAMACPP_URL: http://prometheus-judge:8000
+      OLLAMA_URL: http://host.docker.internal:11434  # fallback si besoin
       DEV_MODE: "false"  # Mode production: worker tourne en continu (10 jobs avant reload)
 
       # ========== CONFIGURATION TIMEOUT CENTRALISÉE ==========
@@ -228,6 +231,36 @@ services:
   #   command: start --config /etc/ngrok.yml --all
   #   networks:
   #     - knowbase_net
+
+  # LLM Judge self-hosted via llama.cpp server
+  # Heberge M-Prometheus-14B (GGUF Q4_K_M) sur GPU local pour RAGAS.
+  # Remplace Ollama (timeouts frequents) par llama.cpp natif (plus stable).
+  # Port 8002 interne, 8082 exterieur.
+  prometheus-judge:
+    <<: *common-config
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: knowbase-prometheus-judge
+    restart: unless-stopped
+    ports:
+      - "8082:8000"
+    volumes:
+      - ./data/models/prometheus:/models
+    environment:
+      - LLAMA_ARG_MODEL=/models/M-Prometheus-14B.i1-Q4_K_M.gguf
+      - LLAMA_ARG_HOST=0.0.0.0
+      - LLAMA_ARG_PORT=8000
+      - LLAMA_ARG_N_GPU_LAYERS=99
+      - LLAMA_ARG_CTX_SIZE=8192
+      - LLAMA_ARG_THREADS=4
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - knowbase_net
 
 networks:
   knowbase_net:
