@@ -105,8 +105,15 @@ async def create_backup(
             detail=f"Un backup '{request.name}' existe déjà"
         )
 
-    logger.info(f"Création backup '{request.name}' par {admin.get('email', 'admin')}")
-    return service.launch_backup(request.name, request.include_cache)
+    logger.info(
+        f"Création backup '{request.name}' par {admin.get('email', 'admin')} "
+        f"(purge_benchmarks_after={request.purge_benchmarks_after})"
+    )
+    return service.launch_backup(
+        request.name,
+        request.include_cache,
+        purge_benchmarks_after=request.purge_benchmarks_after,
+    )
 
 
 @router.post(

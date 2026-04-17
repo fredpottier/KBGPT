@@ -457,6 +457,56 @@ def _backup_config(backup_dir: Path, log_lines: list) -> dict:
         return {"status": "error", "file_count": 0, "size_bytes": 0, "error": str(e)}
 
 
+def _purge_benchmark_results(log_lines: list) -> int:
+    """
+    Purge les fichiers de resultats benchmark (post-backup uniquement).
+
+    Supprime :
+    - benchmark/results/* (T2T5 runs)
+    - benchmark/analysis/*.json (RAGAS reports)
+    - data/benchmark/results/* (runs via API + logs)
+    - app/data/benchmark/results/* (duplicata volume Docker)
+
+    Preserve :
+    - benchmark/questions/ (corpus de questions source, in git)
+    - benchmark/baselines/ (scripts)
+    - benchmark/evaluators/ (code)
+    - benchmark/config.yaml, *.py
+    """
+    paths_to_clean = [
+        Path("/app/benchmark/results"),
+        Path("/app/benchmark/analysis"),
+        Path("/data/benchmark/results"),
+        Path("benchmark/results"),
+        Path("benchmark/analysis"),
+        Path("data/benchmark/results"),
+        Path("app/data/benchmark/results"),
+    ]
+
+    total_files = 0
+    for path in paths_to_clean:
+        if not path.exists():
+            continue
+        # Compter avant
+        files = list(path.rglob("*.json")) + list(path.rglob("*.log"))
+        total_files += len(files)
+        for f in files:
+            try:
+                f.unlink()
+            except Exception as e:
+                log_lines.append(f"  WARN delete {f}: {e}")
+        # Supprimer sous-dossiers vides
+        for sub in sorted(path.rglob("*"), reverse=True):
+            if sub.is_dir():
+                try:
+                    sub.rmdir()
+                except OSError:
+                    pass  # pas vide, skip
+        log_lines.append(f"  Clean {path} : {len(files)} fichiers supprimes")
+
+    return total_files
+
+
 def _backup_benchmark(backup_dir: Path, log_lines: list) -> dict:
     """Backup du repertoire benchmark (resultats, questions, scripts)."""
     benchmark_dir = Path("/app/benchmark")
@@ -1063,11 +1113,19 @@ class BackupService:
 
         return stats
 
-    def launch_backup(self, name: str, include_cache: bool = True) -> BackupJobStatus:
+    def launch_backup(
+        self,
+        name: str,
+        include_cache: bool = True,
+        purge_benchmarks_after: bool = False,
+    ) -> BackupJobStatus:
         """Lance un backup en background (thread Python)."""
         job_id = str(uuid.uuid4())[:8]
 
-        logger.info(f"Lancement backup '{name}' (job={job_id})")
+        logger.info(
+            f"Lancement backup '{name}' (job={job_id}, "
+            f"include_cache={include_cache}, purge_bench={purge_benchmarks_after})"
+        )
 
         status = BackupJobStatus(
             job_id=job_id,
@@ -1080,14 +1138,20 @@ class BackupService:
 
         thread = threading.Thread(
             target=self._do_backup,
-            args=(name, include_cache, job_id),
+            args=(name, include_cache, purge_benchmarks_after, job_id),
             daemon=True,
         )
         thread.start()
 
         return status
 
-    def _do_backup(self, name: str, include_cache: bool, job_id: str):
+    def _do_backup(
+        self,
+        name: str,
+        include_cache: bool,
+        purge_benchmarks_after: bool,
+        job_id: str,
+    ):
         """Exécute le backup complet (appelé dans un thread)."""
         start_time = time.time()
         backup_dir = BACKUPS_DIR / name
@@ -1180,6 +1244,22 @@ class BackupService:
         log_lines.append(f"Composants OK : {components_ok}/6")
 
         final_status = "completed" if components_ok >= 3 else "failed"
+
+        # Purge benchmark optionnelle APRES succes backup
+        # Verifie que le composant benchmark a bien ete backupe avant de purger
+        if purge_benchmarks_after and final_status == "completed":
+            benchmark_status = manifest_data["components"].get("benchmark", {}).get("status")
+            if benchmark_status == "success":
+                log_lines.append("")
+                log_lines.append("=== PURGE BENCHMARKS (post-backup) ===")
+                purged = _purge_benchmark_results(log_lines)
+                log_lines.append(f"Fichiers benchmark supprimes : {purged}")
+            else:
+                log_lines.append("")
+                log_lines.append(
+                    "SKIP purge benchmarks : composant benchmark en erreur dans le backup"
+                )
+
         self._update_job_progress(job_id, final_status, "Backup terminé", log_lines)
 
         logger.info(f"Backup '{name}' terminé en {round(duration, 1)}s — {components_ok}/5 OK")

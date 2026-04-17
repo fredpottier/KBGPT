@@ -130,6 +130,15 @@ class BackupCreateRequest(BaseModel):
     """Requête de création de backup."""
     name: str = Field(..., min_length=1, max_length=100, pattern=r'^[a-zA-Z0-9_\-]+$')
     include_cache: bool = Field(default=True, description="Inclure le cache d'extraction")
+    purge_benchmarks_after: bool = Field(
+        default=False,
+        description=(
+            "Si True, purge les resultats benchmark (benchmark/results/, "
+            "benchmark/analysis/, data/benchmark/results/) APRES succes du backup. "
+            "Usage : nettoyer le disque avant un changement de corpus tout en "
+            "gardant l'historique dans le backup."
+        ),
+    )
 
 
 class BackupRestoreRequest(BaseModel):
