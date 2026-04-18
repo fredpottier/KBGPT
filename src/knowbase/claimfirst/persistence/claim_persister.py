@@ -1243,17 +1243,22 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
                     item["method"] = method
             batch.append(item)
 
+        # Bug fix : LIMIT 1 precedent s'appliquait au batch entier (tous items confondus)
+        # creant 1 seul ABOUT par appel. On utilise une subquery CALL pour garantir
+        # 1 entity match par item, en conservant le fallback normalized_name/entity_id.
         session.run("""
             UNWIND $batch AS item
             MATCH (c:Claim {claim_id: item.claim_id})
-            WITH c, item
-            MATCH (e:Entity)
-            WHERE (item.normalized_name IS NOT NULL
-                   AND e.normalized_name = item.normalized_name
-                   AND e.tenant_id = c.tenant_id)
-               OR (item.normalized_name IS NULL
-                   AND e.entity_id = item.entity_id)
-            WITH c, e, item LIMIT 1
+            CALL {
+                WITH c, item
+                MATCH (e:Entity)
+                WHERE (item.normalized_name IS NOT NULL
+                       AND e.normalized_name = item.normalized_name
+                       AND e.tenant_id = c.tenant_id)
+                   OR (item.normalized_name IS NULL
+                       AND e.entity_id = item.entity_id)
+                RETURN e LIMIT 1
+            }
             MERGE (c)-[r:ABOUT]->(e)
             ON CREATE SET r.method = CASE WHEN item.method IS NOT NULL THEN item.method ELSE 'core' END
         """, batch=batch)

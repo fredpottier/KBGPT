@@ -48,7 +48,7 @@ REWRITE_POST_CHECK = 0.88  # Post-check strict après réécriture
 class EvidenceRewriter:
     """Reformule les claims à partir du verbatim (evidence-locked)."""
 
-    MAX_CONCURRENT = 5
+    MAX_CONCURRENT = 180  # DeepInfra: 200 max, marge 10%
 
     def __init__(self):
         self._stats = {

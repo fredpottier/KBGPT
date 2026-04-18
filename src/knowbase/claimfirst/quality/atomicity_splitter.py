@@ -42,7 +42,7 @@ ATOMICITY_CHAR_THRESHOLD = 160
 class AtomicitySplitter:
     """Split les claims >160 chars en claims atomiques via vLLM."""
 
-    MAX_CONCURRENT = 5
+    MAX_CONCURRENT = 180  # DeepInfra: 200 max, marge 10%
 
     def __init__(self):
         self._stats = {
@@ -164,25 +164,66 @@ class AtomicitySplitter:
                 detail="LLM returned 1 claim, no split needed",
             )
 
-        # Créer les sub-claims
+        # Créer les sub-claims (avec defense contre chain-of-thought LLM)
         sub_claims = []
         suffixes = ["_a", "_b", "_c", "_d"]
+        skipped_count = 0
         for i, sub_text in enumerate(sub_texts[:4]):
+            # Defense 1: nettoyer les reasoning traces residuelles
+            sub_text = self._strip_reasoning_trace(sub_text)
+
+            # Defense 2: rejeter les textes vides ou trop courts apres cleanup
+            if not sub_text or len(sub_text) < 10:
+                skipped_count += 1
+                continue
+
+            # Defense 3: rejeter les textes qui ressemblent a du raisonnement LLM
+            if self._looks_like_reasoning(sub_text):
+                logger.warning(
+                    f"[OSMOSE:AtomicitySplitter] Rejected reasoning-like sub-claim for {claim.claim_id}: "
+                    f"{sub_text[:80]!r}..."
+                )
+                skipped_count += 1
+                continue
+
+            # Defense 4: truncation hard cap 500 chars (limite Pydantic)
+            if len(sub_text) > 500:
+                logger.warning(
+                    f"[OSMOSE:AtomicitySplitter] Sub-claim too long ({len(sub_text)} chars) for "
+                    f"{claim.claim_id}, truncating to 500 chars"
+                )
+                sub_text = sub_text[:500].rsplit(" ", 1)[0] if " " in sub_text[:500] else sub_text[:500]
+
+            # Defense 5: try/except autour de Claim() — skip gracefully si Pydantic rejette
             suffix = suffixes[i] if i < len(suffixes) else f"_{i}"
-            sub_claim = Claim(
-                claim_id=f"{claim.claim_id}{suffix}",
-                tenant_id=claim.tenant_id,
-                doc_id=claim.doc_id,
-                text=sub_text,
-                claim_type=claim.claim_type,
-                scope=claim.scope,
-                verbatim_quote=claim.verbatim_quote,
-                passage_id=claim.passage_id,
-                unit_ids=claim.unit_ids,
-                confidence=claim.confidence,
-                language=claim.language,
+            try:
+                sub_claim = Claim(
+                    claim_id=f"{claim.claim_id}{suffix}",
+                    tenant_id=claim.tenant_id,
+                    doc_id=claim.doc_id,
+                    text=sub_text,
+                    claim_type=claim.claim_type,
+                    scope=claim.scope,
+                    verbatim_quote=claim.verbatim_quote,
+                    passage_id=claim.passage_id,
+                    unit_ids=claim.unit_ids,
+                    confidence=claim.confidence,
+                    language=claim.language,
+                )
+                sub_claims.append(sub_claim)
+            except Exception as e:
+                logger.warning(
+                    f"[OSMOSE:AtomicitySplitter] Claim() rejected sub-text for {claim.claim_id}: {e}"
+                )
+                skipped_count += 1
+
+        # Si toutes les sub-claims ont ete rejetees, on garde la claim originale (pas de split)
+        if not sub_claims:
+            return claim, [], QualityVerdict(
+                action=QualityAction.PASS,
+                scores={"char_count": len(claim.text), "sub_claims_skipped": skipped_count},
+                detail=f"All {skipped_count} sub-claims rejected (reasoning traces), keeping original",
             )
-            sub_claims.append(sub_claim)
 
         verdict = QualityVerdict(
             action=QualityAction.SPLIT_ATOMICITY,
@@ -190,12 +231,48 @@ class AtomicitySplitter:
                 "char_count": len(claim.text),
                 "clauses": self._count_clauses(claim.text),
                 "sub_claims_count": len(sub_claims),
+                "sub_claims_skipped": skipped_count,
             },
-            detail=f"Split into {len(sub_claims)} atomic claims",
+            detail=f"Split into {len(sub_claims)} atomic claims ({skipped_count} rejected)",
             split_claims=[sc.text for sc in sub_claims],
         )
 
         return claim, sub_claims, verdict
+
+    # Patterns typiques de chain-of-thought LLM (Qwen/reasoning leak)
+    _REASONING_PREFIX_PATTERN = re.compile(
+        r'^\s*(Wait[,.]|Let me think|Let me re[-]?|I need to|I should|I must|'
+        r'Actually[,.]|Hmm[,.]|First[,.]|Looking at|The original|Based on the|'
+        r'So the|So[,.]|Okay[,.]|Alright[,.]|Now[,.]|Let\'s|Given that|Thinking|'
+        r'Analysis:|Reasoning:|Step \d+)',
+        flags=re.IGNORECASE,
+    )
+
+    _REASONING_INLINE_PATTERN = re.compile(
+        r'\b(Let me think|let me re[-]?check|Wait,|I think I|on second thought|'
+        r'Actually, I|user\'s instruction|compound claim|original sentence)\b',
+        flags=re.IGNORECASE,
+    )
+
+    def _strip_reasoning_trace(self, text: str) -> str:
+        """Supprime les traces de raisonnement LLM en fin de texte."""
+        if not text:
+            return text
+        # Couper tout apres un marqueur inline de reasoning
+        parts = self._REASONING_INLINE_PATTERN.split(text, maxsplit=1)
+        return parts[0].strip() if parts else text.strip()
+
+    def _looks_like_reasoning(self, text: str) -> bool:
+        """Detecte si le texte ressemble a une trace de raisonnement LLM (pas un claim)."""
+        if not text:
+            return True
+        # Prefixe typique de reasoning
+        if self._REASONING_PREFIX_PATTERN.match(text):
+            return True
+        # Densite elevee de marqueurs inline
+        if len(self._REASONING_INLINE_PATTERN.findall(text)) >= 2:
+            return True
+        return False
 
     def _parse_response(self, response: str) -> List[str]:
         """Parse la réponse LLM (JSON array ou lignes numérotées).
@@ -206,7 +283,9 @@ class AtomicitySplitter:
 
         # Couper tout après un marqueur de raisonnement LLM
         cleaned = re.split(
-            r'\n\s*\*{0,2}\s*(?:Reasoning|Explanation|Note|Analysis|Response|Comment)[:\s*]',
+            r'\n\s*\*{0,2}\s*(?:Reasoning|Explanation|Note|Analysis|Response|Comment|'
+            r'Wait|Let me think|Let me re[-]?|Actually|Hmm|I need to|I should|'
+            r'Looking at|The original|So the|Thinking|Okay|Alright)[:\s*,.]',
             raw, maxsplit=1, flags=re.IGNORECASE,
         )[0].strip()
 

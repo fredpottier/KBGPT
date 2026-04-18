@@ -145,8 +145,12 @@ async def _run_extraction_v2(
     gating_thresholds = v2_config.get("gating_thresholds", {})
 
     # Creer configuration pipeline
+    vision_enabled = vision_config.get("enabled", True)
+    # enable_semantic: si absent, suit enable_vision (retro-compat)
+    vision_semantic_enabled = vision_config.get("enable_semantic", vision_enabled)
     config = PipelineConfig(
-        enable_vision=vision_config.get("enabled", True),
+        enable_vision=vision_enabled,
+        enable_vision_semantic=vision_semantic_enabled,
         enable_gating=True,
         vision_required_threshold=gating_thresholds.get("vision_required", 0.60),
         vision_recommended_threshold=gating_thresholds.get("vision_recommended", 0.40),
@@ -161,7 +165,8 @@ async def _run_extraction_v2(
 
     logger.info(
         f"[ExtractionV2] Processing {file_path.name} with config: "
-        f"vision={config.enable_vision}, gating={config.enable_gating}"
+        f"vision={config.enable_vision}, vision_semantic={config.enable_vision_semantic}, "
+        f"gating={config.enable_gating}"
     )
 
     # Executer pipeline

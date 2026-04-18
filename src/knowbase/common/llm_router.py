@@ -1478,9 +1478,31 @@ class LLMRouter:
             )
         return self._deepinfra_async_client
 
+    def _apply_qwen3_thinking_mode(self, model: str, api_kwargs: dict, enable_thinking: bool) -> None:
+        """Applique les parametres de thinking mode pour les modeles Qwen3.
+
+        Qwen3 active le thinking par defaut — consomme > 2000 tokens de sortie
+        juste pour "raisonner". Pour classification/JSON structure on desactive.
+
+        Utilise 2 canaux (selon la doc DeepInfra) :
+        - `reasoning_effort: "none"` (standard OpenAI-compat, doc DeepInfra)
+        - `chat_template_kwargs.enable_thinking` (fallback Qwen-specifique)
+        """
+        model_lower = (model or "").lower()
+        if "qwen3" in model_lower:
+            api_kwargs.setdefault('extra_body', {})
+            if enable_thinking:
+                api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": True}
+                api_kwargs['extra_body']['reasoning_effort'] = "medium"
+            else:
+                api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": False}
+                api_kwargs['extra_body']['reasoning_effort'] = "none"
+
     def _call_deepinfra(self, model, messages, temperature, max_tokens, task_type, **kwargs):
         """Appel vers DeepInfra (API OpenAI-compatible)."""
+        enable_thinking = kwargs.pop('enable_thinking', False)
         api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference', 'json_schema']}
+        self._apply_qwen3_thinking_mode(model, api_kwargs, enable_thinking)
         client = self._get_deepinfra_client()
         response = client.chat.completions.create(
             model=model, messages=messages,
@@ -1495,7 +1517,9 @@ class LLMRouter:
 
     async def _call_deepinfra_async(self, model, messages, temperature, max_tokens, task_type, **kwargs):
         """Appel async vers DeepInfra."""
+        enable_thinking = kwargs.pop('enable_thinking', False)
         api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference', 'json_schema']}
+        self._apply_qwen3_thinking_mode(model, api_kwargs, enable_thinking)
         client = self._get_deepinfra_async_client()
         response = await client.chat.completions.create(
             model=model, messages=messages,

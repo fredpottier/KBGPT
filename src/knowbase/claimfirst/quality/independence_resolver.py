@@ -50,7 +50,7 @@ VERIF_SCORE_MINIMUM = 0.88  # Claims avec verif bas → pas un problème d'indé
 class IndependenceResolver:
     """Résout les anaphores par entity anchoring + vLLM (language-agnostic)."""
 
-    MAX_CONCURRENT = 5
+    MAX_CONCURRENT = 180  # DeepInfra: 200 max, marge 10%
 
     def __init__(self):
         self._stats = {

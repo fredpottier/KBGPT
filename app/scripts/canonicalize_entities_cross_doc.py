@@ -939,10 +939,14 @@ def merge_duplicate_canonicals(session, tenant_id: str, dry_run: bool = True) ->
 
     canonicals = []
     for r in result:
-        stem = _extract_stem(r["name"])
+        name = r["name"]
+        if not name:
+            # Skip CanonicalEntity fantome (canonical_name NULL)
+            continue
+        stem = _extract_stem(name)
         canonicals.append({
             "ce_id": r["ce_id"],
-            "name": r["name"],
+            "name": name,
             "stem": stem,
             "entity_count": r["entity_count"],
             "total_claims": r["total_claims"],
