@@ -3,7 +3,8 @@ C4 NLI Adjudicator — Adjudication des paires candidates via LLM.
 
 Stage 2 du pipeline C4 Relations Evidence-First.
 
-Chaque paire candidate est evaluee par Claude Haiku pour determiner :
+Chaque paire candidate est evaluee par le LLM classification (FAST_CLASSIFICATION
+route via llm_router, actuellement Qwen3-14B via DeepInfra) pour determiner :
 - Le type de relation (CONTRADICTS, QUALIFIES, REFINES, NONE)
 - La confiance (0.0-1.0)
 - Les preuves verbatim des deux claims
@@ -40,6 +41,8 @@ class AdjudicationResult:
     detection_method: str    # "embedding_nli"
     doc_a_title: str = ""
     doc_b_title: str = ""
+    above_threshold: bool = False  # Si relation passe le seuil de confiance
+    evidence_valid: bool = False   # Si evidence_a/b sont verbatim des claims sources
 
 
 # Seuils asymetriques — faux positif pire que faux negatif
@@ -77,7 +80,7 @@ Respond ONLY with valid JSON (no markdown):
 class NLIAdjudicator:
     """Adjudique les paires candidates via LLM NLI."""
 
-    def __init__(self, max_workers: int = 3):
+    def __init__(self, max_workers: int = 100):  # sweet spot DeepInfra Qwen3-14B
         self.max_workers = max_workers
 
     def adjudicate_batch(
@@ -92,10 +95,13 @@ class NLIAdjudicator:
             on_progress: Callback(done, total) pour progression
 
         Returns:
-            Liste de AdjudicationResult (seuls ceux qui passent le seuil)
+            Liste de TOUS les AdjudicationResult (y compris NONE et sub-threshold).
+            Utiliser result.above_threshold et result.evidence_valid pour filtrer
+            les vraies relations a persister. Les NONE/sub-threshold permettent de
+            tracer via :C4_SCANNED les paires deja adjudiquees (runs incrementaux).
         """
         start = time.time()
-        results = []
+        all_results = []
         done = 0
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
@@ -111,26 +117,34 @@ class NLIAdjudicator:
 
                 try:
                     result = future.result()
-                    if result and self._passes_threshold(result):
-                        # Validate evidence is verbatim
-                        pair = futures[future]
-                        if self._validate_evidence(result, pair):
-                            results.append(result)
-                        else:
+                    if result is None:
+                        continue
+                    pair = futures[future]
+                    # Annoter le resultat avec les flags de qualite
+                    result.above_threshold = self._passes_threshold(result)
+                    if result.above_threshold:
+                        result.evidence_valid = self._validate_evidence(result, pair)
+                        if not result.evidence_valid:
                             logger.debug(f"[C4:NLI] Evidence validation failed for {result.claim_a_id}")
+                    all_results.append(result)
                 except Exception as e:
                     logger.debug(f"[C4:NLI] Adjudication failed: {e}")
 
+        # Statistiques
+        relations_ok = [r for r in all_results if r.above_threshold and r.evidence_valid]
+        none_count = sum(1 for r in all_results if r.relation == "NONE")
         duration = time.time() - start
         logger.info(
-            f"[C4:NLI] Adjudicated {len(pairs)} pairs in {duration:.1f}s → "
-            f"{len(results)} relations found "
-            f"({len([r for r in results if r.relation == 'CONTRADICTS'])} CONTRADICTS, "
-            f"{len([r for r in results if r.relation == 'QUALIFIES'])} QUALIFIES, "
-            f"{len([r for r in results if r.relation == 'REFINES'])} REFINES)"
+            f"[C4:NLI] Adjudicated {len(all_results)}/{len(pairs)} pairs in {duration:.1f}s "
+            f"→ {len(relations_ok)} valid relations "
+            f"({sum(1 for r in relations_ok if r.relation == 'CONTRADICTS')} CONTRADICTS, "
+            f"{sum(1 for r in relations_ok if r.relation == 'QUALIFIES')} QUALIFIES, "
+            f"{sum(1 for r in relations_ok if r.relation == 'REFINES')} REFINES), "
+            f"{none_count} NONE, "
+            f"{len(pairs) - len(all_results)} errors"
         )
 
-        return results
+        return all_results
 
     def _adjudicate_one(self, pair) -> AdjudicationResult | None:
         """Adjudique une seule paire via LLM."""
@@ -148,7 +162,7 @@ class NLIAdjudicator:
                 task_type=TaskType.FAST_CLASSIFICATION,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=500,
+                max_tokens=350,  # JSON suffit (~320 tok + marge) ; thinking desactive au router
             ).strip()
             # Parse JSON — handle potential markdown wrapping
             if text.startswith("```"):

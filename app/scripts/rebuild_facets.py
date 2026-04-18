@@ -414,7 +414,8 @@ def _match_claims_to_facets(driver, tenant_id: str, validated_facets) -> int:
 
         logger.info(f"  Loaded {len(claims)} claims pour matching")
 
-        # Matcher
+        # Matcher (mode post-import keyword-only — FacetMatcher detecte automatiquement
+        # l'absence de doc_facet_ids et bascule sur _assign_keyword_only permissif).
         _, links = matcher.match(
             claims=claims,
             tenant_id=tenant_id,

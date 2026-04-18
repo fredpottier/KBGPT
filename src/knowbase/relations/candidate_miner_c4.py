@@ -214,9 +214,16 @@ class CandidateMinerC4:
         return pairs
 
     def _get_existing_relation_pairs(self) -> set[tuple[str, str]]:
-        """Retourne les paires claim qui ont deja une relation."""
+        """Retourne les paires claim deja scannees ou ayant une relation.
+
+        Inclut :
+        - Les relations reelles (CONTRADICTS/QUALIFIES/REFINES) — deja persistees
+        - Le marker :C4_SCANNED — paires adjudiquees y compris celles resolues en NONE
+          (permet les runs C4 incrementaux sans re-adjudication)
+        """
         query = """
-        MATCH (a:Claim {tenant_id: $tid})-[r:CONTRADICTS|QUALIFIES|REFINES]->(b:Claim)
+        MATCH (a:Claim {tenant_id: $tid})-[r:CONTRADICTS|QUALIFIES|REFINES|C4_SCANNED]-(b:Claim)
+        WHERE a.claim_id < b.claim_id
         RETURN a.claim_id AS a_id, b.claim_id AS b_id
         """
         with self.driver.session() as session:

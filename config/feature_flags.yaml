@@ -177,7 +177,8 @@ extraction_v2:
   enabled: true
 
   vision_config:
-    enabled: true
+    enabled: false  # BYPASS vision pour economiser (corpus preeclampsie, text-only)
+    enable_semantic: false  # BYPASS VisionSemanticReader (FIGURE_TEXT chunks) pour economiser
     model: "gpt-4o"
     temperature: 0.0
     budget: null
@@ -228,6 +229,19 @@ claimfirst_pipeline:
     min_unit_length: 30
     max_unit_length: 500
     batch_size: 10
+
+  # Facet Extraction
+  # max_per_doc : nombre max de facettes extraites par document via LLM.
+  # Recommandations selon le type de corpus :
+  #   - 6   : corpus compacts (notes, fiches, comptes-rendus courts)
+  #   - 10-12 : corpus scientifique / technique (articles, specs — DEFAUT conseille)
+  #   - 15+ : corpus tres riches (manuels, livres, docs reglementaires complexes)
+  # Un cap trop bas => le LLM agrege les themes => claims orphelins.
+  # Un cap trop haut => facettes trop granulaires => dilution + cout.
+  # TODO : exposer ce parametre dans le frontend admin
+  # (voir doc/ongoing/TODO_ADMIN_UI_CLAIMFIRST_PARAMS.md)
+  facet_extraction:
+    max_per_doc: 12
 
   # Clustering (INV-6: conservateur)
   clustering:

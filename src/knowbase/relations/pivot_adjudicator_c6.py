@@ -42,6 +42,8 @@ class PivotAdjudicationResult:
     detection_method: str = "entity_pivot_nli"
     doc_a_title: str = ""
     doc_b_title: str = ""
+    above_threshold: bool = False  # Si relation passe le seuil de confiance
+    evidence_valid: bool = False   # Si evidence_a/b sont verbatim des claims sources
 
 
 THRESHOLDS = {
@@ -78,7 +80,7 @@ Respond ONLY with valid JSON (no markdown):
 class PivotAdjudicatorC6:
     """Adjudique les paires pivot via LLM NLI."""
 
-    def __init__(self, max_workers: int = 3):
+    def __init__(self, max_workers: int = 100):  # sweet spot DeepInfra Qwen3-14B
         self.max_workers = max_workers
 
     def adjudicate_batch(
@@ -86,9 +88,13 @@ class PivotAdjudicatorC6:
         pairs: list,
         on_progress: callable = None,
     ) -> list[PivotAdjudicationResult]:
-        """Adjudique un batch de paires pivot en parallele."""
+        """Adjudique un batch de paires pivot en parallele.
+
+        Retourne TOUS les resultats (y compris NONE/sub-threshold), avec flags
+        above_threshold et evidence_valid pour permettre le tracking via :C6_SCANNED.
+        """
         start = time.time()
-        results = []
+        all_results = []
         done = 0
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
@@ -104,27 +110,34 @@ class PivotAdjudicatorC6:
 
                 try:
                     result = future.result()
-                    if result and self._passes_threshold(result):
-                        pair = futures[future]
-                        if self._validate_evidence(result, pair):
-                            results.append(result)
-                        else:
+                    if result is None:
+                        continue
+                    pair = futures[future]
+                    result.above_threshold = self._passes_threshold(result)
+                    if result.above_threshold:
+                        result.evidence_valid = self._validate_evidence(result, pair)
+                        if not result.evidence_valid:
                             logger.debug(f"[C6:NLI] Evidence validation failed for {result.claim_a_id}")
+                    all_results.append(result)
                 except Exception as e:
                     logger.debug(f"[C6:NLI] Adjudication failed: {e}")
 
+        # Statistiques
+        relations_ok = [r for r in all_results if r.above_threshold and r.evidence_valid]
+        none_count = sum(1 for r in all_results if r.relation == "NONE")
         duration = time.time() - start
         by_type = {}
-        for r in results:
+        for r in relations_ok:
             by_type[r.relation] = by_type.get(r.relation, 0) + 1
-
         logger.info(
-            f"[C6:NLI] Adjudicated {len(pairs)} pairs in {duration:.1f}s → "
-            f"{len(results)} relations found "
-            f"({', '.join(f'{k} {v}' for k, v in sorted(by_type.items()))})"
+            f"[C6:NLI] Adjudicated {len(all_results)}/{len(pairs)} pairs in {duration:.1f}s "
+            f"→ {len(relations_ok)} valid relations "
+            f"({', '.join(f'{k} {v}' for k, v in sorted(by_type.items()))}), "
+            f"{none_count} NONE, "
+            f"{len(pairs) - len(all_results)} errors"
         )
 
-        return results
+        return all_results
 
     def _adjudicate_one(self, pair) -> PivotAdjudicationResult | None:
         """Adjudique une seule paire via LLM."""
@@ -143,7 +156,7 @@ class PivotAdjudicatorC6:
                 task_type=TaskType.FAST_CLASSIFICATION,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=500,
+                max_tokens=350,  # JSON avec evidences + reasoning + marge
             ).strip()
             if text.startswith("```"):
                 text = text.split("```")[1]

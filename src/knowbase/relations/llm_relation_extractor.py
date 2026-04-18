@@ -150,8 +150,8 @@ class LLMRelationExtractor:
         # Étape 2: Chunking si texte trop long
         text_chunks = self._chunk_text_if_needed(full_text, concepts)
 
-        # Étape 3: LLM extraction par chunk (PARALLÈLE avec 8 workers)
-        max_workers = 8
+        # Étape 3: LLM extraction par chunk (PARALLÈLE — DeepInfra supporte 200 max)
+        max_workers = 180
         logger.info(
             f"[OSMOSE:LLMRelationExtractor] Processing {len(text_chunks)} chunks "
             f"in PARALLEL with {max_workers} workers (OPTIMIZED for speed)"

@@ -1308,6 +1308,76 @@ def _run_garbage_collection(tenant_id: str) -> dict:
     }
 
 
+# Version du prompt NLI C4/C6. Incrementer lors de changement de prompt pour
+# permettre une re-adjudication selective (future fonctionnalite).
+SCAN_PROMPT_VERSION = "v1"
+
+
+def _persist_scanned_markers(
+    driver,
+    tenant_id: str,
+    results: list,
+    *,
+    relation_type: str,
+    model: str,
+) -> int:
+    """Persiste un marker :C4_SCANNED ou :C6_SCANNED pour chaque paire adjudiquee.
+
+    Permet de tracer toutes les paires deja adjudiquees (y compris NONE) afin
+    que les runs incrementaux (2K/3K/5K paires) ne les re-adjudiquent pas.
+
+    Args:
+        driver: Neo4j driver
+        tenant_id: Tenant ID
+        results: Liste AdjudicationResult | PivotAdjudicationResult
+        relation_type: "C4_SCANNED" ou "C6_SCANNED"
+        model: Nom du modele LLM utilise (pour traçabilite)
+
+    Returns:
+        Nombre de markers persistes
+    """
+    import time as _time
+    if not results:
+        return 0
+
+    now = _time.time()
+    persisted = 0
+    # Batch par chunks pour eviter transactions trop grandes
+    CHUNK = 500
+    with driver.session() as session:
+        for i in range(0, len(results), CHUNK):
+            batch = results[i:i + CHUNK]
+            payload = [
+                {
+                    "a_id": r.claim_a_id,
+                    "b_id": r.claim_b_id,
+                    "relation_found": r.relation,
+                    "confidence": float(r.confidence or 0.0),
+                    "above_threshold": bool(getattr(r, "above_threshold", False)),
+                    "scanned_at": now,
+                    "model": model,
+                    "prompt_version": SCAN_PROMPT_VERSION,
+                }
+                for r in batch
+            ]
+            query = (
+                "UNWIND $batch AS p "
+                "MATCH (a:Claim {claim_id: p.a_id, tenant_id: $tid}) "
+                "MATCH (b:Claim {claim_id: p.b_id, tenant_id: $tid}) "
+                f"MERGE (a)-[s:{relation_type}]->(b) "
+                "SET s.relation_found = p.relation_found, "
+                "    s.confidence = p.confidence, "
+                "    s.above_threshold = p.above_threshold, "
+                "    s.scanned_at = p.scanned_at, "
+                "    s.model = p.model, "
+                "    s.prompt_version = p.prompt_version "
+                "RETURN count(s) AS n"
+            )
+            r = session.run(query, batch=payload, tid=tenant_id).single()
+            persisted += r["n"] if r else 0
+    return persisted
+
+
 def _run_c4_relations(tenant_id: str, progress=None) -> dict:
     """C4 Relations Evidence-First : mining + adjudication + persistance."""
     from knowbase.common.clients.neo4j_client import get_neo4j_client
@@ -1337,45 +1407,47 @@ def _run_c4_relations(tenant_id: str, progress=None) -> dict:
 
     _p(30, f"Stage 2 : Adjudication de {len(pairs)} paires...")
 
-    # Stage 2 : Adjudication NLI
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        _p(100, "ANTHROPIC_API_KEY manquante")
-        return {"error": "ANTHROPIC_API_KEY non definie"}
-
-    adjudicator = NLIAdjudicator(max_workers=3)
+    # Stage 2 : Adjudication NLI via llm_router (DeepInfra Qwen3-14B)
+    adjudicator = NLIAdjudicator()  # utilise le default (100 workers, sweet spot DeepInfra)
 
     def on_adj(done, total):
         pct = 30 + int(50 * done / total)
         _p(pct, f"Adjudication: {done}/{total}")
 
-    results = adjudicator.adjudicate_batch(pairs, on_progress=on_adj)
+    all_results = adjudicator.adjudicate_batch(pairs, on_progress=on_adj)
+    valid_results = [r for r in all_results if r.above_threshold and r.evidence_valid]
 
-    if not results:
-        _p(100, "Aucune relation detectee")
-        return {
-            "pairs_mined": len(pairs),
-            "relations_found": 0,
-            "message": "Aucune relation detectee apres adjudication",
-        }
+    # Stage 3a : Trace ALL adjudicated pairs via :C4_SCANNED (runs incrementaux)
+    _p(80, f"Stage 3a : Marquage de {len(all_results)} paires adjudiquees...")
+    scanned_persisted = _persist_scanned_markers(
+        driver, tenant_id, all_results, relation_type="C4_SCANNED", model="Qwen/Qwen3-14B"
+    )
 
-    # Stage 3 : Persistance
-    _p(85, f"Stage 3 : Persistance de {len(results)} relations...")
-    persister = RelationPersisterC4(driver, tenant_id=tenant_id)
-    counts_before = persister.get_relation_counts()
-    persist_stats = persister.persist_batch(results)
-    counts_after = persister.get_relation_counts()
+    # Stage 3b : Persistance des vraies relations
+    if valid_results:
+        _p(90, f"Stage 3b : Persistance de {len(valid_results)} relations valides...")
+        persister = RelationPersisterC4(driver, tenant_id=tenant_id)
+        counts_before = persister.get_relation_counts()
+        persist_stats = persister.persist_batch(valid_results)
+        counts_after = persister.get_relation_counts()
+    else:
+        counts_before = {}
+        counts_after = {}
+        persist_stats = type("Stats", (), {"created": 0, "updated": 0, "errors": 0})()
 
-    _p(100, f"{persist_stats.created} nouvelles relations creees")
+    _p(100, f"{persist_stats.created} relations valides + {scanned_persisted} marqueurs scanned")
 
     by_type = {}
-    for r in results:
+    for r in valid_results:
         by_type[r.relation] = by_type.get(r.relation, 0) + 1
 
     return {
         "corpus_claims": pre_stats["total_claims"],
         "corpus_docs": pre_stats["total_docs"],
         "pairs_mined": len(pairs),
-        "relations_found": len(results),
+        "pairs_adjudicated": len(all_results),
+        "pairs_scanned_persisted": scanned_persisted,
+        "relations_found": len(valid_results),
         "by_type": by_type,
         "created": persist_stats.created,
         "updated": persist_stats.updated,
@@ -1412,37 +1484,45 @@ def _run_c6_pivots(tenant_id: str, progress=None) -> dict:
 
     _p(30, f"Stage 2 : Adjudication de {len(pairs)} paires...")
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        _p(100, "ANTHROPIC_API_KEY manquante")
-        return {"error": "ANTHROPIC_API_KEY non definie"}
-
-    adjudicator = PivotAdjudicatorC6(max_workers=3)
+    # Adjudication via llm_router (DeepInfra Qwen3-14B)
+    adjudicator = PivotAdjudicatorC6()  # utilise le default (100 workers, sweet spot DeepInfra)
 
     def on_adj(done, total):
         pct = 30 + int(50 * done / total)
         _p(pct, f"Adjudication: {done}/{total}")
 
-    results = adjudicator.adjudicate_batch(pairs, on_progress=on_adj)
+    all_results = adjudicator.adjudicate_batch(pairs, on_progress=on_adj)
+    valid_results = [r for r in all_results if r.above_threshold and r.evidence_valid]
 
-    if not results:
-        _p(100, "Aucune relation C6 detectee")
-        return {"pairs_mined": len(pairs), "relations_found": 0}
+    # Stage 3a : Trace ALL adjudicated pairs via :C6_SCANNED
+    _p(80, f"Stage 3a : Marquage de {len(all_results)} paires adjudiquees...")
+    scanned_persisted = _persist_scanned_markers(
+        driver, tenant_id, all_results, relation_type="C6_SCANNED", model="Qwen/Qwen3-14B"
+    )
 
-    _p(85, f"Stage 3 : Persistance de {len(results)} relations...")
-    persister = RelationPersisterC4(driver, tenant_id=tenant_id)
-    counts_before = persister.get_relation_counts()
-    persist_stats = persister.persist_batch(results)
-    counts_after = persister.get_relation_counts()
+    # Stage 3b : Persistance des vraies relations
+    if valid_results:
+        _p(90, f"Stage 3b : Persistance de {len(valid_results)} relations C6 valides...")
+        persister = RelationPersisterC4(driver, tenant_id=tenant_id)
+        counts_before = persister.get_relation_counts()
+        persist_stats = persister.persist_batch(valid_results)
+        counts_after = persister.get_relation_counts()
+    else:
+        counts_before = {}
+        counts_after = {}
+        persist_stats = type("Stats", (), {"created": 0, "updated": 0, "errors": 0})()
 
-    _p(100, f"{persist_stats.created} nouvelles relations C6")
+    _p(100, f"{persist_stats.created} relations C6 + {scanned_persisted} marqueurs scanned")
 
     by_type = {}
-    for r in results:
+    for r in valid_results:
         by_type[r.relation] = by_type.get(r.relation, 0) + 1
 
     return {
         "pairs_mined": len(pairs),
-        "relations_found": len(results),
+        "pairs_adjudicated": len(all_results),
+        "pairs_scanned_persisted": scanned_persisted,
+        "relations_found": len(valid_results),
         "by_type": by_type,
         "created": persist_stats.created,
         "updated": persist_stats.updated,
@@ -1618,23 +1698,38 @@ def _update_state(
     try:
         from knowbase.common.clients.redis_client import get_redis_client
         rc = get_redis_client()
+        state_key = f"osmose:post_import:state:{tenant_id}"
+
+        # Preserver step_started_at tant que current_step ne change pas
+        # (evite de perdre le timestamp entre progressions d'une meme etape)
+        previous_started_at = None
+        try:
+            prev_raw = rc.client.get(state_key)
+            if prev_raw:
+                prev = json.loads(prev_raw)
+                if prev.get("current_step") == current_step:
+                    previous_started_at = prev.get("step_started_at")
+        except Exception:
+            previous_started_at = None
+
+        if current_step:
+            step_started_at = previous_started_at or time.time()
+        else:
+            step_started_at = None
+
         data = {
             "running": running,
             "current_step": current_step,
             "current_step_name": current_step_name,
             "step_progress": step_progress,
             "step_detail": step_detail,
-            "step_started_at": time.time() if current_step and step_progress == 0 else None,
+            "step_started_at": step_started_at,
             "completed_steps": completed,
             "total_steps": len(all_steps),
             "progress": len(completed) / len(all_steps) if all_steps else 0,
             "results": results or [],
             "updated_at": time.time(),
         }
-        rc.client.set(
-            f"osmose:post_import:state:{tenant_id}",
-            json.dumps(data),
-            ex=3600,
-        )
+        rc.client.set(state_key, json.dumps(data), ex=3600)
     except Exception:
         pass

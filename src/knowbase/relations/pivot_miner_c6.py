@@ -227,9 +227,16 @@ class PivotMinerC6:
         return pairs
 
     def _get_existing_relation_pairs(self) -> set[tuple[str, str]]:
-        """Retourne les paires qui ont deja une relation (C4 ou autre)."""
+        """Retourne les paires deja scannees ou ayant une relation (C4/C6).
+
+        Inclut :
+        - Relations reelles (C4 + C6)
+        - Markers :C4_SCANNED et :C6_SCANNED (paires deja adjudiquees, y compris NONE)
+          pour permettre les runs incrementaux
+        """
         query = """
-        MATCH (a:Claim {tenant_id: $tid})-[r:CONTRADICTS|QUALIFIES|REFINES|COMPLEMENTS|EVOLVES_TO|SPECIALIZES]->(b:Claim)
+        MATCH (a:Claim {tenant_id: $tid})-[r:CONTRADICTS|QUALIFIES|REFINES|COMPLEMENTS|EVOLVES_TO|SPECIALIZES|C4_SCANNED|C6_SCANNED]-(b:Claim)
+        WHERE a.claim_id < b.claim_id
         RETURN a.claim_id AS a_id, b.claim_id AS b_id
         """
         with self.driver.session() as session:

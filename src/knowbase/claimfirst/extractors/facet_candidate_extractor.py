@@ -31,8 +31,29 @@ _VAGUE_LABELS = {
 }
 
 # Limite du nombre de facettes par document
-MAX_FACETS_PER_DOC = 6
+# Configurable via feature_flags.yaml -> claimfirst_pipeline.facet_extraction.max_per_doc
+# Defaut conservateur (6) adapte aux corpus compacts ; augmenter pour corpus
+# scientifiques/techniques ou les documents couvrent naturellement 10-15 themes.
+_MAX_FACETS_PER_DOC_DEFAULT = 6
 MIN_FACETS_PER_DOC = 1
+
+
+def _get_max_facets_per_doc() -> int:
+    """Lit la limite depuis feature_flags.yaml (avec cache module-level)."""
+    try:
+        from knowbase.config.feature_flags import get_feature_flags
+        flags = get_feature_flags()
+        cf = (flags.get("claimfirst_pipeline", {}) or {}).get("facet_extraction", {}) or {}
+        val = cf.get("max_per_doc")
+        if isinstance(val, int) and val >= MIN_FACETS_PER_DOC:
+            return val
+    except Exception:
+        pass
+    return _MAX_FACETS_PER_DOC_DEFAULT
+
+
+# Retrocompat : expose comme attribut module (lazy-evaluated au premier acces)
+MAX_FACETS_PER_DOC = _get_max_facets_per_doc()
 
 
 @dataclass
@@ -205,7 +226,7 @@ def _parse_llm_response(
             source_doc_id=source_doc_id,
         ))
 
-        if len(candidates) >= MAX_FACETS_PER_DOC:
+        if len(candidates) >= _get_max_facets_per_doc():
             break
 
     return candidates
