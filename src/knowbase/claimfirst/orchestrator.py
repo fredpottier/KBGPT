@@ -42,6 +42,7 @@ from knowbase.claimfirst.models.subject_anchor import SubjectAnchor
 from knowbase.claimfirst.models.document_context import DocumentContext, ResolutionStatus
 
 from knowbase.claimfirst.extractors.claim_extractor import ClaimExtractor
+from knowbase.claimfirst.constants import CANONICAL_PREDICATES
 from knowbase.claimfirst.extractors.entity_extractor import EntityExtractor
 from knowbase.claimfirst.extractors.entity_canonicalizer import EntityCanonicalizer
 from knowbase.claimfirst.extractors.context_extractor import ContextExtractor
@@ -110,6 +111,19 @@ class ClaimFirstOrchestrator:
         self.tenant_id = tenant_id
         self.persist_enabled = persist_enabled
 
+        # Predicats effectifs : merge core + domain packs actifs du tenant
+        from knowbase.claimfirst.constants import get_effective_predicates
+        (
+            self._effective_predicates,
+            self._effective_predicate_descriptions,
+            self._effective_predicate_norm_map,
+        ) = get_effective_predicates(tenant_id)
+        logger.info(
+            f"[OSMOSE:ClaimFirst] Effective predicates for tenant={tenant_id}: "
+            f"{len(self._effective_predicates)} canonical "
+            f"({len(self._effective_predicates - CANONICAL_PREDICATES)} domain-specific)"
+        )
+
         # Composants Phase 1.5 (INV-8, INV-9)
         self.context_extractor = ContextExtractor(
             llm_client=llm_client,
@@ -143,7 +157,12 @@ class ClaimFirstOrchestrator:
         )
 
         # Composants Phase 1
-        self.claim_extractor = ClaimExtractor(llm_client)
+        self.claim_extractor = ClaimExtractor(
+            llm_client,
+            canonical_predicates=self._effective_predicates,
+            predicate_descriptions=self._effective_predicate_descriptions,
+            predicate_normalization_map=self._effective_predicate_norm_map,
+        )
         self.entity_extractor = EntityExtractor(
             max_entity_length=50,
             max_entity_words=6,  # Noms marketing SAP font parfois 6 mots
@@ -157,8 +176,14 @@ class ClaimFirstOrchestrator:
         self.facet_registry = facet_registry or FacetRegistry(tenant_id)
         self.claim_clusterer = ClaimClusterer()
         self.relation_detector = RelationDetector()
-        self.chain_detector = ChainDetector()
-        self.slot_enricher = SlotEnricher()
+        self.chain_detector = ChainDetector(
+            canonical_predicates=self._effective_predicates,
+        )
+        self.slot_enricher = SlotEnricher(
+            canonical_predicates=self._effective_predicates,
+            predicate_descriptions=self._effective_predicate_descriptions,
+            predicate_normalization_map=self._effective_predicate_norm_map,
+        )
 
         # Persistance
         if neo4j_driver:

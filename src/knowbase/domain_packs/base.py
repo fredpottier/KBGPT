@@ -217,6 +217,56 @@ class DomainPack(ABC):
             return []
         return [str(item).strip() for item in gazetteer if item]
 
+    def get_canonical_predicates(self) -> dict:
+        """Predicats canoniques additionnels specifiques au domaine.
+
+        Retourne un dict {predicate_name: description} qui sera mergee avec
+        les predicats du core ClaimFirst. Les descriptions sont injectees dans
+        le prompt LLM (Layer A) pour que le modele les utilise en priorite.
+
+        Exemple biomedical :
+            {
+                "CAUSES": "X has a direct causal effect leading to Y",
+                "PREVENTS": "X prevents the occurrence of Y",
+                "INHIBITS": "X biochemically inhibits Y"
+            }
+
+        Charge depuis la cle 'canonical_predicates' du context_defaults.json.
+        """
+        defaults = self._load_defaults_json()
+        preds = defaults.get("canonical_predicates", {})
+        if not isinstance(preds, dict):
+            logger.warning(
+                f"[DomainPack:{self.name}] canonical_predicates is not a dict, ignoring"
+            )
+            return {}
+        return {str(k).strip().upper(): str(v) for k, v in preds.items() if k and v}
+
+    def get_predicate_normalization_map(self) -> dict:
+        """Mapping d'alias LLM vers predicats canoniques du domaine.
+
+        Permet de rattraper les variantes courantes produites par le LLM
+        (synonymes, temps grammaticaux, inverses) et les mapper vers un
+        predicat canonique stable du domaine.
+
+        Exemple biomedical :
+            {"CORRELATES_WITH": "ASSOCIATED_WITH", "TRIGGERS": "CAUSES"}
+
+        Charge depuis la cle 'predicate_normalization_map' du context_defaults.json.
+        """
+        defaults = self._load_defaults_json()
+        mapping = defaults.get("predicate_normalization_map", {})
+        if not isinstance(mapping, dict):
+            logger.warning(
+                f"[DomainPack:{self.name}] predicate_normalization_map is not a dict, ignoring"
+            )
+            return {}
+        return {
+            str(k).strip().upper(): str(v).strip().upper()
+            for k, v in mapping.items()
+            if k and v
+        }
+
     def get_canonical_aliases(self) -> dict:
         """Table d'alias -> canonical pour la resolution d'entites.
 

@@ -48,15 +48,19 @@ logger = logging.getLogger(__name__)
 from knowbase.claimfirst.constants import (
     CANONICAL_PREDICATES,
     PREDICATE_NORMALIZATION_MAP,
+    CORE_PREDICATE_DESCRIPTIONS,
 )
 
 
 def normalize_predicate(raw_predicate: str) -> Optional[str]:
     """
-    Normalise un prédicat vers la whitelist canonique (Layer B).
+    Normalise un prédicat vers la whitelist canonique core (Layer B, fallback).
+
+    Pour domain-aware, utiliser ClaimExtractor._normalize_effective() qui
+    combine core + predicats des Domain Packs actifs.
 
     Returns:
-        Le prédicat canonique, ou None si non mappable.
+        Le prédicat canonique core, ou None si non mappable.
     """
     pred = raw_predicate.strip().upper().replace(" ", "_")
     if pred in CANONICAL_PREDICATES:
@@ -65,6 +69,21 @@ def normalize_predicate(raw_predicate: str) -> Optional[str]:
     if mapped:
         return mapped
     return None
+
+
+def build_predicates_table(descriptions: Dict[str, str]) -> str:
+    """Construit la table markdown de predicats pour injection dans le prompt LLM.
+
+    Args:
+        descriptions: Dict {PREDICATE: description}
+
+    Returns:
+        Table markdown formatee.
+    """
+    lines = ["| Predicate | Meaning |", "|-----------|---------|"]
+    for pred in sorted(descriptions.keys()):
+        lines.append(f"| {pred} | {descriptions[pred]} |")
+    return "\n".join(lines)
 
 
 # ============================================================================
@@ -138,28 +157,13 @@ Not all claims have the same value. Prioritize in this order:
 
 ## STRICT CONSTRAINT — structured_form predicates
 
-You MUST choose EXACTLY one predicate from this CLOSED list (12 predicates):
+You MUST choose EXACTLY one predicate from this CLOSED list:
 
-| Predicate | Meaning |
-|-----------|---------|
-| USES | X explicitly uses Y as a tool, technology, or component |
-| REQUIRES | X needs Y to function (includes "depends on") |
-| BASED_ON | X is built on, derived from, or runs on Y |
-| SUPPORTS | X supports or is designed for Y |
-| ENABLES | X makes possible a specific named capability Y |
-| PROVIDES | X provides, delivers, or offers Y |
-| EXTENDS | X extends or adds functionality to Y |
-| REPLACES | X replaces, supersedes, or succeeds Y |
-| PART_OF | X is a module, component, or feature of Y |
-| INTEGRATED_IN | X is integrated or embedded in Y |
-| COMPATIBLE_WITH | X is compatible with or works alongside Y |
-| CONFIGURES | X configures, manages, or controls Y |
+{predicates_table}
 
 **RULES:**
-- NEVER invent a predicate outside this list. No IS_A_FEATURE_IN, no OFFERS, no INCLUDES.
+- NEVER invent a predicate outside this list. No synonyms, no inflections, no invented forms.
 - If the relationship does not fit any predicate above, set "structured_form": null.
-- USES: Only when X explicitly uses Y. NOT for "users use X" or "X can be used".
-- ENABLES: Only when X enables a specific named capability Y. NOT for "enables users to...".
 - Subject and object must be proper nouns or technical terms, NOT descriptions or clauses.
 - If no clear relation between two named entities → "structured_form": null.
 
@@ -187,8 +191,11 @@ def build_claim_extraction_prompt(
     section_title: str = "",
     section_concepts: str = "",
     domain_context: str = "",
+    predicates_table: str = "",
 ) -> str:
-    """Construit le prompt d'extraction de claims (V2 enrichi)."""
+    """Construit le prompt d'extraction de claims (V2 enrichi, domain-aware)."""
+    if not predicates_table:
+        predicates_table = build_predicates_table(CORE_PREDICATE_DESCRIPTIONS)
     return CLAIM_EXTRACTION_PROMPT_TEMPLATE.format(
         units_text=units_text,
         doc_title=doc_title,
@@ -197,11 +204,12 @@ def build_claim_extraction_prompt(
         section_title=section_title or "N/A",
         section_concepts=section_concepts or "N/A",
         domain_context=domain_context,
+        predicates_table=predicates_table,
     )
 
 
 # Nombre max d'appels LLM en parallèle (évite de surcharger vLLM/OpenAI)
-MAX_CONCURRENT_LLM_CALLS = 10
+MAX_CONCURRENT_LLM_CALLS = 180  # DeepInfra supporte ~200, marge de securite 10%
 
 
 @dataclass
@@ -240,6 +248,9 @@ class ClaimExtractor:
         max_unit_length: int = 500,
         batch_size: int = 10,
         max_concurrent: int = MAX_CONCURRENT_LLM_CALLS,
+        canonical_predicates: Optional[frozenset] = None,
+        predicate_descriptions: Optional[Dict[str, str]] = None,
+        predicate_normalization_map: Optional[Dict[str, str]] = None,
     ):
         """
         Initialise l'extracteur.
@@ -250,10 +261,31 @@ class ClaimExtractor:
             max_unit_length: Longueur maximale d'une unité
             batch_size: Nombre d'unités par batch LLM
             max_concurrent: Nombre max d'appels LLM en parallèle
+            canonical_predicates: Predicats autorises (core + domain packs actifs).
+                Si None, utilise CANONICAL_PREDICATES core.
+            predicate_descriptions: Descriptions des predicats pour prompt LLM.
+                Si None, utilise CORE_PREDICATE_DESCRIPTIONS.
+            predicate_normalization_map: Mapping alias -> canonique.
+                Si None, utilise PREDICATE_NORMALIZATION_MAP core.
         """
         self.llm_client = llm_client
         self.batch_size = batch_size
         self.max_concurrent = max_concurrent
+
+        # Predicats domain-aware (core + domain packs actifs)
+        self.canonical_predicates: frozenset = canonical_predicates or CANONICAL_PREDICATES
+        self.predicate_descriptions: Dict[str, str] = (
+            predicate_descriptions or CORE_PREDICATE_DESCRIPTIONS
+        )
+        self.predicate_normalization_map: Dict[str, str] = (
+            predicate_normalization_map or PREDICATE_NORMALIZATION_MAP
+        )
+        # Table markdown precalculee pour injection dans le prompt LLM
+        self._predicates_table: str = build_predicates_table(self.predicate_descriptions)
+        logger.info(
+            f"[OSMOSE:ClaimExtractor] Predicates: {len(self.canonical_predicates)} canonical, "
+            f"{len(self.predicate_normalization_map)} normalization aliases"
+        )
 
         # Indexer pour segmentation
         self.unit_indexer = AssertionUnitIndexer(
@@ -277,6 +309,20 @@ class ClaimExtractor:
             "json_parse_errors": 0,
             "empty_responses": 0,
         }
+
+    def _normalize_effective(self, raw_predicate: str) -> Optional[str]:
+        """Normalise un predicat avec le set effectif (core + domain packs).
+
+        Returns:
+            Le predicat canonique (effectif), ou None si non-mappable.
+        """
+        pred = raw_predicate.strip().upper().replace(" ", "_")
+        if pred in self.canonical_predicates:
+            return pred
+        mapped = self.predicate_normalization_map.get(pred)
+        if mapped and mapped in self.canonical_predicates:
+            return mapped
+        return None
 
     def extract(
         self,
@@ -415,7 +461,7 @@ class ClaimExtractor:
         # Formatter les unités pour le LLM
         units_text = format_units_for_llm(task.units)
 
-        # Construire le prompt V2 (enrichi avec contexte)
+        # Construire le prompt V2 (enrichi avec contexte + domain-aware predicates)
         prompt = build_claim_extraction_prompt(
             units_text=units_text,
             doc_title=task.doc_title or "Unknown",
@@ -424,6 +470,7 @@ class ClaimExtractor:
             section_title=task.section_title,
             section_concepts=task.section_concepts,
             domain_context=task.domain_context,
+            predicates_table=self._predicates_table,
         )
 
         # Appel LLM async
@@ -480,7 +527,7 @@ class ClaimExtractor:
         puis met à jour les structured_form in-place.
         Gratuit sur vLLM (EC2), seul le temps compte.
         """
-        predicates_list = ", ".join(sorted(CANONICAL_PREDICATES))
+        predicates_list = ", ".join(sorted(self.canonical_predicates))
 
         items_text = "\n".join(
             f'{i+1}. Claim: "{c.text[:120]}" | '
@@ -517,7 +564,7 @@ Reply ONLY with a JSON array, one entry per claim:
 
                     claim, raw_pred = claims_to_fix[idx - 1]
 
-                    if new_pred in CANONICAL_PREDICATES:
+                    if new_pred in self.canonical_predicates:
                         claim.structured_form["predicate"] = new_pred
                         self.stats["predicates_retried"] += 1
                         logger.debug(
@@ -598,7 +645,7 @@ Reply ONLY with a JSON array, one entry per claim:
         # Formatter les unités pour le LLM
         units_text = format_units_for_llm(units)
 
-        # Construire le prompt V2 (enrichi avec contexte)
+        # Construire le prompt V2 (enrichi avec contexte + domain-aware predicates)
         prompt = build_claim_extraction_prompt(
             units_text=units_text,
             doc_title=doc_title or "Unknown",
@@ -607,6 +654,7 @@ Reply ONLY with a JSON array, one entry per claim:
             section_title=section_title,
             section_concepts=section_concepts,
             domain_context=domain_context,
+            predicates_table=self._predicates_table,
         )
 
         # Appel LLM
@@ -806,10 +854,10 @@ Reply ONLY with a JSON array, one entry per claim:
 
         raw_pred = claim.structured_form["predicate"]
 
-        # Layer B: normalisation statique
-        canonical = normalize_predicate(raw_pred)
+        # Layer B: normalisation statique (domain-aware)
+        canonical = self._normalize_effective(raw_pred)
         if canonical:
-            if raw_pred.upper() in CANONICAL_PREDICATES:
+            if raw_pred.upper() in self.canonical_predicates:
                 self.stats["predicates_canonical"] += 1
             else:
                 self.stats["predicates_normalized"] += 1

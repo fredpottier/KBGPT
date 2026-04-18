@@ -88,10 +88,13 @@ class ChainDetector:
         max_edges_per_key: int = MAX_EDGES_PER_KEY,
         max_edges_per_key_cross_doc: int = MAX_EDGES_PER_KEY_CROSS_DOC,
         max_edges_per_doc_pair: int = MAX_EDGES_PER_DOC_PAIR,
+        canonical_predicates: Optional[frozenset] = None,
     ):
         self.max_edges_per_key = max_edges_per_key
         self.max_edges_per_key_cross_doc = max_edges_per_key_cross_doc
         self.max_edges_per_doc_pair = max_edges_per_doc_pair
+        # Predicats effectifs (core + domain packs). Si None, retombe sur core.
+        self.canonical_predicates: frozenset = canonical_predicates or _CANONICAL_PREDICATES
         self._stats = {
             "claims_with_sf": 0,
             "docs_processed": 0,
@@ -169,7 +172,7 @@ class ChainDetector:
             if not (subj and pred and obj):
                 continue
             # Rejeter les prédicats non-canoniques (MONITORS, CONNECTS_TO, etc.)
-            if pred.upper() not in _CANONICAL_PREDICATES:
+            if pred.upper() not in self.canonical_predicates:
                 skipped_pred += 1
                 continue
             valid.append(cd)
@@ -338,7 +341,7 @@ class ChainDetector:
             if not (subj and pred and obj):
                 continue
             # Rejeter les prédicats non-canoniques
-            if pred.upper() not in _CANONICAL_PREDICATES:
+            if pred.upper() not in self.canonical_predicates:
                 continue
             valid.append(cd)
 
@@ -668,9 +671,8 @@ class ChainDetector:
     # Utilitaires
     # ---------------------------------------------------------------
 
-    @staticmethod
-    def _filter_valid_claims(claim_dicts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Filtre les claims avec SF valide et prédicat canonique."""
+    def _filter_valid_claims(self, claim_dicts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Filtre les claims avec SF valide et prédicat canonique (domain-aware)."""
         valid = []
         for cd in claim_dicts:
             sf = cd.get("structured_form")
@@ -681,7 +683,7 @@ class ChainDetector:
             obj = sf.get("object", "")
             if not (subj and pred and obj):
                 continue
-            if pred.upper() not in _CANONICAL_PREDICATES:
+            if pred.upper() not in self.canonical_predicates:
                 continue
             valid.append(cd)
         return valid

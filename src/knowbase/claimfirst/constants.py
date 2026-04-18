@@ -7,17 +7,39 @@ les doublons et les divergences silencieuses.
 
 from __future__ import annotations
 
-from typing import Optional
+import logging
+from typing import Dict, FrozenSet, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # ── Predicats canoniques (whitelist) ──────────────────────────────────────────
 # Les seuls predicats autorises dans le KG. Tout predicat LLM non-canonique
 # est normalise via PREDICATE_NORMALIZATION_MAP ou rejete.
+#
+# Ceci est le CORE set (SAP/enterprise/regulatory). Les Domain Packs peuvent
+# AJOUTER des predicats specifiques via get_canonical_predicates().
 
 CANONICAL_PREDICATES = frozenset({
     "USES", "REQUIRES", "BASED_ON", "SUPPORTS", "ENABLES",
     "PROVIDES", "EXTENDS", "REPLACES", "PART_OF",
     "INTEGRATED_IN", "COMPATIBLE_WITH", "CONFIGURES",
 })
+
+# Descriptions core pour injection dans le prompt LLM (Layer A)
+CORE_PREDICATE_DESCRIPTIONS: Dict[str, str] = {
+    "USES": "X explicitly uses Y as a tool, technology, or component",
+    "REQUIRES": "X needs Y to function (includes 'depends on')",
+    "BASED_ON": "X is built on, derived from, or runs on Y",
+    "SUPPORTS": "X supports or is designed for Y",
+    "ENABLES": "X makes possible a specific named capability Y",
+    "PROVIDES": "X provides, delivers, or offers Y",
+    "EXTENDS": "X extends or adds functionality to Y",
+    "REPLACES": "X replaces, supersedes, or succeeds Y",
+    "PART_OF": "X is a module, component, or feature of Y",
+    "INTEGRATED_IN": "X is integrated or embedded in Y",
+    "COMPATIBLE_WITH": "X is compatible with or works alongside Y",
+    "CONFIGURES": "X configures, manages, or controls Y",
+}
 
 # ── Normalisation des predicats (Layer B) ─────────────────────────────────────
 # Le prompt durci (Layer A) capture 90%+, ce mapping rattrape le reste.
@@ -75,7 +97,10 @@ PREDICATE_PRIORITY = {
 
 
 def normalize_predicate(raw_predicate: str) -> Optional[str]:
-    """Normalise un predicat vers la whitelist canonique.
+    """Normalise un predicat vers la whitelist canonique (CORE uniquement).
+
+    Pour la version domain-aware, utiliser get_effective_predicates(tenant_id)
+    puis appeler l'instance method de ClaimExtractor.
 
     Returns:
         Le predicat canonique, ou None si non-mappable.
@@ -84,3 +109,65 @@ def normalize_predicate(raw_predicate: str) -> Optional[str]:
     if upper in CANONICAL_PREDICATES:
         return upper
     return PREDICATE_NORMALIZATION_MAP.get(upper)
+
+
+# ── Resolution domain-aware des predicats effectifs ──────────────────────────
+# Merge le core + les predicats apportes par les Domain Packs actifs du tenant.
+
+def get_effective_predicates(
+    tenant_id: str,
+) -> Tuple[FrozenSet[str], Dict[str, str], Dict[str, str]]:
+    """Merge les predicats core avec ceux des Domain Packs actifs pour un tenant.
+
+    Args:
+        tenant_id: Identifiant du tenant (ex: "default")
+
+    Returns:
+        (predicates_set, descriptions_dict, normalization_map)
+        - predicates_set : frozenset de noms de predicats autorises
+        - descriptions_dict : nom -> description (pour prompt LLM)
+        - normalization_map : alias -> canonique (pour post-processing)
+    """
+    predicates = set(CANONICAL_PREDICATES)
+    descriptions = dict(CORE_PREDICATE_DESCRIPTIONS)
+    norm_map = dict(PREDICATE_NORMALIZATION_MAP)
+
+    try:
+        from knowbase.domain_packs.registry import get_pack_registry
+
+        registry = get_pack_registry()
+        active_packs = registry.get_active_packs(tenant_id)
+    except Exception as e:
+        logger.warning(
+            f"[constants] Could not load active domain packs for {tenant_id}: {e} — "
+            f"using core predicates only"
+        )
+        return frozenset(predicates), descriptions, norm_map
+
+    for pack in active_packs:
+        try:
+            pack_preds = pack.get_canonical_predicates()
+            if pack_preds:
+                predicates.update(pack_preds.keys())
+                descriptions.update(pack_preds)
+                logger.info(
+                    f"[constants] Merged {len(pack_preds)} predicates from pack '{pack.name}': "
+                    f"{sorted(pack_preds.keys())}"
+                )
+        except Exception as e:
+            logger.warning(
+                f"[constants] Pack '{pack.name}' get_canonical_predicates error: {e}"
+            )
+
+        try:
+            pack_norm = pack.get_predicate_normalization_map()
+            if pack_norm:
+                # Conflits : les alias du domain pack ecrasent le core
+                # (le pack est plus specifique)
+                norm_map.update(pack_norm)
+        except Exception as e:
+            logger.warning(
+                f"[constants] Pack '{pack.name}' get_predicate_normalization_map error: {e}"
+            )
+
+    return frozenset(predicates), descriptions, norm_map

@@ -30,44 +30,41 @@ from knowbase.claimfirst.constants import (
 )
 
 
-def _normalize_predicate(raw_predicate: str) -> Optional[str]:
-    """Normalise un prédicat vers la whitelist canonique."""
+def _normalize_predicate(
+    raw_predicate: str,
+    canonical_predicates: frozenset = _CANONICAL_PREDICATES,
+    normalization_map: Dict[str, str] = _PREDICATE_NORMALIZATION_MAP,
+) -> Optional[str]:
+    """Normalise un prédicat vers la whitelist canonique (domain-aware).
+
+    Args:
+        raw_predicate: Predicat brut du LLM
+        canonical_predicates: Set des predicats autorises (core + domain packs)
+        normalization_map: Mapping alias -> canonique
+    """
     pred = raw_predicate.strip().upper().replace(" ", "_")
-    if pred in _CANONICAL_PREDICATES:
+    if pred in canonical_predicates:
         return pred
-    mapped = _PREDICATE_NORMALIZATION_MAP.get(pred)
-    if mapped:
+    mapped = normalization_map.get(pred)
+    if mapped and mapped in canonical_predicates:
         return mapped
     return None
 
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 15
-MAX_CONCURRENT = 5
+MAX_CONCURRENT = 180  # DeepInfra: 200 max, marge 10%
 
 SLOT_ENRICHMENT_PROMPT = """Extract structured triplets from claims. Return ONLY a JSON array, no extra text or explanation.
 
-## Predicates (CLOSED list, 12 only)
+## Predicates (CLOSED list)
 
-| Predicate | Meaning |
-|-----------|---------|
-| USES | X explicitly uses Y |
-| REQUIRES | X needs Y to function |
-| BASED_ON | X is built on or derived from Y |
-| SUPPORTS | X supports or is designed for Y |
-| ENABLES | X makes possible capability Y |
-| PROVIDES | X provides, delivers, or offers Y |
-| EXTENDS | X extends or adds functionality to Y |
-| REPLACES | X replaces, supersedes, or succeeds Y |
-| PART_OF | X is a module, component, or feature of Y |
-| INTEGRATED_IN | X is integrated or embedded in Y |
-| COMPATIBLE_WITH | X is compatible with or works alongside Y |
-| CONFIGURES | X configures, manages, or controls Y |
+{predicates_table}
 
 RULES:
 - Subject and object must be proper nouns or technical terms, NOT descriptions.
 - If no clear relation between two named entities → null.
-- If the predicate does not fit any of the 12 → null.
+- If the predicate does not fit any above → null.
 - Prefer null over invention.
 - Use "Known entities" when listed. Do NOT invent entities not in the claim.
 
@@ -76,7 +73,7 @@ RULES:
 {claims_block}
 
 ## Response — ONLY a JSON array, one entry per claim, no comments:
-[{{"index":1,"structured_form":{{"subject":"SAP S/4HANA","predicate":"USES","object":"SAP HANA"}}}},{{"index":2,"structured_form":null}}]"""
+[{{"index":1,"structured_form":{{"subject":"Entity A","predicate":"USES","object":"Entity B"}}}},{{"index":2,"structured_form":null}}]"""
 
 
 @dataclass
@@ -102,9 +99,33 @@ class SlotEnricher:
         self,
         batch_size: int = BATCH_SIZE,
         max_concurrent: int = MAX_CONCURRENT,
+        canonical_predicates: Optional[frozenset] = None,
+        predicate_descriptions: Optional[Dict[str, str]] = None,
+        predicate_normalization_map: Optional[Dict[str, str]] = None,
     ):
         self.batch_size = batch_size
         self.max_concurrent = max_concurrent
+        # Predicats effectifs (core + domain packs actifs)
+        self.canonical_predicates: frozenset = canonical_predicates or _CANONICAL_PREDICATES
+        # Descriptions pour le prompt. Fallback minimal si non-fournies.
+        if predicate_descriptions:
+            self.predicate_descriptions: Dict[str, str] = predicate_descriptions
+        else:
+            # Import lazy pour retrocompat (pas de circulaire)
+            from knowbase.claimfirst.constants import CORE_PREDICATE_DESCRIPTIONS
+            self.predicate_descriptions = CORE_PREDICATE_DESCRIPTIONS
+        self.predicate_normalization_map: Dict[str, str] = (
+            predicate_normalization_map or _PREDICATE_NORMALIZATION_MAP
+        )
+        # Table markdown precalculee pour injection dans le prompt LLM
+        self._predicates_table: str = "\n".join(
+            ["| Predicate | Meaning |", "|-----------|---------|"] +
+            [
+                f"| {pred} | {self.predicate_descriptions[pred]} |"
+                for pred in sorted(self.canonical_predicates)
+                if pred in self.predicate_descriptions
+            ]
+        )
         self._stats = {
             "claims_processed": 0,
             "claims_enriched": 0,
@@ -369,7 +390,10 @@ class SlotEnricher:
         from knowbase.common.llm_router import get_llm_router, TaskType
 
         router = get_llm_router()
-        prompt = SLOT_ENRICHMENT_PROMPT.format(claims_block=claims_block)
+        prompt = SLOT_ENRICHMENT_PROMPT.format(
+            claims_block=claims_block,
+            predicates_table=self._predicates_table,
+        )
 
         messages = [
             {"role": "user", "content": prompt},
@@ -469,8 +493,12 @@ class SlotEnricher:
         if not subject or not predicate or not obj:
             return None
 
-        # Normaliser le prédicat
-        canonical_pred = _normalize_predicate(predicate)
+        # Normaliser le prédicat (domain-aware)
+        canonical_pred = _normalize_predicate(
+            predicate,
+            canonical_predicates=self.canonical_predicates,
+            normalization_map=self.predicate_normalization_map,
+        )
         if not canonical_pred:
             return None
 

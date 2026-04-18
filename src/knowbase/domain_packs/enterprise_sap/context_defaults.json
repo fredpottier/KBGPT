@@ -264,6 +264,40 @@
     "SAP Sustainability Control Tower",
     "SAP Sustainability Footprint Management"
   ],
+  "canonical_predicates": {
+    "DEPLOYED_ON": "X is deployed, hosted, or runs on infrastructure Y (cloud, on-premise, edition)",
+    "AVAILABLE_SINCE": "X is available starting from version, release, or edition Y",
+    "DEPRECATED_SINCE": "X is deprecated or sunset starting from version, release, or edition Y",
+    "LICENSED_AS": "X is licensed or commercially packaged as Y (license type, commercial name)",
+    "PROCESSES": "X processes, transforms, or handles Y (data, transaction, object)",
+    "EXTENDS_MODULE": "X is an extension, add-on, or enhancement to SAP module Y",
+    "INTEGRATES_VIA": "X integrates with others via interface or protocol Y (BAPI, IDoc, OData, CPI scenario)"
+  },
+
+  "predicate_normalization_map": {
+    "HOSTED_ON": "DEPLOYED_ON",
+    "RUNS_ON_PLATFORM": "DEPLOYED_ON",
+    "DEPLOYED_IN": "DEPLOYED_ON",
+    "AVAILABLE_FROM": "AVAILABLE_SINCE",
+    "RELEASED_IN": "AVAILABLE_SINCE",
+    "INTRODUCED_IN": "AVAILABLE_SINCE",
+    "SHIPPED_WITH": "AVAILABLE_SINCE",
+    "REMOVED_IN": "DEPRECATED_SINCE",
+    "SUNSET_IN": "DEPRECATED_SINCE",
+    "RETIRED_IN": "DEPRECATED_SINCE",
+    "SOLD_AS": "LICENSED_AS",
+    "COMMERCIALIZED_AS": "LICENSED_AS",
+    "PACKAGED_AS": "LICENSED_AS",
+    "HANDLES": "PROCESSES",
+    "TRANSFORMS": "PROCESSES",
+    "MANIPULATES_DATA": "PROCESSES",
+    "ENHANCES": "EXTENDS_MODULE",
+    "ADDS_TO": "EXTENDS_MODULE",
+    "CONNECTED_VIA": "INTEGRATES_VIA",
+    "TALKS_TO_VIA": "INTEGRATES_VIA",
+    "EXCHANGES_VIA": "INTEGRATES_VIA"
+  },
+
   "entity_stoplist": [
     "SAP",
     "SAP SE",
