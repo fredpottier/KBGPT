@@ -97,16 +97,29 @@ text, NOT specific keywords.
 
 4. If scope_relation = EQUIVALENT and assertions match, prefer REAFFIRMS or EQUIVALENT.
 
-5. CONFLICT requires:
-   - Truly incompatible assertions (e.g., contradictory numbers, exclusive states)
+5. CONFLICT requires ALL of:
+   - **Direct factual incompatibility**: contradictory numerical values (e.g., "73 passengers" vs "48 passengers" same scope), mutually exclusive states (e.g., "is solid" vs "is liquid"), or directly opposing assertions (e.g., "must be encrypted" vs "must NOT be encrypted")
    - SAME or overlapping scope (not just "same product family")
    - Active validity windows (both in force)
+   A simple phrasing difference, a typographic variation, or citing the same external authority is NOT a conflict.
 
-6. Beware false positives:
-   - Different units expressing same value: "100 knots" vs "185 km/hr (100 knots)" → EQUIVALENT, not CONFLICT
-   - Same rule rephrased: "Changed Product Rule (CPR)" vs "'Changed Product Rule (CPR)'" → EQUIVALENT
-   - Different scopes: "InGaN exclusion" vs "InAlN exclusion" → likely DISJOINT or OVERLAP, not CONFLICT
-   - Different time windows for same product: → SUPERSEDES, not CONFLICT
+6. **CRITICAL false-positive guards** (read carefully — these are ALL NON-conflicts):
+
+   a. **Same external citation** : two claims citing the same external document/standard/regulation (by name or number — e.g., "FAA AC 25-17A", "ISO 9001", "CS 25.1309", "Regulation (EU) 2021/821") are EQUIVALENT or REAFFIRMS, NOT CONFLICT. They reference the same authority, they do not contradict it.
+
+   b. **Different units expressing same value** : "100 knots" vs "185 km/hr (100 knots)" → EQUIVALENT, NOT CONFLICT (the second just adds the metric equivalent).
+
+   c. **Same rule rephrased / typographic variation** : "Changed Product Rule (CPR)" vs "'Changed Product Rule (CPR)'", or "the rule X" vs "rule X" → EQUIVALENT, NOT CONFLICT.
+
+   d. **Different specific exclusions/inclusions of similar items** : "InGaN exclusion" vs "InAlN exclusion" → DISJOINT or OVERLAP (they exclude different materials), NOT CONFLICT (they don't directly contradict each other).
+
+   e. **Different time windows for same product/rule** : "rule applies before X" vs "rule applies after X" same scope → SUPERSEDES candidate, NOT CONFLICT (they're sequential, not contradicting).
+
+   f. **One claim is a more detailed restatement of the other** : "Aircraft must comply with CS 25.1309" vs "Aircraft must comply with CS 25.1309 (relating to safety)" → EQUIVALENT or SUBSET, NOT CONFLICT.
+
+   g. **Both claims acknowledge the same external standard as guidance** : "AC 25-17A is acceptable means of compliance" appearing in both → EQUIVALENT, NOT CONFLICT.
+
+When in doubt between CONFLICT and EQUIVALENT/OVERLAP, prefer the non-CONFLICT option. False CONFLICTs are the worst-case error in this system — they pollute the dashboard with noise. False EQUIVALENTs are recoverable later.
 
 ## Strength
 

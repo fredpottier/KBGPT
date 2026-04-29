@@ -58,6 +58,7 @@ def main() -> int:
     parser.add_argument("--threshold", type=float, default=0.55, help="Composite score threshold (default 0.55)")
     parser.add_argument("--max-pairs", type=int, default=10000, help="Cap total pairs (default 10000)")
     parser.add_argument("--gate-sample", type=int, default=0, help="Sample size for Gate evaluation (0=all). Default 0=all.")
+    parser.add_argument("--skip-new-pairs", action="store_true", help="Skip multi-signal new pairs mining (use only C4 cached). Recommended on first run to avoid Neo4j OOM.")
     args = parser.parse_args()
 
     if not args.dry_run and not args.run:
@@ -85,6 +86,7 @@ def main() -> int:
         candidates = miner.mine_candidates(
             composite_threshold=args.threshold,
             max_pairs=args.max_pairs,
+            include_new_pairs=not args.skip_new_pairs,
         )
         elapsed_mining = time.time() - t0
         logger.info(f"  {len(candidates):,} candidates retained (elapsed: {elapsed_mining:.1f}s)")
