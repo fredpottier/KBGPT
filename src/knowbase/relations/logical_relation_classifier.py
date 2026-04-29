@@ -103,23 +103,31 @@ text, NOT specific keywords.
    - Active validity windows (both in force)
    A simple phrasing difference, a typographic variation, or citing the same external authority is NOT a conflict.
 
-6. **CRITICAL false-positive guards** (read carefully — these are ALL NON-conflicts):
+6. **CRITICAL false-positive guards** (universal, language- and domain-agnostic):
 
-   a. **Same external citation** : two claims citing the same external document/standard/regulation (by name or number — e.g., "FAA AC 25-17A", "ISO 9001", "CS 25.1309", "Regulation (EU) 2021/821") are EQUIVALENT or REAFFIRMS, NOT CONFLICT. They reference the same authority, they do not contradict it.
+   a. **Same external citation** : two claims citing the same external document/standard/regulation (by name or identifier) are EQUIVALENT or REAFFIRMS, NOT CONFLICT. They reference the same authority, they do not contradict it.
 
-   b. **Different units expressing same value** : "100 knots" vs "185 km/hr (100 knots)" → EQUIVALENT, NOT CONFLICT (the second just adds the metric equivalent).
+   b. **Different units expressing same value** : numerically identical with different units (e.g., units of measurement equivalence, language translations) → EQUIVALENT, NOT CONFLICT.
 
-   c. **Same rule rephrased / typographic variation** : "Changed Product Rule (CPR)" vs "'Changed Product Rule (CPR)'", or "the rule X" vs "rule X" → EQUIVALENT, NOT CONFLICT.
+   c. **Typographic / phrasing variation only** : same content with different word order, punctuation, capitalisation, or quote style → EQUIVALENT, NOT CONFLICT.
 
-   d. **Different specific exclusions/inclusions of similar items** : "InGaN exclusion" vs "InAlN exclusion" → DISJOINT or OVERLAP (they exclude different materials), NOT CONFLICT (they don't directly contradict each other).
+   d. **Different enumerated entries of the same standard/document** (CRITICAL — the most common false positive):
+      Normative documents (regulations, standards, technical specs, list-based control schemes) frequently contain MULTIPLE enumerated items, sections, sub-paragraphs, or table rows that each define independent rules with different threshold values, conditions, or specifications.
+      For example, an item "Category A: threshold > 0.002" and an item "Category B: threshold > 0.1" are NOT in conflict — they define independent applicability rules for distinct categories.
+      Without explicit textual evidence that BOTH claims target the EXACT SAME enumerated entry / section / configuration / category, prefer OVERLAP or DISJOINT, NOT CONFLICT.
+      Indicators of "different enumerated entries" : different section IDs, different category labels, different sub-item references, distinct list positions.
 
-   e. **Different time windows for same product/rule** : "rule applies before X" vs "rule applies after X" same scope → SUPERSEDES candidate, NOT CONFLICT (they're sequential, not contradicting).
+   e. **Temporal succession evidence** : if the two source documents have publication dates differing significantly (typically more than 1 year for regulatory/normative texts) AND share an evident document-family relationship (versioning convention, replacement clauses, predecessor-successor naming), prefer SUPERSEDES, NOT CONFLICT. Successor rules replace predecessor rules; they don't contradict them. Look for : explicit "repealed by" / "replaces" / "supersedes" language, or strong family/numbering pattern (e.g., a 2009 doc and a 2021 doc that clearly belong to the same regulatory line).
 
-   f. **One claim is a more detailed restatement of the other** : "Aircraft must comply with CS 25.1309" vs "Aircraft must comply with CS 25.1309 (relating to safety)" → EQUIVALENT or SUBSET, NOT CONFLICT.
+   f. **Different specific items within a list of similar entities** : two claims that exclude or include different specific items (different materials, different sub-categories, different model numbers) → DISJOINT or OVERLAP, NOT CONFLICT. They make independent assertions about different entities.
 
-   g. **Both claims acknowledge the same external standard as guidance** : "AC 25-17A is acceptable means of compliance" appearing in both → EQUIVALENT, NOT CONFLICT.
+   g. **Different categorical thresholds within a graduated scheme** : graduated schemes often define multiple thresholds (e.g., severity levels, distance categories, performance tiers) that coexist independently. Different threshold values from a graduated scheme → OVERLAP, NOT CONFLICT, unless explicitly stated to be the SAME tier with different values.
 
-When in doubt between CONFLICT and EQUIVALENT/OVERLAP, prefer the non-CONFLICT option. False CONFLICTs are the worst-case error in this system — they pollute the dashboard with noise. False EQUIVALENTs are recoverable later.
+   h. **One claim is a more detailed restatement of the other** : same assertion with extra qualifying clause → EQUIVALENT or SUBSET, NOT CONFLICT.
+
+When in doubt between CONFLICT and OVERLAP/SUPERSEDES, prefer the non-CONFLICT option. False CONFLICTs are the worst-case error in this system — they pollute the dashboard with noise. The bar for CONFLICT is high: BOTH claims must explicitly target the SAME identified scope/entry/configuration AND make incompatible assertions, with no plausible alternative interpretation.
+
+NOTE FOR FUTURE EXTENSIONS: domain-specific contextual hints (regulatory family conventions, standard-specific versioning patterns, etc.) should be injected at runtime via the active Domain Pack, not hardcoded in this generic prompt. The principles here are deliberately universal.
 
 ## Strength
 
