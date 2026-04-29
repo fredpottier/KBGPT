@@ -46,6 +46,16 @@ TEST_QUERIES = [
         "expected_mode": "SNAPSHOT_TEMPORAL",
         "expected_regime": "KG_LED",
     },
+    {
+        "question": "What changed in dual-use export controls between 2009 and 2021?",
+        "expected_mode": "DIFF_EVOLUTION",
+        "expected_regime": "KG_LED",
+    },
+    {
+        "question": "List all the exceptions defined in the corpus for ETOPS",
+        "expected_mode": "EXPLORATION_RELATIONAL",
+        "expected_regime": "KG_LED",
+    },
 ]
 
 

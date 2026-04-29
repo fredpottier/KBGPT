@@ -236,10 +236,11 @@ class EvidencePlanner:
         """
         Détecte les 4 types de signaux V1.1 dans les rag_results.
 
-        Note : implémentation incrémentale. Pour V1.1 socle, on détecte juste
-        WITHDRAWN/REPEALED via lifecycle_status. Les autres signaux (temporal
-        ambiguity, unresolved conflict, multi-version) seront ajoutés en R3+R4
-        quand on aura des hooks Cypher dédiés.
+        Implémentation R3+R4 :
+        - WITHDRAWN/REPEALED : lifecycle_status sur top results
+        - TEMPORAL_AMBIGUITY : ≥2 publication_dates très différentes
+        - UNRESOLVED_CONFLICT : claim_ids des top results impliqués dans CONFLICT
+        - MULTI_VERSION : ≥2 SUPERSEDES depuis/vers le même claim
         """
         signals = []
 
@@ -276,6 +277,62 @@ class EvidencePlanner:
                         ))
                 except (ValueError, IndexError):
                     pass
+
+        return signals
+
+    def detect_kg_signals(
+        self,
+        claim_ids: list[str],
+        kg_lookup_fn,
+    ) -> list[EscalationSignal]:
+        """
+        Signaux nécessitant un round-trip KG : UNRESOLVED_CONFLICT + MULTI_VERSION.
+
+        Args:
+            claim_ids: claim_ids extraits des top RAG results
+            kg_lookup_fn: callable(claim_ids: list[str]) -> dict avec keys:
+                - 'conflicts': list of dicts {claim_id, conflict_count}
+                - 'supersedes_in': list of dicts {claim_id, n_in}
+                - 'supersedes_out': list of dicts {claim_id, n_out}
+
+        Returns:
+            Liste EscalationSignal supplémentaires.
+        """
+        signals = []
+        if not claim_ids or kg_lookup_fn is None:
+            return signals
+
+        try:
+            kg_data = kg_lookup_fn(claim_ids)
+        except Exception as e:
+            logger.warning(f"[EvidencePlanner] kg_lookup failed: {e}")
+            return signals
+
+        # UNRESOLVED_CONFLICT : ≥1 top claim impliqué dans un CONFLICT
+        conflicts = kg_data.get("conflicts", [])
+        if conflicts:
+            evidence = [str(c.get("claim_id")) for c in conflicts]
+            severity = min(0.9, 0.3 + 0.15 * len(conflicts))
+            signals.append(EscalationSignal(
+                signal_type="UNRESOLVED_CONFLICT",
+                evidence=evidence,
+                severity=severity,
+            ))
+
+        # MULTI_VERSION : ≥2 SUPERSEDES sur le même claim (in OR out)
+        sup_in = kg_data.get("supersedes_in", [])
+        sup_out = kg_data.get("supersedes_out", [])
+        multi_evidence = []
+        for entry in sup_in + sup_out:
+            count = int(entry.get("n_in") or entry.get("n_out") or 0)
+            if count >= 2:
+                multi_evidence.append(str(entry.get("claim_id")))
+        if multi_evidence:
+            signals.append(EscalationSignal(
+                signal_type="MULTI_VERSION",
+                evidence=multi_evidence,
+                severity=min(0.8, 0.3 + 0.1 * len(multi_evidence)),
+            ))
 
         return signals
 

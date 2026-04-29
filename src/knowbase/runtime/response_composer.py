@@ -103,8 +103,8 @@ class ResponseComposer:
         # 2. Section "Conditions"
         conditions = self._build_conditions(resolved, chunks, relations)
 
-        # 3. Bloc métier modulable
-        business_block = self._build_business_block(resolved.mode, chunks, relations)
+        # 3. Bloc métier modulable (resolved fourni pour SNAPSHOT.as_of, etc.)
+        business_block = self._build_business_block(resolved, chunks, relations)
 
         # 4. Section "Preuves" (top-K citations)
         evidence = self._build_evidence(chunks, relations, top_k=5)
@@ -177,40 +177,124 @@ class ResponseComposer:
         return conditions
 
     def _build_business_block(
-        self, mode: ResponseMode, chunks: list[dict], relations: list[dict]
+        self, resolved: ResolvedQuery, chunks: list[dict], relations: list[dict]
     ) -> dict:
         """Bloc métier modulable selon mode."""
+        mode = resolved.mode
+
         if mode == ResponseMode.LOOKUP_FACTUAL:
             return {"type": "factual_value", "top_match": chunks[0] if chunks else None}
 
         if mode == ResponseMode.APPLICABILITY_QUERY:
             applicable = [c for c in chunks if c.get("lifecycle_status") in ("ACTIVE", None, "UNKNOWN")]
-            return {"type": "applicable_rules", "rules": applicable[:10]}
+            withdrawn = [c for c in chunks if c.get("lifecycle_status") in ("WITHDRAWN", "DEPRECATED", "SUPERSEDED")]
+            # Group by doc_id pour audit trail
+            by_doc: dict[str, list[dict]] = {}
+            for c in applicable:
+                doc = c.get("doc_id", "unknown")
+                by_doc.setdefault(doc, []).append(c)
+            return {
+                "type": "applicable_rules",
+                "rules": applicable[:10],
+                "withdrawn_excluded": [{"claim_id": c.get("claim_id"), "doc_id": c.get("doc_id"), "lifecycle": c.get("lifecycle_status")} for c in withdrawn[:5]],
+                "by_document": {k: len(v) for k, v in by_doc.items()},
+            }
 
         if mode == ResponseMode.SNAPSHOT_TEMPORAL:
-            return {"type": "snapshot", "as_of": None, "claims_at_t": chunks[:10]}
+            as_of_iso = resolved.temporal_anchor.isoformat() if resolved.temporal_anchor else None
+            # Indicateur lifecycle au point T
+            active_at_t = [c for c in chunks if c.get("lifecycle_status") not in ("WITHDRAWN", "REPEALED", "DEPRECATED")]
+            return {
+                "type": "snapshot",
+                "as_of": as_of_iso,
+                "claims_at_t": chunks[:10],
+                "n_active_at_t": len(active_at_t),
+                "n_total_valid": len(chunks),
+            }
 
         if mode == ResponseMode.DIFF_EVOLUTION:
             introduced = [c for c in chunks if c.get("diff_change_type") == "introduced"]
             retired = [c for c in chunks if c.get("diff_change_type") == "retired"]
             modified = [c for c in chunks if c.get("diff_change_type") == "modified"]
+            reaffirmed = [c for c in chunks if c.get("diff_change_type") == "reaffirmed"]
+            period = None
+            if resolved.temporal_range:
+                period = {
+                    "start": resolved.temporal_range[0].isoformat(),
+                    "end": resolved.temporal_range[1].isoformat(),
+                }
             return {
                 "type": "diff",
+                "period": period,
                 "introduced": introduced,
                 "retired": retired,
                 "modified": modified,
+                "reaffirmed": reaffirmed,
+                "summary": {
+                    "introduced": len(introduced),
+                    "retired": len(retired),
+                    "modified": len(modified),
+                    "reaffirmed": len(reaffirmed),
+                },
             }
 
         if mode == ResponseMode.CONFLICT_RISK:
-            conflicts = [r for r in relations if r.get("type") == "CONFLICT" and r.get("is_contradiction")]
-            return {"type": "contradictions", "conflicts": conflicts[:20]}
+            # Enrichi avec les 2 côtés (a / b) + reasoning + scope
+            conflicts_all = [r for r in relations if r.get("type") == "CONFLICT"]
+            conflicts_real = [r for r in conflicts_all if r.get("is_contradiction")]
+            enriched = []
+            for r in conflicts_real[:20]:
+                enriched.append({
+                    "claim_a": {
+                        "claim_id": r.get("a_claim_id"),
+                        "text": (r.get("a_text") or "")[:300],
+                        "doc_id": r.get("a_doc_id"),
+                    },
+                    "claim_b": {
+                        "claim_id": r.get("b_claim_id"),
+                        "text": (r.get("b_text") or "")[:300],
+                        "doc_id": r.get("b_doc_id"),
+                    },
+                    "confidence": r.get("confidence"),
+                    "strength": r.get("strength"),
+                    "scope_alignment": r.get("scope_alignment"),
+                    "temporal_relation": r.get("temporal_relation"),
+                    "reasoning": (r.get("reasoning") or "")[:400],
+                })
+            return {
+                "type": "contradictions",
+                "conflicts": enriched,
+                "n_total_candidates": len(conflicts_all),
+                "n_real_conflicts": len(conflicts_real),
+            }
 
         if mode == ResponseMode.EXPLORATION_RELATIONAL:
-            by_type = {}
+            # Drill-down par type avec exemples top-3 par type
+            by_type: dict[str, list[dict]] = {}
             for r in relations:
                 t = r.get("type", "UNKNOWN")
                 by_type.setdefault(t, []).append(r)
-            return {"type": "navigation", "relations_by_type": {k: len(v) for k, v in by_type.items()}}
+            type_breakdown = {}
+            for t, rels in by_type.items():
+                # tri par confidence desc + 3 examples
+                rels_sorted = sorted(rels, key=lambda x: float(x.get("confidence", 0) or 0), reverse=True)
+                type_breakdown[t] = {
+                    "count": len(rels),
+                    "examples": [
+                        {
+                            "claim_a_text": (r.get("a_text") or "")[:200],
+                            "claim_b_text": (r.get("b_text") or "")[:200],
+                            "confidence": r.get("confidence"),
+                            "reasoning": (r.get("reasoning") or "")[:200],
+                        }
+                        for r in rels_sorted[:3]
+                    ],
+                }
+            return {
+                "type": "navigation",
+                "relations_by_type": type_breakdown,
+                "n_total_relations": len(relations),
+            }
 
         if mode == ResponseMode.SYNTHESIS_SUMMARY:
             return {
@@ -261,6 +345,26 @@ class ResponseComposer:
             items.append({
                 "label": "Explorer les relations typées",
                 "url": "/admin/relations",
+            })
+            # Liens drill-down par type présent
+            seen_types = set()
+            for r in relations[:20]:
+                t = r.get("type")
+                if t and t not in seen_types:
+                    seen_types.add(t)
+                    items.append({
+                        "label": f"Filtrer relations {t}",
+                        "url": f"/admin/relations?type={t}",
+                    })
+        if mode == ResponseMode.SNAPSHOT_TEMPORAL:
+            items.append({
+                "label": "Voir le KG completes au point T (Atlas)",
+                "url": "/atlas",
+            })
+        if mode == ResponseMode.DIFF_EVOLUTION:
+            items.append({
+                "label": "Voir les SUPERSEDES dans le KG",
+                "url": "/admin/relations?type=SUPERSEDES",
             })
         if chunks:
             doc_ids = sorted({c.get("doc_id") for c in chunks[:3] if c.get("doc_id")})
