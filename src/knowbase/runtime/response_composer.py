@@ -309,13 +309,17 @@ class ResponseComposer:
     def _build_evidence(
         self, chunks: list[dict], relations: list[dict], top_k: int = 5
     ) -> list[EvidenceCitation]:
-        """Section 3 : preuves verbatim (top-k chunks + 2 relations clés)."""
+        """Section 3 : preuves verbatim (top-k chunks + 2 relations clés).
+
+        Defensive : on coalesce les claim_id/doc_id null car Qdrant + KG peuvent
+        retourner des metadata partielles selon les payloads d'ingestion.
+        """
         citations = []
         for c in chunks[:top_k]:
             citations.append(EvidenceCitation(
-                claim_id=c.get("claim_id", "unknown"),
-                text=c.get("text", ""),
-                doc_id=c.get("doc_id", "unknown"),
+                claim_id=str(c.get("claim_id") or "unknown"),
+                text=c.get("text") or "",
+                doc_id=str(c.get("doc_id") or "unknown"),
                 publication_date=c.get("publication_date"),
                 validity_start=c.get("validity_start"),
                 validity_end=c.get("validity_end"),
@@ -324,9 +328,9 @@ class ResponseComposer:
         # Top 2 relations comme evidences supplémentaires
         for r in (relations or [])[:2]:
             citations.append(EvidenceCitation(
-                claim_id=r.get("a_claim_id", "unknown"),
-                text=f"[via {r.get('type')}] {r.get('reasoning', '')[:200]}",
-                doc_id=r.get("a_doc_id", "unknown"),
+                claim_id=str(r.get("a_claim_id") or "unknown"),
+                text=f"[via {r.get('type')}] {(r.get('reasoning') or '')[:200]}",
+                doc_id=str(r.get("a_doc_id") or "unknown"),
                 relation_type=r.get("type"),
             ))
         return citations

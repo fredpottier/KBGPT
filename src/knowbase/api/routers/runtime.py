@@ -39,9 +39,9 @@ class RuntimeQueryRequest(BaseModel):
 
 
 class EvidenceItem(BaseModel):
-    claim_id: str
-    text: str
-    doc_id: str
+    claim_id: Optional[str] = None
+    text: str = ""
+    doc_id: Optional[str] = None
     publication_date: Optional[str] = None
     validity_start: Optional[str] = None
     validity_end: Optional[str] = None
