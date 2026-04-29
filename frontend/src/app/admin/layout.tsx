@@ -38,6 +38,7 @@ import {
   FiActivity,
   FiMenu,
   FiDroplet,
+  FiCheckCircle,
 } from 'react-icons/fi'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
@@ -94,6 +95,7 @@ const ADMIN_SECTIONS: SidebarSection[] = [
       { label: 'Corpus Intelligence', href: '/admin/corpus-intelligence', icon: FiBarChart2 },
       { label: 'Contradictions', href: '/admin/contradictions', icon: FiAlertTriangle },
       { label: 'Relations V3.3', href: '/admin/relations', icon: FiActivity },
+      { label: 'Golden Set (annotation)', href: '/admin/relations/golden-set', icon: FiCheckCircle },
       { label: 'Audit Corpus', href: '/admin/corpus-audit', icon: FiActivity },
       { label: 'Benchmarks', href: '/admin/benchmarks', icon: FiBarChart2 },
     ],

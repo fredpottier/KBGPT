@@ -48,7 +48,6 @@ class RelationsStatsResponse(BaseModel):
 
     total: int
     by_type: list[RelationTypeStat]
-    legacy_remaining: int = Field(description="Edges legacy CONTRADICTS/REFINES/QUALIFIES marquées legacy=true")
     true_contradictions: int = Field(description="Type=CONFLICT + is_contradiction=true + confidence ≥ 0.85")
 
 
@@ -160,17 +159,9 @@ async def get_stats(tenant_id: str = Depends(get_tenant_id)) -> RelationsStatsRe
                 RETURN count(r) AS n
             """).single()["n"]
 
-            # Legacy remaining
-            legacy = s.run("""
-                MATCH ()-[r:CONTRADICTS|REFINES|QUALIFIES]->()
-                WHERE r.legacy = true
-                RETURN count(r) AS n
-            """).single()["n"]
-
             return RelationsStatsResponse(
                 total=total,
                 by_type=by_type,
-                legacy_remaining=legacy,
                 true_contradictions=true_contra,
             )
     finally:
@@ -338,6 +329,140 @@ async def get_pair_detail(
                 extracted_at=row["extracted_at"],
                 kg_trust=_compute_kg_trust(row["confidence"], row["strength"]),
             )
+    finally:
+        driver.close()
+
+
+# ============================================================================
+# S3.F — Golden set endpoints
+# ============================================================================
+
+class GoldenPair(BaseModel):
+    golden_id: str
+    predicted_type: str
+    predicted_strength: str
+    predicted_confidence: float
+    predicted_is_contradiction: bool
+    predicted_reasoning: str
+    scope_alignment: Optional[str] = None
+    temporal_relation: Optional[str] = None
+    a_claim_id: str
+    a_text: str
+    a_doc_id: str
+    b_claim_id: str
+    b_text: str
+    b_doc_id: str
+    human_label: Optional[str] = None
+    human_notes: Optional[str] = None
+
+
+class GoldenSetStats(BaseModel):
+    total: int
+    annotated: int
+    by_predicted_type: dict[str, int]
+
+
+class GoldenSetResponse(BaseModel):
+    pairs: list[GoldenPair]
+    stats: GoldenSetStats
+
+
+class AnnotationRequest(BaseModel):
+    human_label: str
+    human_notes: Optional[str] = None
+
+
+@router.get("/golden-set", response_model=GoldenSetResponse)
+async def get_golden_set(tenant_id: str = Depends(get_tenant_id)) -> GoldenSetResponse:
+    """Liste les GoldenPair (annotés et non annotés) avec stats."""
+    driver = _get_neo4j_driver()
+    try:
+        with driver.session() as s:
+            rows = s.run("""
+                MATCH (g:GoldenPair {tenant_id: $tid})
+                MATCH (a:Claim)-[:GOLDEN_PAIR_OF {role: 'a'}]->(g)
+                MATCH (b:Claim)-[:GOLDEN_PAIR_OF {role: 'b'}]->(g)
+                RETURN
+                  g.golden_id AS golden_id,
+                  g.predicted_type AS predicted_type,
+                  g.predicted_strength AS predicted_strength,
+                  g.predicted_confidence AS predicted_confidence,
+                  g.predicted_is_contradiction AS predicted_is_contradiction,
+                  g.predicted_reasoning AS predicted_reasoning,
+                  g.scope_alignment AS scope_alignment,
+                  g.temporal_relation AS temporal_relation,
+                  g.human_label AS human_label,
+                  g.human_notes AS human_notes,
+                  a.claim_id AS a_id, a.text AS a_text, a.doc_id AS a_doc,
+                  b.claim_id AS b_id, b.text AS b_text, b.doc_id AS b_doc
+                ORDER BY g.predicted_type, g.golden_id
+            """, tid=tenant_id).data()
+
+            pairs = []
+            by_type: dict[str, int] = {}
+            annotated = 0
+            for r in rows:
+                pairs.append(GoldenPair(
+                    golden_id=r["golden_id"],
+                    predicted_type=r["predicted_type"],
+                    predicted_strength=r["predicted_strength"] or "STRONG",
+                    predicted_confidence=float(r["predicted_confidence"] or 0),
+                    predicted_is_contradiction=r["predicted_is_contradiction"] or False,
+                    predicted_reasoning=r["predicted_reasoning"] or "",
+                    scope_alignment=r["scope_alignment"],
+                    temporal_relation=r["temporal_relation"],
+                    a_claim_id=r["a_id"],
+                    a_text=r["a_text"] or "",
+                    a_doc_id=r["a_doc"],
+                    b_claim_id=r["b_id"],
+                    b_text=r["b_text"] or "",
+                    b_doc_id=r["b_doc"],
+                    human_label=r["human_label"],
+                    human_notes=r["human_notes"],
+                ))
+                by_type[r["predicted_type"]] = by_type.get(r["predicted_type"], 0) + 1
+                if r["human_label"]:
+                    annotated += 1
+
+            return GoldenSetResponse(
+                pairs=pairs,
+                stats=GoldenSetStats(
+                    total=len(pairs),
+                    annotated=annotated,
+                    by_predicted_type=by_type,
+                ),
+            )
+    finally:
+        driver.close()
+
+
+@router.post("/golden-set/{golden_id}")
+async def annotate_golden_pair(
+    golden_id: str,
+    req: AnnotationRequest,
+    tenant_id: str = Depends(get_tenant_id),
+) -> dict:
+    """Persiste l'annotation human_label sur une GoldenPair."""
+    from datetime import datetime as _dt
+
+    driver = _get_neo4j_driver()
+    try:
+        with driver.session() as s:
+            result = s.run("""
+                MATCH (g:GoldenPair {golden_id: $gid, tenant_id: $tid})
+                SET g.human_label = $label,
+                    g.human_notes = $notes,
+                    g.annotated_at = $ts
+                RETURN g.golden_id AS gid
+            """,
+                gid=golden_id, tid=tenant_id,
+                label=req.human_label,
+                notes=req.human_notes,
+                ts=_dt.utcnow().isoformat(),
+            ).single()
+            if not result:
+                raise HTTPException(status_code=404, detail=f"GoldenPair {golden_id} not found")
+            return {"ok": True, "golden_id": result["gid"]}
     finally:
         driver.close()
 
