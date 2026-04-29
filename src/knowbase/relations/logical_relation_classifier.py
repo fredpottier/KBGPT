@@ -178,14 +178,28 @@ class LogicalRelationClassifier:
         publication_date_b: Optional[str] = None,
         validity_start_a: Optional[str] = None,
         validity_start_b: Optional[str] = None,
+        domain_hints: Optional[dict] = None,
     ) -> Optional[LogicalRelationOutput]:
         """
         Classifie la relation logique entre 2 claims.
+
+        Args:
+            domain_hints: optionnel, dict des classifier_hints du Domain Pack
+                          actif (ex: {"context_summary": "...",
+                          "succession_patterns": "...", ...}). Injecté en prose
+                          dans le system prompt — V3.3-conforming, pas de regex.
 
         Returns None si appel LLM échoue ou JSON invalide.
         """
         scope_str = scope_relation.value if scope_relation else "unknown"
         temporal_str = temporal_relation.value if temporal_relation else "unknown"
+
+        # System prompt : universal + domain hints (V3.3 §3.G.4)
+        system_prompt = PROMPT_SYSTEM_12CLASS
+        if domain_hints:
+            domain_section = self._format_domain_hints(domain_hints)
+            if domain_section:
+                system_prompt = system_prompt + "\n\n" + domain_section
 
         # User prompt
         user_prompt = f"""## Claim A
@@ -209,7 +223,7 @@ Classify the logical relation between A and B."""
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": PROMPT_SYSTEM_12CLASS},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.0,
@@ -317,6 +331,54 @@ Classify the logical relation between A and B."""
             is_contradiction=is_contradiction,
             contradiction_reason=contradiction_reason,
             alternatives=alternatives if isinstance(alternatives, list) else [],
+        )
+
+
+    @staticmethod
+    def _format_domain_hints(hints: dict) -> str:
+        """Transforme les classifier_hints du Domain Pack en section prose
+        injectable dans le system prompt.
+
+        V3.3-conforming : on traite chaque entry comme un paragraphe sémantique,
+        sans transformation lexicale. Le LLM reçoit la prose telle quelle.
+        """
+        if not isinstance(hints, dict) or not hints:
+            return ""
+
+        ordered_keys = [
+            "context_summary",
+            "succession_patterns",
+            "transitional_provisions",
+            "annex_correspondence",
+            "cross_references",
+            "graduated_schemes_warning",
+            "enumerated_entries_warning",
+            "repeal_evidence",
+        ]
+        seen = set()
+        sections = []
+        for key in ordered_keys:
+            if key in hints and isinstance(hints[key], str) and hints[key].strip():
+                sections.append(hints[key].strip())
+                seen.add(key)
+        # Ajouter les autres clés non listées (fallback)
+        for key, value in hints.items():
+            if key in seen:
+                continue
+            if isinstance(value, str) and value.strip():
+                sections.append(value.strip())
+
+        if not sections:
+            return ""
+
+        body = "\n\n".join(sections)
+        return (
+            "## Domain context (provided by the active Domain Pack)\n\n"
+            "The following paragraphs describe semantic conventions specific to "
+            "the domain of the documents being classified. Use them as additional "
+            "context when interpreting the claims. They do NOT override the universal "
+            "decision rules above; they refine the priors for this corpus.\n\n"
+            f"{body}"
         )
 
 

@@ -41,6 +41,13 @@ class PackManifest(BaseModel):
     container: ContainerSpec
     provides: ProvidesSpec = Field(default_factory=ProvidesSpec)
 
+    # V3.3 §3.G.4 — Hints sémantiques pour le 12-class classifier.
+    # Chaque clé est un thème (context_summary, succession_patterns, etc.) et
+    # la valeur est un paragraphe en prose. Pas de regex ni listes de keywords.
+    # Utilisé runtime par LogicalRelationClassifier pour adapter les priors au
+    # domaine actif sans toucher au prompt système universel.
+    classifier_hints: Dict[str, str] = Field(default_factory=dict)
+
 
 class PackState:
     """États possibles d'un pack."""
@@ -50,4 +57,38 @@ class PackState:
     ERROR = "error"              # Container en erreur
 
 
-__all__ = ["PackManifest", "ContainerSpec", "ProvidesSpec", "PackState"]
+def load_pack_manifest(pack_name: str) -> Optional[PackManifest]:
+    """Charge le manifest.json d'un pack installé localement (sources Python).
+
+    Cherche dans src/knowbase/domain_packs/<pack_name>/manifest.json.
+    Renvoie None si le pack n'existe pas.
+    """
+    import json
+    from pathlib import Path
+
+    pack_dir = Path(__file__).parent / pack_name
+    manifest_path = pack_dir / "manifest.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        return PackManifest(**json.loads(manifest_path.read_text(encoding="utf-8")))
+    except Exception:
+        return None
+
+
+def get_classifier_hints(pack_name: str) -> Dict[str, str]:
+    """Renvoie les classifier_hints du pack, ou dict vide si absent."""
+    manifest = load_pack_manifest(pack_name)
+    if not manifest:
+        return {}
+    return dict(manifest.classifier_hints or {})
+
+
+__all__ = [
+    "PackManifest",
+    "ContainerSpec",
+    "ProvidesSpec",
+    "PackState",
+    "load_pack_manifest",
+    "get_classifier_hints",
+]
