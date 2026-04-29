@@ -116,9 +116,10 @@ class ClaimFirstSchema:
         "BELONGS_TO_FACET",         # Claim → Facet
         "IN_CLUSTER",        # Claim → ClaimCluster
         "IN_DOCUMENT",       # Claim → Document (SHORTCUT UNIQUE - INV-8 PATCH C)
-        "CONTRADICTS",       # Claim → Claim
-        "REFINES",           # Claim → Claim
-        "QUALIFIES",         # Claim → Claim
+        "CONTRADICTS",       # [LEGACY V0] Claim → Claim — marqué legacy=true en S0, supprimé fin S3
+        "REFINES",           # [LEGACY V0] Claim → Claim — idem
+        "QUALIFIES",         # [LEGACY V0] Claim → Claim — idem
+        "LOGICAL_RELATION",  # [V3.3] Claim → Claim — typed avec props {type, strength, confidence, scope_alignment, temporal_relation, is_contradiction, derivation_path, reasoning, model_id, extracted_at, evidence_quote_a, evidence_quote_b}
         "HAS_CONTEXT",       # Document → DocumentContext (INV-8)
         "ABOUT_SUBJECT",     # DocumentContext → SubjectAnchor (INV-8) - topics secondaires
         "ABOUT_COMPARABLE",  # DocumentContext → ComparableSubject (INV-25) - sujet stable
@@ -399,6 +400,39 @@ class ClaimFirstSchema:
             label="Perspective",
             property_keys=["label"],
             index_type="FULLTEXT"
+        ),
+
+        # ==== V3.3 — Nouveaux indexes additifs (chantier contradiction-detection) ====
+
+        # Lifecycle filtering (utilisé par runtime V1.1 + 12-class classifier)
+        SchemaIndex(
+            name="claim_lifecycle_status",
+            label="Claim",
+            property_keys=["tenant_id", "lifecycle_status"]
+        ),
+
+        # Temporal range queries (snapshot mode, diff evolution mode)
+        SchemaIndex(
+            name="claim_publication_date",
+            label="Claim",
+            property_keys=["tenant_id", "publication_date"]
+        ),
+        SchemaIndex(
+            name="claim_validity_start",
+            label="Claim",
+            property_keys=["tenant_id", "validity_start"]
+        ),
+        SchemaIndex(
+            name="claim_validity_end",
+            label="Claim",
+            property_keys=["tenant_id", "validity_end"]
+        ),
+
+        # DocumentContext: temporal frame V2 lookup
+        SchemaIndex(
+            name="doccontext_publication_date",
+            label="DocumentContext",
+            property_keys=["tenant_id", "publication_date"]
         ),
     ])
 
