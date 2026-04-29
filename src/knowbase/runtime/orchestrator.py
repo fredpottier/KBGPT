@@ -100,6 +100,30 @@ Réponse :"""
 
 
 # Persona overrides pour la synthèse
+# ============================================================================
+# HyDE — Hypothetical Document Embeddings (V3.3-conforming, no synonym list)
+# ============================================================================
+
+HYDE_PROMPT = """Imagine the exact passage from a real document (regulation, specification, technical standard, contract, etc.) that would directly answer the question below. Write only the passage itself, in 2-3 sentences, in the language and style most natural for such a document. Do not add commentary, quotation marks, or preamble — output only the imagined passage text.
+
+Question: __QUESTION__
+
+Hypothetical passage:"""
+
+# Modes où HyDE est utile (la question cherche un passage précis dans un doc).
+# Skip pour les modes de structure (EXPLORATION, SUMMARY, DIFF, CONFLICT) où la
+# question n'a pas de "passage hypothétique" naturel.
+HYDE_MODES_ENABLED = {
+    "LOOKUP_FACTUAL",
+    "APPLICABILITY_QUERY",
+    "SNAPSHOT_TEMPORAL",
+}
+
+# Cross-encoder reranker (multilingual, BAAI/bge-reranker-v2-m3 by default,
+# fallback config via env var).
+CROSS_ENCODER_MODEL = os.getenv("RUNTIME_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+
+
 SYNTHESIS_STYLE_LABELS = {
     "factual": "factuel et précis (privilégie les valeurs, dates, références exactes)",
     "exploratory": "exploratoire (mentionne les nuances, exceptions, contradictions)",
@@ -174,10 +198,12 @@ class RuntimeOrchestrator:
         self.neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
         self.temporal_retriever = TemporalRetriever(self.neo4j_driver, tenant_id=tenant_id)
 
-        # Lazy-init Qdrant + embeddings
+        # Lazy-init Qdrant + embeddings + cross-encoder reranker
         self._qdrant = None
         self._embeddings_model = None
         self._settings = None
+        self._cross_encoder = None
+        self._cross_encoder_failed = False
 
     def close(self):
         """Ferme le driver Neo4j."""
@@ -374,39 +400,76 @@ class RuntimeOrchestrator:
             )
 
     def _retrieve_qdrant(self, query: str, plan: RetrievalPlan) -> list[dict]:
-        """Retrieval Qdrant + enrichissement metadata depuis Neo4j."""
+        """Retrieval Qdrant avec HyDE (semantic expansion) + cross-encoder reranker.
+
+        Pipeline :
+        1. Embed la question
+        2. Si mode dans HYDE_MODES_ENABLED : génère un passage hypothétique via
+           LLM (HyDE) et fusionne les embeddings (50/50 normalisé)
+        3. Récupère un pool agrandi (3× plan.qdrant_top_k, capé à 100)
+        4. Re-rank le pool avec cross-encoder (multilingue)
+        5. Garde les top plan.qdrant_top_k après rerank
+        6. Enrichit avec metadata Neo4j
+        """
         try:
             self._ensure_qdrant_clients()
         except Exception as e:
             logger.warning(f"[Runtime] Qdrant unavailable: {e}")
             return []
 
+        is_e5 = "e5" in (self._settings.embeddings_model or "").lower()
+
         # Embed query
-        # e5 conventions : prefix "query: " pour les queries
-        query_text = f"query: {query}" if "e5" in (self._settings.embeddings_model or "").lower() else query
+        query_text = f"query: {query}" if is_e5 else query
         try:
-            query_vector = self._embeddings_model.encode(query_text).tolist()
+            query_vector = self._embeddings_model.encode(query_text)
         except Exception as e:
             logger.warning(f"[Runtime] Embedding failed: {e}")
             return []
 
-        # Qdrant search — préférer settings.qdrant_collection si présent, fallback env var
+        # HyDE — Hypothetical Document Embedding (V3.3-conforming, LLM-driven, no synonym lists)
+        mode_str = plan.mode.value if plan.mode else ""
+        use_hyde = mode_str in HYDE_MODES_ENABLED
+        hyde_passage: Optional[str] = None
+        if use_hyde:
+            hyde_passage = self._generate_hyde_passage(query)
+            if hyde_passage:
+                try:
+                    import numpy as np
+                    hyde_text = f"passage: {hyde_passage}" if is_e5 else hyde_passage
+                    hyde_vector = self._embeddings_model.encode(hyde_text)
+                    # Fusion 50/50, normalisé pour cosine
+                    combined = (np.asarray(query_vector) + np.asarray(hyde_vector)) / 2.0
+                    norm = np.linalg.norm(combined)
+                    if norm > 0:
+                        combined = combined / norm
+                    query_vector = combined
+                    logger.info(f"[Runtime] HyDE active: '{hyde_passage[:80]}...'")
+                except Exception as e:
+                    logger.warning(f"[Runtime] HyDE embedding failed: {e}")
+
+        # Convert to list for Qdrant
+        if hasattr(query_vector, "tolist"):
+            query_vector = query_vector.tolist()
+
+        # Pool agrandi : 3× le top_k final (capé à 100), pour donner du grain au reranker
+        pool_size = min(100, max(plan.qdrant_top_k * 3, plan.qdrant_top_k))
+
+        # Qdrant search
         collection_name = getattr(self._settings, "qdrant_collection", None) or QDRANT_COLLECTION
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
         try:
             results = self._qdrant.search(
                 collection_name=collection_name,
                 query_vector=query_vector,
-                limit=plan.qdrant_top_k,
+                limit=pool_size,
                 with_payload=True,
             )
         except Exception as e:
             logger.warning(f"[Runtime] Qdrant search failed: {e}")
             return []
 
-        # Build chunk list + enrichir avec metadata Neo4j (publication_date, validity_start, lifecycle)
-        chunk_dicts = []
-        claim_ids = []
+        # Build chunk pool
+        chunk_pool = []
         for r in results:
             payload = dict(r.payload or {})
             chunk = {
@@ -415,11 +478,13 @@ class RuntimeOrchestrator:
                 "doc_id": payload.get("doc_id"),
                 "score": float(r.score),
             }
-            chunk_dicts.append(chunk)
-            if chunk["claim_id"]:
-                claim_ids.append(chunk["claim_id"])
+            chunk_pool.append(chunk)
 
-        # Enrichissement Neo4j
+        # Re-rank avec cross-encoder (filet de sécurité : si indisponible, on garde l'ordre Qdrant)
+        chunk_dicts = self._rerank_chunks(query, chunk_pool, top_k=plan.qdrant_top_k)
+
+        # Enrichissement Neo4j (publication_date, validity_start, lifecycle)
+        claim_ids = [c["claim_id"] for c in chunk_dicts if c.get("claim_id")]
         if claim_ids:
             metadata = self._fetch_claim_metadata(claim_ids)
             for chunk in chunk_dicts:
@@ -428,6 +493,95 @@ class RuntimeOrchestrator:
                     chunk.update(metadata[cid])
 
         return chunk_dicts
+
+    # ------------------------------------------------------------------------
+    # HyDE generation (V3.3-conforming, LLM-driven, no static lists)
+    # ------------------------------------------------------------------------
+
+    def _generate_hyde_passage(self, query: str) -> Optional[str]:
+        """Demande au LLM d'imaginer le passage qui répondrait à la question.
+
+        V3.3-conforming : pas de synonymes hardcodés, pas de keyword list,
+        pas de regex. Le LLM produit un passage sémantiquement proche du
+        contenu cible, dans la langue et le style appropriés au domaine.
+        """
+        prompt = HYDE_PROMPT.replace("__QUESTION__", query)
+        try:
+            response = httpx.post(
+                f"{self.vllm_url}/v1/chat/completions",
+                json={
+                    "model": self.vllm_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                    "max_tokens": 200,
+                },
+                timeout=8.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+            passage = data["choices"][0]["message"]["content"].strip()
+            # Cleanup : si le LLM a quand même mis des guillemets, on retire
+            if passage.startswith('"') and passage.endswith('"'):
+                passage = passage[1:-1].strip()
+            return passage if passage else None
+        except Exception as e:
+            logger.warning(f"[Runtime] HyDE generation failed: {e}")
+            return None
+
+    # ------------------------------------------------------------------------
+    # Cross-encoder re-ranker (multilingue, optionnel)
+    # ------------------------------------------------------------------------
+
+    def _ensure_cross_encoder(self):
+        """Lazy-load du cross-encoder. Échec silencieux → re-rank désactivé."""
+        if self._cross_encoder is not None or self._cross_encoder_failed:
+            return
+        try:
+            from sentence_transformers import CrossEncoder
+            from knowbase.config.settings import get_settings
+            settings = get_settings()
+            cache_folder = str(settings.hf_home) if getattr(settings, "hf_home", None) else None
+            logger.info(f"[Runtime] Loading cross-encoder: {CROSS_ENCODER_MODEL}")
+            self._cross_encoder = CrossEncoder(
+                CROSS_ENCODER_MODEL,
+                max_length=512,
+                cache_folder=cache_folder,
+            )
+            logger.info(f"[Runtime] Cross-encoder loaded.")
+        except Exception as e:
+            logger.warning(f"[Runtime] Cross-encoder unavailable: {e}. Re-ranking disabled.")
+            self._cross_encoder_failed = True
+
+    def _rerank_chunks(
+        self, query: str, chunks: list[dict], top_k: int
+    ) -> list[dict]:
+        """Re-rank les chunks avec un cross-encoder (query, chunk_text). Si le
+        cross-encoder n'est pas disponible, on garde l'ordre Qdrant et on tronque."""
+        if not chunks:
+            return []
+        self._ensure_cross_encoder()
+        if not self._cross_encoder:
+            return chunks[:top_k]
+
+        pairs = [(query, (c.get("text") or "")[:512]) for c in chunks]
+        try:
+            scores = self._cross_encoder.predict(pairs)
+        except Exception as e:
+            logger.warning(f"[Runtime] Cross-encoder predict failed: {e}")
+            return chunks[:top_k]
+
+        chunks_scored = list(zip(chunks, scores))
+        chunks_scored.sort(key=lambda x: -float(x[1]))
+        out = []
+        for c, s in chunks_scored[:top_k]:
+            c["score_rerank"] = float(s)
+            out.append(c)
+        logger.info(
+            f"[Runtime] Reranked {len(chunks)} → top {len(out)} "
+            f"(rerank score range: {out[0].get('score_rerank', 0):.3f} → "
+            f"{out[-1].get('score_rerank', 0):.3f})"
+        )
+        return out
 
     def _fetch_claim_metadata(self, claim_ids: list[str]) -> dict[str, dict]:
         """Récupère publication_date, validity_start, lifecycle_status depuis Neo4j."""
