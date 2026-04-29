@@ -13,7 +13,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics, markers, claimfirst, verify, gpu, backup, wiki, kg_hygiene, domain_packs, post_import, corpus_intelligence, atlas, kg_health, relations_explorer
+from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics, markers, claimfirst, verify, gpu, backup, wiki, kg_hygiene, domain_packs, post_import, corpus_intelligence, atlas, kg_health, relations_explorer, runtime
 # Pipeline V2 - Stratified Reading Model
 from knowbase.stratified.api import router as stratified_v2_router
 # MVP V1 - Challenge de Texte (Usage B)
@@ -254,6 +254,7 @@ def create_app() -> FastAPI:
     app.include_router(corpus_intelligence.router, prefix="/api")  # 🧠 Corpus Intelligence - Heatmap, Bubble, Audit, Contradictions
     app.include_router(kg_health.router, prefix="/api")  # 🩺 KG Health Score - Diagnostic intrinseque qualite du graphe
     app.include_router(relations_explorer.router, prefix="/api")  # 🔗 Relations Explorer V3.3 - Mini-runtime LOGICAL_RELATION (S3.E)
+    app.include_router(runtime.router, prefix="/api")  # 🎯 Runtime V1.1 - Query Resolver + Evidence Planner + Trust + Composer (R1+R2)
 
     # 🖥️ OSMOSE GPU Infrastructure - Health check & restart services EC2
     app.include_router(gpu.router)  # Endpoints: /api/gpu/health, /api/gpu/restart-service
