@@ -341,6 +341,203 @@ class ApplicabilityFrame(BaseModel):
         }
 
 
+# ============================================================================
+# V3.3 — ApplicabilityFrame V2 (3 axes orthogonaux + evidence-locked)
+# ============================================================================
+#
+# Schéma V2 cible (cf. CONTRADICTION_DETECTION_ARCHITECTURE.md V3.3 §4 ter) :
+#
+#   Scope (invariant) : product_version, region, edition, conditions, subject_class
+#   Temporality (mutable) : publication_date, validity_start, validity_end
+#   Lifecycle (metadata) : status, supersedes, superseded_by, evolves_from
+#
+# Pattern V3.3 :
+#   - Chaque field non-null porte un evidence_quote verbatim depuis le source
+#   - Validator post-LLM rejette tout field dont la quote n'est pas substring du source
+#   - Pour les dates, champ date_role explicite pour distinguer adoption vs publication vs effective
+#   - Anti-pattern : pas de regex/keywords lexicaux. Le LLM est l'extracteur sémantique unique.
+
+
+class DateRole(str, Enum):
+    """
+    Rôle sémantique d'une date extraite (V3.3 — distinction critique).
+
+    publication_date V3.3 ← roles {publication}
+    validity_start    V3.3 ← roles {effective, applicable_from}
+    validity_end      V3.3 ← roles {expiry}
+
+    Les rôles {adoption, signature} ne peuplent PAS validity_start (un texte
+    adopté/signé à T n'est pas forcément applicable à T — souvent T+N mois).
+    """
+
+    ADOPTION = "adoption"
+    """Date de signature/adoption politique (ex: 'of 20 May 2021' titre EU regulation)."""
+
+    SIGNATURE = "signature"
+    """Date de signature individuelle d'un document (auteur, autorité)."""
+
+    PUBLICATION = "publication"
+    """Date de publication (ex: Official Journal, Issue Date, Release Date)."""
+
+    EFFECTIVE = "effective"
+    """Date à laquelle les règles deviennent effectives/exécutables."""
+
+    APPLICABLE_FROM = "applicable_from"
+    """Date à laquelle les règles commencent à s'appliquer (synonyme effective)."""
+
+    EXPIRY = "expiry"
+    """Date à laquelle les règles cessent d'être applicables."""
+
+    REVIEW_DATE = "review_date"
+    """Date prévue de révision/réévaluation (pas une fin)."""
+
+    UNKNOWN = "unknown"
+    """Rôle non déterminé."""
+
+
+class LifecycleStatus(str, Enum):
+    """
+    LifecycleStatus canonique V3.3 (domain-agnostic).
+
+    Mapping vers les domaines (cf. CONTRADICTION_DETECTION_ARCHITECTURE.md V3.3 §4 ter) :
+    - Regulatory : ACTIVE / SUPERSEDED / REPEALED
+    - Medical : ACTIVE / WITHDRAWN
+    - Legal : IN FORCE / REPEALED
+    - IT/Tech : SUPPORTED / DEPRECATED / END_OF_LIFE
+    """
+
+    ACTIVE = "ACTIVE"
+    """Règles actuellement applicables."""
+
+    PROVISIONAL = "PROVISIONAL"
+    """Règles publiées mais pas encore entrées en vigueur."""
+
+    DEPRECATED = "DEPRECATED"
+    """Règles dépréciées mais encore valides en attente de remplacement."""
+
+    SUPERSEDED = "SUPERSEDED"
+    """Règles remplacées par une version ultérieure."""
+
+    RETIRED = "RETIRED"
+    """Règles retirées de l'usage actif (pas remplacées, juste plus utilisées)."""
+
+    WITHDRAWN = "WITHDRAWN"
+    """Règles retirées (rappel produit, vide juridique, etc.)."""
+
+    DRAFT = "DRAFT"
+    """Pas encore publié officiellement."""
+
+    UNKNOWN = "UNKNOWN"
+    """Status non déterminable depuis le doc."""
+
+
+class EvidenceLockedField(BaseModel):
+    """
+    Field V3.3 avec evidence_quote verbatim obligatoire.
+
+    Chaque field non-null DOIT avoir une quote présente dans le full_text source.
+    Le validator post-LLM rejette les fields dont la quote n'est pas substring
+    du source (insensible aux espaces multiples + lowercase).
+    """
+
+    value: Optional[str] = Field(default=None, description="Valeur extraite (None si non trouvable)")
+    evidence_quote: Optional[str] = Field(
+        default=None,
+        description="Citation verbatim depuis le full_text source (max 100 chars)"
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description="Source: 'tier1_filename', 'tier1_cache_marker', 'tier2_llm', 'tier2_llm_evidence'"
+    )
+    confidence: FrameFieldConfidence = Field(default=FrameFieldConfidence.MEDIUM)
+
+
+class DateField(BaseModel):
+    """Date V3.3 avec rôle sémantique + evidence_quote."""
+
+    value: Optional[str] = Field(default=None, description="Date au format YYYY ou YYYY-MM-DD")
+    date_role: DateRole = Field(default=DateRole.UNKNOWN, description="Rôle sémantique de la date")
+    evidence_quote: Optional[str] = Field(default=None, description="Citation verbatim depuis le source")
+    source: Optional[str] = Field(default=None, description="tier1_filename | tier2_llm")
+    confidence: FrameFieldConfidence = Field(default=FrameFieldConfidence.MEDIUM)
+
+
+class ScopeAxis(BaseModel):
+    """Axe 1 (invariant) : ce que le document/règles applique."""
+
+    product_version: Optional[EvidenceLockedField] = None
+    region: Optional[EvidenceLockedField] = None
+    edition: Optional[EvidenceLockedField] = None
+    conditions: List[EvidenceLockedField] = Field(default_factory=list)
+    subject_class: Optional[EvidenceLockedField] = None
+
+
+class TemporalityAxis(BaseModel):
+    """
+    Axe 2 (mutable) : 3 dates DISTINCTES (V3.3 invariant critique).
+
+    Règle : NE JAMAIS hériter publication_date sur validity_start par défaut.
+    Si seul ADOPTION/SIGNATURE est trouvé → validity_start.value = None.
+    """
+
+    publication_date: Optional[DateField] = None
+    """Quand le document a été authored/issued/published. Roles attendus : publication."""
+
+    validity_start: Optional[DateField] = None
+    """Quand les règles commencent à s'appliquer. Roles attendus : effective, applicable_from."""
+
+    validity_end: Optional[DateField] = None
+    """Quand les règles cessent. Role attendu : expiry."""
+
+    publication_validity_relationship: Optional[str] = Field(
+        default="unknown",
+        description="same_date | validity_after_publication | validity_before_publication | unknown"
+    )
+
+
+class LifecycleAxis(BaseModel):
+    """Axe 3 (metadata) : statut courant du document/règles."""
+
+    status: LifecycleStatus = Field(default=LifecycleStatus.UNKNOWN)
+    status_evidence_quote: Optional[str] = None
+    supersedes: List[EvidenceLockedField] = Field(default_factory=list)
+    superseded_by: Optional[EvidenceLockedField] = None
+    evolves_from: Optional[EvidenceLockedField] = None
+
+
+class ApplicabilityFrameV2(BaseModel):
+    """
+    Frame V3.3 avec 3 axes orthogonaux + evidence-locked.
+
+    Sortie de Layer C V2, validée par EvidenceValidatorV2 (Layer D V2).
+
+    Backward-compatible : peut coexister avec ApplicabilityFrame V1 dans
+    DocumentContext (différentes propriétés JSON : applicability_frame_json
+    vs applicability_frame_v2_json).
+    """
+
+    doc_id: str
+    scope: ScopeAxis = Field(default_factory=ScopeAxis)
+    temporality: TemporalityAxis = Field(default_factory=TemporalityAxis)
+    lifecycle: LifecycleAxis = Field(default_factory=LifecycleAxis)
+
+    method: str = Field(
+        default="tier1_deterministic+tier2_llm_evidence_locked",
+        description="Méthode utilisée pour construire le frame"
+    )
+
+    rejected_fields: List[Dict] = Field(
+        default_factory=list,
+        description="Fields rejetés par le validator (evidence_quote non trouvée). Format: {axis, field, value, quote, reason}"
+    )
+
+    validation_notes: List[str] = Field(default_factory=list)
+
+    def to_json_dict(self) -> dict:
+        """Sérialise en dict JSON-safe pour stockage Neo4j."""
+        return self.model_dump(mode="json")
+
+
 __all__ = [
     "EvidenceUnit",
     "MarkerCategory",
@@ -351,4 +548,13 @@ __all__ = [
     "FrameField",
     "ApplicabilityFrame",
     "compute_canonical_value",
+    # V3.3
+    "DateRole",
+    "LifecycleStatus",
+    "EvidenceLockedField",
+    "DateField",
+    "ScopeAxis",
+    "TemporalityAxis",
+    "LifecycleAxis",
+    "ApplicabilityFrameV2",
 ]
