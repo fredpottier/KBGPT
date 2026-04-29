@@ -831,8 +831,13 @@ class ClaimFirstOrchestrator:
         type_aware_chunks = cache_result.pass0_result.chunks if cache_result.pass0_result else []
 
         if self.persist_enabled and (type_aware_chunks or result.passages):
+            qdrant_count = 0
             try:
                 logger.info("[OSMOSE:ClaimFirst] Phase 8: Persisting chunks to Qdrant...")
+
+                # Health check Qdrant pre-Phase 8 (incident 2026-04-27 — fail-fast si DB down)
+                if not self._qdrant_health_check():
+                    raise RuntimeError("Qdrant health check failed — service unavailable")
 
                 if type_aware_chunks:
                     qdrant_count = self._persist_type_aware_chunks_to_qdrant(
@@ -852,6 +857,14 @@ class ClaimFirstOrchestrator:
                 result.qdrant_points_upserted = qdrant_count
                 logger.info(f"  -> {qdrant_count} points upserted to Qdrant Layer R")
 
+                # Persiste status OK en Neo4j (visibilite)
+                self._set_doc_qdrant_status(
+                    doc_id=result.doc_id,
+                    tenant_id=result.tenant_id,
+                    status="OK",
+                    chunks_count=qdrant_count,
+                )
+
                 # Phase 8b: Bridge claim↔chunk pour ce document
                 # Met à jour chunk_ids sur les claims Neo4j (cache rebuildable, INV-BRIDGE)
                 try:
@@ -861,13 +874,29 @@ class ClaimFirstOrchestrator:
                     )
                     logger.info(f"  -> {bridge_count} claims bridged to Qdrant chunks")
                 except Exception as e:
-                    logger.warning(
-                        f"[OSMOSE:ClaimFirst] Claim-chunk bridge failed (non-blocking): {e}"
+                    logger.error(
+                        f"[OSMOSE:ClaimFirst] Claim-chunk bridge failed (non-blocking): {e}",
+                        exc_info=True,
                     )
             except Exception as e:
-                logger.warning(
-                    f"[OSMOSE:ClaimFirst] Qdrant persistence failed (non-blocking): {e}"
+                # F1 — fail-loud avec stack trace + persistance status (incident 2026-04-27)
+                logger.error(
+                    f"[OSMOSE:ClaimFirst] Qdrant persistence FAILED (non-blocking) "
+                    f"for doc={result.doc_id}: {type(e).__name__}: {e}",
+                    exc_info=True,
                 )
+                try:
+                    self._set_doc_qdrant_status(
+                        doc_id=result.doc_id,
+                        tenant_id=result.tenant_id,
+                        status=f"FAILED:{type(e).__name__}",
+                        error=str(e)[:500],
+                        chunks_count=qdrant_count,
+                    )
+                except Exception as status_err:
+                    logger.warning(
+                        f"[OSMOSE:ClaimFirst] Could not persist FAILED status: {status_err}"
+                    )
 
         return result
 
@@ -1005,22 +1034,37 @@ class ClaimFirstOrchestrator:
                 sc.text = prefix + sc.text
 
         logger.info(
-            f"[OSMOSE:ClaimFirst] Rechunked: {len(chunks)} TypeAwareChunks → "
+            f"[OSMOSE:ClaimFirst] Phase 8 RECHUNKED: {len(chunks)} TypeAwareChunks → "
             f"{len(sub_chunks)} SubChunks for Qdrant"
         )
+        self._update_phase8_state(doc_id, "RECHUNKED", processed=len(sub_chunks), total=len(sub_chunks))
 
-        # Embeddings
+        # Embeddings — batched + retry pour resilience sur gros docs (incident 2026-04-27)
         texts = [sc.text for sc in sub_chunks]
+        total_chars = sum(len(t) for t in texts)
+        logger.info(
+            f"[OSMOSE:ClaimFirst] Phase 8 ENCODING: {len(texts)} texts, "
+            f"total {total_chars} chars (avg {total_chars // max(1, len(texts))} chars/text)"
+        )
+        self._update_phase8_state(doc_id, "ENCODING", processed=0, total=len(texts))
+
         manager = get_embedding_manager()
-        embeddings = manager.encode(texts)
+        embeddings = self._encode_with_resilience(manager, texts, doc_id)
 
         if embeddings is None or len(embeddings) == 0:
-            logger.warning("[OSMOSE:ClaimFirst] No embeddings generated")
+            logger.error(
+                f"[OSMOSE:ClaimFirst] Phase 8: NO embeddings produced for doc={doc_id} "
+                f"(input texts={len(texts)})"
+            )
+            self._update_phase8_state(doc_id, "FAILED:no_embeddings")
             return 0
+
+        logger.info(f"[OSMOSE:ClaimFirst] Phase 8 ENCODED: {len(embeddings)} embeddings produced")
 
         # Filtrer les zero-vectors et normaliser en listes Python
         import numpy as np
         pairs = []
+        skipped_zero = 0
         for sc, emb in zip(sub_chunks, embeddings):
             if isinstance(emb, np.ndarray):
                 emb_list = emb.tolist()
@@ -1030,8 +1074,21 @@ class ClaimFirstOrchestrator:
                 emb_list = list(emb)
             if any(v != 0.0 for v in emb_list[:10]):
                 pairs.append((sc, emb_list))
+            else:
+                skipped_zero += 1
+
+        if skipped_zero:
+            logger.warning(
+                f"[OSMOSE:ClaimFirst] Phase 8: {skipped_zero}/{len(sub_chunks)} "
+                f"zero-vector embeddings skipped (encode failures or empty texts)"
+            )
 
         if not pairs:
+            logger.error(
+                f"[OSMOSE:ClaimFirst] Phase 8: 0 valid pairs after zero-vector filter "
+                f"for doc={doc_id}"
+            )
+            self._update_phase8_state(doc_id, "FAILED:all_zero_vectors")
             return 0
 
         ensure_layer_r_collection()
@@ -1048,8 +1105,198 @@ class ClaimFirstOrchestrator:
                     if axis_val:
                         doc_axis_map[axis_name] = axis_val
 
+        # Upsert (qdrant_layer_r.upsert_layer_r est deja batche + a son propre retry interne post incident)
+        logger.info(
+            f"[OSMOSE:ClaimFirst] Phase 8 UPSERTING: {len(pairs)} points to Qdrant Layer R..."
+        )
+        self._update_phase8_state(doc_id, "UPSERTING", processed=0, total=len(pairs))
+
         n = upsert_layer_r(pairs, tenant_id=tenant_id, doc_axis_values=doc_axis_map)
+
+        logger.info(
+            f"[OSMOSE:ClaimFirst] Phase 8 UPSERT DONE: {n}/{len(pairs)} points persisted "
+            f"(rechunk_ratio: {len(sub_chunks)}/{len(chunks)} = "
+            f"{100*len(sub_chunks)//max(1,len(chunks))}%)"
+        )
+        self._update_phase8_state(doc_id, "DONE", processed=n, total=len(pairs))
         return n
+
+    # =========================================================================
+    # Helpers Phase 8 (incident 2026-04-27 — durcissement persistance Qdrant)
+    # =========================================================================
+
+    def _qdrant_health_check(self, max_retries: int = 3, retry_wait_s: int = 10) -> bool:
+        """Ping Qdrant avant Phase 8 pour fail-fast si service down."""
+        import os
+        import time
+        try:
+            import requests as _r
+        except ImportError:
+            return True  # Fallback: skip check si requests absent
+        url = os.environ.get("QDRANT_URL", "http://qdrant:6333").rstrip("/")
+        for attempt in range(max_retries):
+            try:
+                resp = _r.get(f"{url}/healthz", timeout=5)
+                if resp.status_code == 200:
+                    return True
+                resp = _r.get(f"{url}/", timeout=5)
+                if resp.status_code == 200:
+                    return True
+            except Exception as e:
+                logger.warning(
+                    f"[OSMOSE:ClaimFirst] Qdrant health check attempt {attempt+1}/{max_retries} "
+                    f"failed: {type(e).__name__}: {e}"
+                )
+            if attempt < max_retries - 1:
+                time.sleep(retry_wait_s)
+        return False
+
+    def _encode_with_resilience(
+        self,
+        manager,
+        texts: List[str],
+        doc_id: str,
+        batch_size: int = 32,
+        max_retries: int = 3,
+    ):
+        """Encode resilient avec batching + retry (mode local).
+
+        En mode burst, manager.encode utilise deja sa propre logique TEI-batching.
+        En mode local (CPU), SentenceTransformer.encode peut OOM ou hang sur gros volumes.
+        On batche manuellement et on retry les batches qui echouent.
+
+        Les batches qui echouent definitivement sont remplaces par des zero-vectors
+        pour preserver l'alignement index, et seront filtres en aval.
+        """
+        import numpy as np
+        import time as _time
+
+        if not texts:
+            return np.array([])
+
+        # Mode burst : delegate (logique TEI-batch interne deja robuste)
+        try:
+            if hasattr(manager, "is_burst_mode_active") and manager.is_burst_mode_active():
+                return manager.encode(texts)
+        except Exception:
+            pass  # Si check echoue, on continue en local
+
+        n = len(texts)
+        all_embeddings = []
+        failed_batches = 0
+        dim_fallback = 1024  # multilingual-e5-large
+
+        for i in range(0, n, batch_size):
+            batch = texts[i:i + batch_size]
+            last_err = None
+            success = False
+            for attempt in range(max_retries):
+                try:
+                    emb = manager.encode(batch, show_progress_bar=False)
+                    all_embeddings.append(emb)
+                    success = True
+                    # Capture dimension reelle au premier succes
+                    if hasattr(emb, "shape") and len(emb.shape) >= 2:
+                        dim_fallback = emb.shape[1]
+                    break
+                except Exception as e:
+                    last_err = e
+                    wait = 2 ** attempt  # 1, 2, 4 sec
+                    logger.warning(
+                        f"[OSMOSE:ClaimFirst] Encode batch {i // batch_size + 1} "
+                        f"attempt {attempt + 1}/{max_retries} failed: "
+                        f"{type(e).__name__}: {e}. Retry in {wait}s",
+                    )
+                    _time.sleep(wait)
+
+            if not success:
+                logger.error(
+                    f"[OSMOSE:ClaimFirst] Encode batch {i // batch_size + 1} GIVE UP "
+                    f"after {max_retries} retries (doc={doc_id}, batch_size={len(batch)}): "
+                    f"{type(last_err).__name__ if last_err else '?'}: {last_err}",
+                    exc_info=last_err if last_err else None,
+                )
+                failed_batches += 1
+                # Substituer zero vectors pour maintenir l'alignement
+                all_embeddings.append(np.zeros((len(batch), dim_fallback)))
+
+            # Progress logging et update Redis
+            done = min(i + batch_size, n)
+            if (i // batch_size + 1) % 10 == 0 or done >= n:
+                logger.info(
+                    f"[OSMOSE:ClaimFirst] Encoding progress: {done}/{n} texts "
+                    f"({100 * done // n}%, failed_batches={failed_batches})"
+                )
+            self._update_phase8_state(doc_id, "ENCODING", processed=done, total=n)
+
+        if failed_batches:
+            logger.warning(
+                f"[OSMOSE:ClaimFirst] Phase 8 encode completed with {failed_batches} batch failure(s) "
+                f"(zero vectors substituted, will be filtered)"
+            )
+
+        if not all_embeddings:
+            return np.array([])
+
+        return np.vstack(all_embeddings)
+
+    def _update_phase8_state(
+        self,
+        doc_id: str,
+        sub_phase: str,
+        processed: int = 0,
+        total: int = 0,
+    ) -> None:
+        """Update Redis state pour visibilite cockpit pendant Phase 8 (best-effort)."""
+        try:
+            import os
+            import time as _time
+            import redis
+            redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+            r = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
+            r.hset("osmose:phase8:state", mapping={
+                "doc_id": doc_id,
+                "sub_phase": sub_phase,
+                "processed": str(processed),
+                "total": str(total),
+                "updated_at": str(_time.time()),
+            })
+            r.expire("osmose:phase8:state", 7200)  # 2h auto-cleanup
+        except Exception:
+            pass  # Best-effort: ne pas bloquer Phase 8 sur erreur Redis
+
+    def _set_doc_qdrant_status(
+        self,
+        doc_id: str,
+        tenant_id: str,
+        status: str,
+        chunks_count: int = 0,
+        error: Optional[str] = None,
+    ) -> None:
+        """Persiste le status Qdrant sur DocumentContext (Neo4j) pour audit + cockpit."""
+        if not self.neo4j_driver:
+            return
+        try:
+            with self.neo4j_driver.session() as session:
+                session.run(
+                    """
+                    MATCH (d:DocumentContext {doc_id: $doc_id, tenant_id: $tenant_id})
+                    SET d.qdrant_status = $status,
+                        d.qdrant_chunks_count = $chunks_count,
+                        d.qdrant_status_error = $error,
+                        d.qdrant_status_at = timestamp()
+                    """,
+                    doc_id=doc_id,
+                    tenant_id=tenant_id,
+                    status=status,
+                    chunks_count=int(chunks_count),
+                    error=error,
+                )
+        except Exception as e:
+            logger.warning(
+                f"[OSMOSE:ClaimFirst] Could not set qdrant_status on DocumentContext "
+                f"({doc_id}): {e}"
+            )
 
     def _bridge_claims_to_chunks(self, doc_id: str, tenant_id: str) -> int:
         """

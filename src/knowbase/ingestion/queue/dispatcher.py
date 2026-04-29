@@ -195,7 +195,7 @@ def enqueue_claimfirst_process(
         job_id=job_id,
         result_ttl=7200,  # 2 heures
         failure_ttl=7200,
-        timeout=7200,  # 2 heures max (gros documents)
+        timeout=21600,  # 6 heures max (gros documents CS-25 amdt 26 = 3525 chunks)
         description=f"Claim-First processing for {len(doc_ids)} documents",
     )
 

@@ -212,11 +212,39 @@ def claimfirst_process_job(
             # Traiter
             _update_state(redis_client, phase="EXTRACTING")
             _emit_phase(redis_client, "EXTRACTING", "running", i, len(doc_ids))
-            result = orchestrator.process_and_persist(
-                doc_id=doc_id,
-                cache_result=cache_result,
-                tenant_id=tenant_id,
-            )
+
+            # Heartbeat thread pour cockpit (fix bug instrumentation)
+            # orchestrator.process_and_persist peut prendre 30-60 min sur 1 doc volumineux
+            # (CS-25 amdt 1500 pages) sans émettre d'update Redis intermédiaire.
+            # Sans ce heartbeat, le cockpit voit la clé osmose:claimfirst:state figée
+            # et déclenche une fausse alerte "idle X min" alors que ClaimFirst tourne bien.
+            # Le thread daemon update simplement updated_at toutes les 30s.
+            import threading as _threading
+            _heartbeat_stop = _threading.Event()
+
+            def _heartbeat_loop():
+                while not _heartbeat_stop.wait(30):
+                    try:
+                        _update_state(
+                            redis_client,
+                            phase="EXTRACTING",
+                            phase_status="running",
+                        )
+                    except Exception:
+                        pass  # Non-bloquant : si Redis indisponible, l'orchestrator continue
+
+            _heartbeat_thread = _threading.Thread(target=_heartbeat_loop, daemon=True)
+            _heartbeat_thread.start()
+
+            try:
+                result = orchestrator.process_and_persist(
+                    doc_id=doc_id,
+                    cache_result=cache_result,
+                    tenant_id=tenant_id,
+                )
+            finally:
+                _heartbeat_stop.set()
+                _heartbeat_thread.join(timeout=2)
 
             # Mettre à jour les stats
             results["processed"] += 1

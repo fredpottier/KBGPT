@@ -90,12 +90,27 @@ class AtomicitySplitter:
         if not to_split:
             return claims, []
 
+        # Cap dynamique en mode burst (vLLM EC2 = max-num-seqs 16, vs DeepInfra 180)
+        max_concurrent = self.MAX_CONCURRENT
+        try:
+            from knowbase.ingestion.burst.provider_switch import get_burst_concurrency_config
+            burst_cfg = get_burst_concurrency_config()
+            burst_max = burst_cfg.get("max_concurrent_llm")
+            if burst_max and burst_max < max_concurrent:
+                logger.info(
+                    f"[OSMOSE:AtomicitySplitter] Burst mode active — capping concurrency "
+                    f"from {max_concurrent} to {burst_max}"
+                )
+                max_concurrent = burst_max
+        except Exception:
+            pass
+
         logger.info(
             f"[OSMOSE:AtomicitySplitter] {len(to_split)} claims to split "
-            f"(>{ATOMICITY_CHAR_THRESHOLD} chars, ≥3 clauses)"
+            f"(>{ATOMICITY_CHAR_THRESHOLD} chars, ≥3 clauses) max_concurrent={max_concurrent}"
         )
 
-        semaphore = asyncio.Semaphore(self.MAX_CONCURRENT)
+        semaphore = asyncio.Semaphore(max_concurrent)
         results: List[Tuple[Optional["Claim"], List["Claim"], QualityVerdict]] = [
             (None, [], QualityVerdict(action=QualityAction.PASS, scores={}))
         ] * len(to_split)
@@ -137,7 +152,10 @@ class AtomicitySplitter:
 
         router = get_llm_router()
         try:
-            response = router.complete(
+            # ASYNC : utiliser acomplete au lieu de complete (sync) pour ne pas bloquer
+            # l'event loop. Sans ce changement, le semaphore MAX_CONCURRENT=180 etait
+            # neutralise et les 4000+ claims de Phase 1.6c etaient processees en serie.
+            response = await router.acomplete(
                 task_type=TaskType.SHORT_ENRICHMENT,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,

@@ -270,6 +270,20 @@ class ClaimExtractor:
         """
         self.llm_client = llm_client
         self.batch_size = batch_size
+        # Si burst mode actif, utiliser la limite burst (cap GPU vLLM ~16-32 seqs)
+        # plutot que la limite DeepInfra (180). Evite avalanche de 500.
+        try:
+            from knowbase.ingestion.burst.provider_switch import get_burst_concurrency_config
+            burst_cfg = get_burst_concurrency_config()
+            burst_max = burst_cfg.get("max_concurrent_llm")
+            if burst_max and burst_max < max_concurrent:
+                logger.info(
+                    f"[OSMOSE:ClaimExtractor] Burst mode active — capping max_concurrent "
+                    f"from {max_concurrent} to {burst_max}"
+                )
+                max_concurrent = burst_max
+        except Exception:
+            pass
         self.max_concurrent = max_concurrent
 
         # Predicats domain-aware (core + domain packs actifs)
@@ -473,6 +487,18 @@ class ClaimExtractor:
             predicates_table=self._predicates_table,
         )
 
+        # DEBUG dump PROMPT input (canary 2026-04-27 phase 2 — diagnostiquer empty claims)
+        if not hasattr(self, "_debug_prompt_dump_count"):
+            self._debug_prompt_dump_count = 0
+        if self._debug_prompt_dump_count < 3:
+            self._debug_prompt_dump_count += 1
+            logger.info(
+                f"[OSMOSE:ClaimExtractor:DEBUG_PROMPT_DUMP {self._debug_prompt_dump_count}/3] "
+                f"doc={task.doc_id} batch={task.batch_id} units={len(task.units)} "
+                f"prompt_len={len(prompt)}\n"
+                f"{'='*70}\n{prompt}\n{'='*70}"
+            )
+
         # Appel LLM async
         try:
             response = await self._call_llm_async(prompt)
@@ -480,6 +506,14 @@ class ClaimExtractor:
 
             # Parser la réponse JSON
             raw_claims = self._parse_llm_response(response)
+
+            # DEBUG : si la réponse est non-vide mais raw_claims=0, log le détail
+            if response and not raw_claims and self._debug_prompt_dump_count <= 3:
+                logger.warning(
+                    f"[OSMOSE:ClaimExtractor:DEBUG_EMPTY] doc={task.doc_id} "
+                    f"batch={task.batch_id} units={len(task.units)} "
+                    f"response_len={len(response)} response_first200={response[:200]!r}"
+                )
 
         except Exception as e:
             logger.error(f"[OSMOSE:ClaimExtractor] LLM error: {e}")
@@ -613,10 +647,20 @@ Reply ONLY with a JSON array, one entry per claim:
             task_type=TaskType.KNOWLEDGE_EXTRACTION,
             messages=messages,
             temperature=0.1,
-            max_tokens=2000,
+            max_tokens=4000,
             response_format={"type": "json_object"},
         )
 
+        # DEBUG temporaire (canary 2026-04-27) : dump des 5 premieres responses async.
+        if not hasattr(self, "_debug_dump_count_async"):
+            self._debug_dump_count_async = 0
+        if self._debug_dump_count_async < 5:
+            self._debug_dump_count_async += 1
+            logger.info(
+                f"[OSMOSE:ClaimExtractor:DEBUG_DUMP_ASYNC {self._debug_dump_count_async}/5] "
+                f"LLM RAW RESPONSE (first 1500 chars):\n"
+                f"{'='*60}\n{response[:1500] if response else '<EMPTY/NULL>'}\n{'='*60}"
+            )
         return response
 
     def _extract_claims_from_units(
@@ -713,10 +757,22 @@ Reply ONLY with a JSON array, one entry per claim:
             task_type=TaskType.KNOWLEDGE_EXTRACTION,
             messages=messages,
             temperature=0.1,
-            max_tokens=2000,
+            max_tokens=4000,
             response_format={"type": "json_object"},
         )
 
+        # DEBUG temporaire (canary 2026-04-27) : dump des 5 premieres responses LLM
+        # pour diagnostiquer si Qwen3-235B retourne du JSON valide ou non.
+        # A supprimer apres validation.
+        if not hasattr(self, "_debug_dump_count"):
+            self._debug_dump_count = 0
+        if self._debug_dump_count < 5:
+            self._debug_dump_count += 1
+            logger.info(
+                f"[OSMOSE:ClaimExtractor:DEBUG_DUMP {self._debug_dump_count}/5] "
+                f"LLM RAW RESPONSE (first 1500 chars):\n"
+                f"{'='*60}\n{response[:1500] if response else '<EMPTY/NULL>'}\n{'='*60}"
+            )
         return response
 
     def _parse_llm_response(self, response: str) -> List[dict]:
