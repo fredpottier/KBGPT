@@ -3,6 +3,13 @@
 
 x-common-config: &common-config
   stop_grace_period: 10s
+  # Rotation Docker json-file (incident 2026-04-27 — eviter perte de logs au recreate).
+  # 20 MB max par fichier, 10 fichiers archives = 200 MB par container.
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "20m"
+      max-file: "10"
 
 services:
   # ===================================
@@ -40,9 +47,16 @@ services:
     container_name: knowbase-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      # SECURITY (incident 2026-04-27 02:03) : bind loopback uniquement.
+      # Redis ne doit JAMAIS etre expose sur 0.0.0.0 (attaques cron poisoning automatisees).
+      # Acces interne via reseau knowbase_net (DNS "redis"). Acces host via localhost ou docker exec.
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
+    # NOTE: protected-mode reste a "no" (defaut) car les workers se connectent
+    # depuis le bridge docker 172.18.0.x = "non-loopback" pour Redis. La protection
+    # contre l'incident 2026-04-27 est assuree par le binding host 127.0.0.1:6379
+    # (configure dans la section ports plus haut), qui empeche tout acces externe.
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     networks:
       - knowbase_net

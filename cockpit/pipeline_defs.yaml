@@ -65,6 +65,34 @@ pipelines:
       claim_chunk_bridge: "Bridge"
       archive_isolated: "Archv"
 
+  v2-extraction:
+    display_name: "V2 EXTRACTION"
+    redis_key: "osmose:v2:state"
+    redis_type: hash  # HGETALL
+    stages:
+      - name: "Initialisation"
+        short: "Init"
+        phase_match: "Initialisation"
+      - name: "Extraction (Docling)"
+        short: "Extr"
+        phase_match: "Extraction"
+      - name: "OSMOSE Agentique"
+        short: "OSMOSE"
+        phase_match: "OSMOSE"
+      - name: "Deduplication"
+        short: "Dedup"
+        phase_match: "Deduplication"
+      - name: "Finalisation"
+        short: "Fin"
+        phase_match: "Finalisation"
+      - name: "Chainage ClaimFirst"
+        short: "ClaimF"
+        phase_match: "ClaimFirst"
+    started_field: "started_at"
+    status_field: "status"
+    active_when: ["PROCESSING"]
+    run_id_field: "job_id"
+
   burst-extract:
     display_name: "BURST EC2"
     redis_key: "osmose:burst:state:live"

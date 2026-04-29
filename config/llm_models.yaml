@@ -10,30 +10,39 @@ task_models:
   vision: "gpt-4o"
 
   # Extraction de métadonnées JSON structurées
-  metadata: "gpt-4o"
+  # Migré sur Qwen3-235B (DeepInfra) — moins cher que Qwen2.5-72B et meilleur context (256k vs 32k)
+  metadata: "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
   # Résumés de textes longs (>10k tokens)
   # DeepInfra Qwen3-235B : MoE 235B, $0.071/$0.10 per M tokens — meilleur rapport qualite/prix
   long_summary: "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
   # Enrichissement de contenu court (table summaries, slot enrichment)
-  enrichment: "Qwen/Qwen3-14B"
+  # Migré du Qwen3-14B vers Qwen3-235B (moins cher de -41%/-58% in/out, context 6x plus grand)
+  enrichment: "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
   # Classification binaire rapide (oui/non, etc.)
-  classification: "Qwen/Qwen3-14B"
+  # Migré du Qwen3-14B vers Qwen3-235B (idem économie)
+  classification: "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
   # Canonicalisation de noms (domain-agnostic)
-  canonicalization: "Qwen/Qwen2.5-72B-Instruct"
+  # Migré du Qwen2.5-72B vers Qwen3-235B (Qwen2.5-72B est passé à $0.36/$0.40 — 5x plus cher que Qwen3-235B)
+  canonicalization: "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
   # Analyse intelligente de questions RFP Excel (filtrage + reformulation + fusion)
   rfp_question_analysis: "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
   # Traduction de langue (tâche simple et peu coûteuse)
-  translation: "Qwen/Qwen3-14B"
+  # Migré du Qwen3-14B vers Qwen3-235B (idem économie)
+  translation: "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
   # Extraction de connaissance structurée (concepts, facts, entities, relations) depuis blocs sémantiques
-  # DeepInfra Qwen2.5-72B : meilleure qualite extraction que le 14B local, $0.12/$0.39 per M
-  knowledge_extraction: "Qwen/Qwen2.5-72B-Instruct"
+  # GARDE Qwen2.5-72B-Instruct (canary 2026-04-27 invalide la migration vers Qwen3-235B).
+  # Test reel cs25_change_amdt_23 : 150 LLM calls Qwen3-235B → 0 claims extraits (Instruct-2507 mode
+  # no-thinking ne suit pas les instructions JSON strictes du prompt full ClaimFirst).
+  # Pour réduire le coût ($66 sur 6 docs avec Qwen2.5-72B), explorer compact prompt + batch packing
+  # + sampling sur pages bruyantes plutôt que la migration de modèle.
+  knowledge_extraction: "Qwen/Qwen3-235B-A22B-Instruct-2507"  # DEBUG canary 2026-04-27 — dump responses
 
 # Paramètres par type de tâche (basés sur les valeurs historiques du code)
 task_parameters:
@@ -133,8 +142,8 @@ fallback_strategy:
     - "claude-sonnet-4-20250514"
 
   metadata:
-    - "gpt-4o"
-    - "gpt-4o-mini"
+    - "Qwen/Qwen3-235B-A22B-Instruct-2507"
+    - "Qwen/Qwen2.5-72B-Instruct"
 
   long_summary:
     - "qwen3.5:9b-q8_0"
@@ -207,10 +216,11 @@ alternative_task_models:
   translation: "qwen2.5:7b"
 
 # Configuration par défaut si aucune tâche ne correspond
-default_model: "gpt-4o"
+# Migré sur DeepInfra Qwen pour éviter OpenAI par défaut pendant l'ingestion
+default_model: "Qwen/Qwen2.5-72B-Instruct"
 default_fallbacks:
-  - "gpt-4o"
-  - "gpt-4o-mini"
+  - "Qwen/Qwen2.5-72B-Instruct"
+  - "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
 # ============================================================================
 # Mode Local — Configuration des modèles Ollama pour les modes partial/full

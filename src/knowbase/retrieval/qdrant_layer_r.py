@@ -95,20 +95,25 @@ def upsert_layer_r(
     tenant_id: str,
     batch_size: int = 0,
     doc_axis_values: Optional[Dict[str, str]] = None,
+    max_retries: int = 3,
 ) -> int:
     """
     Upsert idempotent des sub-chunks + embeddings dans Qdrant.
 
     Chaque point a un point_id déterministe (UUID5) → re-upsert = même points.
+    Retry par batch avec backoff exponentiel pour resilience (incident 2026-04-27).
 
     Args:
         sub_chunks_with_embeddings: Liste de (SubChunk, embedding_vector)
         tenant_id: ID du tenant
         batch_size: Taille des batches d'upsert (0 = auto depuis env)
+        max_retries: Nombre de tentatives par batch en cas d'erreur transitoire (defaut: 3)
 
     Returns:
-        Nombre de points upsertés
+        Nombre de points upsertés (peut être < total si certains batches ont échoué après retries)
     """
+    import time as _time
+
     if not sub_chunks_with_embeddings:
         return 0
 
@@ -121,9 +126,12 @@ def upsert_layer_r(
 
     total = len(sub_chunks_with_embeddings)
     upserted = 0
+    failed_batches = 0
+    n_batches = (total + batch_size - 1) // batch_size
 
     for batch_start in range(0, total, batch_size):
         batch = sub_chunks_with_embeddings[batch_start : batch_start + batch_size]
+        batch_idx = batch_start // batch_size + 1
 
         points = []
         for sc, embedding in batch:
@@ -158,22 +166,55 @@ def upsert_layer_r(
                 payload=payload,
             ))
 
-        client.upsert(
-            collection_name=COLLECTION_NAME,
-            points=points,
-        )
-        upserted += len(points)
+        # Retry par batch (incident 2026-04-27 — gros docs causent des timeouts)
+        last_err = None
+        success = False
+        for attempt in range(max_retries):
+            try:
+                client.upsert(
+                    collection_name=COLLECTION_NAME,
+                    points=points,
+                    wait=True,  # Synchroniser pour detecter erreurs immediatement
+                )
+                upserted += len(points)
+                success = True
+                break
+            except Exception as e:
+                last_err = e
+                wait = 2 ** attempt  # 1, 2, 4 sec
+                logger.warning(
+                    f"[OSMOSE:LayerR] Upsert batch {batch_idx}/{n_batches} attempt "
+                    f"{attempt + 1}/{max_retries} failed ({len(points)} points): "
+                    f"{type(e).__name__}: {e}. Retry in {wait}s",
+                )
+                _time.sleep(wait)
 
-        if total > batch_size:
-            logger.debug(
-                f"[OSMOSE:LayerR] Upserted batch {batch_start // batch_size + 1} "
-                f"({upserted}/{total})"
+        if not success:
+            failed_batches += 1
+            logger.error(
+                f"[OSMOSE:LayerR] Upsert batch {batch_idx}/{n_batches} GIVE UP after "
+                f"{max_retries} retries ({len(points)} points lost): "
+                f"{type(last_err).__name__ if last_err else '?'}: {last_err}",
+                exc_info=last_err if last_err else None,
             )
 
-    logger.info(
-        f"[OSMOSE:LayerR] Upserted {upserted} points in {COLLECTION_NAME} "
-        f"(tenant={tenant_id})"
-    )
+        # Log progression : tous les 10 batches ou a la fin
+        if batch_idx % 10 == 0 or batch_start + batch_size >= total:
+            logger.info(
+                f"[OSMOSE:LayerR] Upsert progress: {upserted}/{total} points "
+                f"({100 * upserted // max(1, total)}%, failed_batches={failed_batches})"
+            )
+
+    if failed_batches:
+        logger.error(
+            f"[OSMOSE:LayerR] Upsert PARTIAL: {upserted}/{total} points persisted, "
+            f"{failed_batches}/{n_batches} batches failed (tenant={tenant_id})"
+        )
+    else:
+        logger.info(
+            f"[OSMOSE:LayerR] Upserted {upserted} points in {COLLECTION_NAME} "
+            f"(tenant={tenant_id}, {n_batches} batches)"
+        )
     return upserted
 
 

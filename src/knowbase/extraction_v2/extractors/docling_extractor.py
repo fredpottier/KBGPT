@@ -98,6 +98,7 @@ class DoclingExtractor:
         self.image_resolution_scale = image_resolution_scale
 
         self._converter = None
+        self._converter_no_ocr = None  # Lazy: créé si détection auto trouve PDF natif
         self._initialized = False
 
         logger.info(
@@ -135,65 +136,146 @@ class DoclingExtractor:
             )
 
         try:
-            from docling.document_converter import DocumentConverter, PdfFormatOption
-            from docling.datamodel.base_models import InputFormat
-            from docling.datamodel.pipeline_options import (
-                PdfPipelineOptions,
-                TableStructureOptions,
-                TableFormerMode,
-            )
-
-            # Utiliser DoclingParseV4 (meilleur reading order + detection colonnes)
-            # au lieu de PyPdfiumDocumentBackend (le plus faible pour les layouts complexes)
-            try:
-                from docling.backend.docling_parse_v4_backend import DoclingParseV4DocumentBackend
-                pdf_backend = DoclingParseV4DocumentBackend
-                logger.info("[DoclingExtractor] Using DoclingParseV4 backend (improved reading order)")
-            except ImportError:
-                from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
-                pdf_backend = PyPdfiumDocumentBackend
-                logger.warning("[DoclingExtractor] DoclingParseV4 not available, falling back to PyPdfium")
-
-            # Configuration du pipeline PDF
-            pipeline_options = PdfPipelineOptions(
-                do_ocr=self.ocr_enabled,
-                do_table_structure=True,
-                # do_cell_matching=False evite le merge cross-colonne
-                # qui cause des melanges de texte entre colonnes
-                table_structure_options=TableStructureOptions(
-                    do_cell_matching=False,
-                    mode=TableFormerMode.ACCURATE,
-                ),
-            )
-
-            # Wrapper PdfFormatOption requis par Docling 2.66+
-            pdf_format_option = PdfFormatOption(
-                pipeline_options=pipeline_options,
-                backend=pdf_backend,
-            )
-
-            # Créer le convertisseur
-            self._converter = DocumentConverter(
-                allowed_formats=[
-                    InputFormat.PDF,
-                    InputFormat.DOCX,
-                    InputFormat.PPTX,
-                    InputFormat.XLSX,
-                    InputFormat.HTML,
-                    InputFormat.MD,
-                    InputFormat.IMAGE,
-                ],
-                format_options={
-                    InputFormat.PDF: pdf_format_option,
-                },
-            )
-
+            # Construire le converter principal (avec OCR si self.ocr_enabled=True).
+            # Le converter sans OCR sera créé lazily si la détection auto trouve un PDF natif.
+            self._converter = self._build_converter(do_ocr=self.ocr_enabled)
             self._initialized = True
             logger.info("[DoclingExtractor] ✅ Docling converter initialized")
 
         except Exception as e:
             logger.error(f"[DoclingExtractor] ❌ Initialization failed: {e}")
             raise RuntimeError(f"Failed to initialize Docling: {e}") from e
+
+    def _build_converter(self, do_ocr: bool):
+        """
+        Construit un DocumentConverter Docling avec ou sans OCR.
+
+        Utilisé pour créer le converter principal (au démarrage) et le converter
+        sans OCR (lazy, si _has_native_text détecte un PDF avec texte natif).
+
+        Args:
+            do_ocr: Active l'OCR sur les pages
+
+        Returns:
+            DocumentConverter configuré
+        """
+        from docling.document_converter import DocumentConverter, PdfFormatOption
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import (
+            PdfPipelineOptions,
+            TableStructureOptions,
+            TableFormerMode,
+        )
+
+        # Utiliser DoclingParseV4 (meilleur reading order + detection colonnes)
+        try:
+            from docling.backend.docling_parse_v4_backend import DoclingParseV4DocumentBackend
+            pdf_backend = DoclingParseV4DocumentBackend
+            logger.info("[DoclingExtractor] Using DoclingParseV4 backend (improved reading order)")
+        except ImportError:
+            from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
+            pdf_backend = PyPdfiumDocumentBackend
+            logger.warning("[DoclingExtractor] DoclingParseV4 not available, falling back to PyPdfium")
+
+        pipeline_options = PdfPipelineOptions(
+            do_ocr=do_ocr,
+            do_table_structure=True,
+            # do_cell_matching=False evite le merge cross-colonne
+            table_structure_options=TableStructureOptions(
+                do_cell_matching=False,
+                mode=TableFormerMode.ACCURATE,
+            ),
+        )
+
+        pdf_format_option = PdfFormatOption(
+            pipeline_options=pipeline_options,
+            backend=pdf_backend,
+        )
+
+        converter = DocumentConverter(
+            allowed_formats=[
+                InputFormat.PDF,
+                InputFormat.DOCX,
+                InputFormat.PPTX,
+                InputFormat.XLSX,
+                InputFormat.HTML,
+                InputFormat.MD,
+                InputFormat.IMAGE,
+            ],
+            format_options={
+                InputFormat.PDF: pdf_format_option,
+            },
+        )
+        logger.info(f"[DoclingExtractor] Built converter (do_ocr={do_ocr})")
+        return converter
+
+    @staticmethod
+    def _has_native_text(pdf_path: str, sample_pages: int = 3, min_chars: int = 500) -> bool:
+        """
+        Détecte si un PDF a du texte natif sélectionnable (vs scanné nécessitant OCR).
+
+        Pour PDFs avec texte natif (CS-25, règlements EU, etc.), on peut désactiver
+        l'OCR de Docling et gagner ~3x sur la durée d'extraction.
+
+        Args:
+            pdf_path: Chemin du PDF
+            sample_pages: Nombre de pages à sonder (premières pages)
+            min_chars: Seuil de caractères extraits sur l'échantillon pour conclure "natif"
+
+        Returns:
+            True si le PDF a du texte natif suffisant (>= min_chars sur sample_pages),
+            False sinon (PDF probablement scanné, OCR nécessaire).
+            En cas d'erreur de lecture, retourne False par sécurité (fallback OCR enabled).
+        """
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(pdf_path)
+            n = min(sample_pages, len(reader.pages))
+            if n == 0:
+                return False
+            text_chars = sum(
+                len((reader.pages[i].extract_text() or "").strip())
+                for i in range(n)
+            )
+            is_native = text_chars >= min_chars
+            logger.info(
+                f"[DoclingExtractor] OCR auto-detect on {Path(pdf_path).name}: "
+                f"{text_chars} chars in {n} pages "
+                f"-> {'NATIVE (skip OCR)' if is_native else 'SCANNED (OCR needed)'}"
+            )
+            return is_native
+        except Exception as e:
+            logger.warning(
+                f"[DoclingExtractor] OCR auto-detection failed for {pdf_path}: {e} "
+                f"-> defaulting to OCR enabled (safer)"
+            )
+            return False
+
+    def _get_converter_for_file(self, file_path: str):
+        """
+        Retourne le converter optimal selon le fichier.
+
+        - PDF avec texte natif (détection auto) : converter sans OCR (rapide)
+        - PDF scanné ou autre format : converter par défaut (OCR si self.ocr_enabled)
+
+        Le converter sans OCR est créé lazily au premier PDF natif détecté.
+
+        Args:
+            file_path: Chemin du document à traiter
+
+        Returns:
+            DocumentConverter à utiliser pour ce fichier
+        """
+        ext = Path(file_path).suffix.lower().lstrip(".")
+
+        # Détection auto OCR uniquement pour PDFs (autres formats n'ont pas d'OCR de toute façon)
+        if ext == "pdf" and self.ocr_enabled and self._has_native_text(file_path):
+            if self._converter_no_ocr is None:
+                logger.info("[DoclingExtractor] Lazy-building no-OCR converter for native PDFs")
+                self._converter_no_ocr = self._build_converter(do_ocr=False)
+            return self._converter_no_ocr
+
+        return self._converter
 
     def _detect_format(self, file_path: str) -> str:
         """
@@ -281,7 +363,8 @@ class DoclingExtractor:
 
         try:
             # Convertir le document
-            result = self._converter.convert(str(path))
+            converter = self._get_converter_for_file(str(path))
+            result = converter.convert(str(path))
 
             # Post-processing : corriger l'ordre de lecture et la hierarchie
             # pour les PDF (docling-hierarchical-pdf)
@@ -650,7 +733,8 @@ class DoclingExtractor:
         if not path.exists():
             raise FileNotFoundError(f"Fichier non trouvé: {file_path}")
 
-        result = self._converter.convert(str(path))
+        converter = self._get_converter_for_file(str(path))
+        result = converter.convert(str(path))
 
         # Post-processing hierarchique pour PDF
         doc_format = self._detect_format(file_path)

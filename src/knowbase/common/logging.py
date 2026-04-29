@@ -1,4 +1,6 @@
 import logging
+import os
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
@@ -192,3 +194,96 @@ def setup_logging(
     knowbase_logger.addHandler(fh_lazy)
 
     return logger
+
+
+# =============================================================================
+# Persistance fichier rotatée pour le ROOT logger (incident 2026-04-27)
+# =============================================================================
+# Objectif: capturer TOUS les logs (uvicorn, RQ, sentence_transformers, etc.)
+# dans des fichiers rotatés sur un volume host, pour survivre aux container
+# recreate / reboots et permettre le forensic post-incident.
+#
+# Les helpers `get_logger` / `setup_logging` ci-dessus restent dédiés aux
+# loggers nommés (knowbase.*) avec leur logique LazyFlushing existante.
+# `setup_root_file_logging` est complémentaire et s'attache au root logger.
+
+_ROOT_FILE_LOGGING_INITIALIZED = False
+
+
+def setup_root_file_logging(
+    service_name: Optional[str] = None,
+    logs_dir: Optional[str] = None,
+    max_bytes: int = 50 * 1024 * 1024,
+    backup_count: int = 20,
+    level: int = logging.INFO,
+) -> Optional[Path]:
+    """
+    Attache un RotatingFileHandler au root logger pour persister tous les logs.
+
+    A appeler une fois au demarrage de chaque entrypoint Python (worker, app).
+    Idempotent: subsequent calls are no-ops.
+
+    Args:
+        service_name: Nom du service (ex: "worker", "worker-2", "app").
+            Si None, lit la var env SERVICE_NAME, fallback "service".
+        logs_dir: Repertoire des logs (defaut: env LOGS_DIR ou /app/logs).
+        max_bytes: Taille max par fichier avant rotation (defaut: 50MB).
+        backup_count: Nombre de fichiers archives (defaut: 20 = max 1GB).
+        level: Niveau de log capture (defaut: INFO).
+
+    Returns:
+        Path du fichier de log actif, ou None si setup desactive/echec.
+    """
+    global _ROOT_FILE_LOGGING_INITIALIZED
+    if _ROOT_FILE_LOGGING_INITIALIZED:
+        return None
+
+    if service_name is None:
+        service_name = os.environ.get("SERVICE_NAME", "service")
+
+    if logs_dir is None:
+        logs_dir = os.environ.get("LOGS_DIR", "/app/logs")
+
+    try:
+        log_dir = Path(logs_dir) / service_name
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"{service_name}.log"
+
+        handler = RotatingFileHandler(
+            str(log_file),
+            mode="a",
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding="utf-8",
+        )
+        handler.setLevel(level)
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+
+        root = logging.getLogger()
+        # Eviter les doublons si l'init est appelee plusieurs fois
+        for h in root.handlers:
+            if isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", "") == str(log_file):
+                _ROOT_FILE_LOGGING_INITIALIZED = True
+                return log_file
+
+        root.addHandler(handler)
+        if root.level > level or root.level == logging.NOTSET:
+            root.setLevel(level)
+
+        _ROOT_FILE_LOGGING_INITIALIZED = True
+
+        # Log de confirmation (capture par le handler lui-meme)
+        logging.getLogger(__name__).info(
+            f"[LOGGING] Root file logging enabled: {log_file} "
+            f"(rotation: {max_bytes // (1024*1024)}MB x {backup_count})"
+        )
+        return log_file
+    except Exception as e:
+        # Ne jamais casser le startup pour un probleme de logs
+        logging.getLogger(__name__).warning(
+            f"[LOGGING] Failed to setup root file logging at {logs_dir}: {e}"
+        )
+        return None

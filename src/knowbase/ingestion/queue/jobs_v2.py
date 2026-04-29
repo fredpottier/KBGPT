@@ -84,6 +84,55 @@ def update_job_progress(step: str, progress: int = 0, total_steps: int = 0, mess
         })
         job.save()
 
+        # Cockpit instrumentation: émet l'état du pipeline V2 vers Redis
+        # pour que le widget Osmosis Pipelines puisse l'afficher.
+        # Note : avec parallélisme 2 workers, la clé est écrasée par le job le plus récent
+        # (limitation acceptée pour MVP — un fix multi-job sera fait plus tard).
+        try:
+            import redis
+            from pathlib import Path
+            redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+            redis_client = redis.from_url(redis_url)
+
+            doc_name = ""
+            if job.kwargs and "file_path" in job.kwargs:
+                doc_name = Path(job.kwargs["file_path"]).name
+
+            now_ts = datetime.now().timestamp()
+            # Si le step est terminal (Termine/Erreur), marquer COMPLETED/FAILED
+            # pour que le cockpit n'affiche plus le pipeline comme actif.
+            if step in ("Termine",):
+                status = "COMPLETED"
+            elif step in ("Erreur",):
+                status = "FAILED"
+            else:
+                status = "PROCESSING"
+
+            redis_client.hset("osmose:v2:state", mapping={
+                "job_id": job.id,
+                "current_document": doc_name,
+                "current_step": step,
+                "progress": str(progress),
+                "total_steps": str(total_steps),
+                "step_message": message,
+                "status": status,
+                "phase": step,
+                "phase_status": "running" if status == "PROCESSING" else "done",
+                "started_at": str(job.meta.get("v2_started_at", now_ts)),
+                "updated_at": str(now_ts),
+                "worker_id": worker_id,
+            })
+            # Mémoriser le started_at sur le job lui-même au 1er appel
+            if "v2_started_at" not in job.meta:
+                job.meta["v2_started_at"] = now_ts
+                job.save()
+        except Exception as e:
+            # Non bloquant : si l'émission Redis échoue, le job continue normalement.
+            import logging
+            logging.getLogger(__name__).warning(
+                f"[V2:COCKPIT] Failed to emit pipeline state to Redis: {e}"
+            )
+
 
 def mark_job_as_processing():
     """Marque le job comme en cours."""
@@ -335,15 +384,39 @@ def ingest_document_v2_job(
         auto_deduplicate_entities(tenant_id=tenant_id)
 
         # Etape 4: Deplacement fichier
-        update_job_progress("Finalisation", 4, 5, "Deplacement vers docs_done")
+        update_job_progress("Finalisation", 4, 6, "Deplacement vers docs_done")
 
         destination = DOCS_DONE / f"{path.stem}{path.suffix}"
         if path.exists():
             shutil.move(str(path), str(destination))
             logger.info(f"[V2] Moved to: {destination}")
 
-        # Etape 5: Completion
-        update_job_progress("Termine", 5, 5, "Import V2 termine avec succes")
+        # Etape 5: Chainage ClaimFirst (pivot epistemique)
+        # V2 fait l'extraction + concepts/relations.
+        # ClaimFirst extrait les claims atomiques + applique les pipelines de qualite
+        # (Entity, Facet, Cluster, ContradictionClassifier, etc.).
+        # Sans cette etape, le KG n'a pas de claims et le pack domain (sidecar NER)
+        # n'est jamais appele.
+        update_job_progress("ClaimFirst", 5, 6, "Enqueue ClaimFirst pour extraction de claims")
+        try:
+            from knowbase.ingestion.queue.dispatcher import enqueue_claimfirst_process
+            cf_job = enqueue_claimfirst_process(
+                doc_ids=[document_id],
+                tenant_id=tenant_id,
+            )
+            logger.info(
+                f"[V2->ClaimFirst] Enqueued ClaimFirst for doc_id={document_id}, "
+                f"cf_job_id={cf_job.id}"
+            )
+        except Exception as e:
+            logger.error(
+                f"[V2->ClaimFirst] Failed to enqueue ClaimFirst for {document_id}: {e}"
+            )
+            # Non-bloquant : V2 reste considere comme reussi, ClaimFirst peut etre
+            # relance manuellement plus tard.
+
+        # Etape 6: Completion
+        update_job_progress("Termine", 6, 6, "Import V2 termine, ClaimFirst en queue")
 
         # Notifier historique
         from knowbase.api.services.import_history_redis import get_redis_import_history_service

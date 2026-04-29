@@ -1,49 +1,30 @@
 x-common-config: &common-config
   stop_grace_period: 10s
+  # Rotation Docker json-file (incident 2026-04-27 — eviter perte de logs au recreate).
+  # 20 MB max par fichier, 10 fichiers archives = 200 MB par container.
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "20m"
+      max-file: "10"
 
 services:
-  qdrant:
-    <<: *common-config
-    image: qdrant/qdrant:v1.15.1
-    container_name: knowbase-qdrant
-    ports:
-      - "6333:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage # volume Docker natif
-    #healthcheck:
-    #  test: ["CMD-SHELL", "nc -z localhost 6333"]
-    #  interval: 10s
-    #  timeout: 5s
-    #  retries: 5
-    environment:
-      - QDRANT__STORAGE__CHECK_FS=false
-      - QDRANT__STORAGE__STRICT=false
-    networks:
-      - knowbase_net
-
-  redis:
-    <<: *common-config
-    image: redis:7.2
-    container_name: knowbase-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-    networks:
-      - knowbase_net
+  # NOTE: qdrant et redis sont definis dans docker-compose.infra.yml (source unique).
+  # Les definir ici aussi causait un merge additif des ports (qui ouvrait Redis a la fois
+  # sur 127.0.0.1 ET 0.0.0.0, contournant le binding loopback de l'incident 2026-04-27).
+  # Lais leurs definitions dans infra.yml — yml ne fait que les referencer en depends_on.
 
   app:
+    <<: *common-config
     build:
       context: .
       dockerfile: ./app/Dockerfile
     image: sap-kb-app:latest
     container_name: knowbase-app
+    restart: unless-stopped
     depends_on:
       - qdrant
       - redis
-    stop_grace_period: 10s
     shm_size: '2gb'  # Nécessaire pour OnnxTR/PyTorch (défaut 64MB insuffisant)
     env_file:
       - .env
@@ -55,6 +36,8 @@ services:
       KNOWBASE_DATA_DIR: /data
       REDIS_URL: redis://redis:6379/0
       BURST_MAX_CONCURRENT_DOCS: "2"  # 2 docs en parallèle (augmenté sur demande)
+      SERVICE_NAME: app  # Pour logs persistants /app/logs/app/app.log
+      LOGS_DIR: /app/logs
     ports:
       - "${APP_PORT}:8000"
       - "5678:5678"
@@ -66,6 +49,7 @@ services:
       - ./tests:/app/tests
       - ./poc:/app/poc
       - ./benchmark:/app/benchmark  # Benchmark — resultats, questions, scripts (inclus dans les backups)
+      - ./logs:/app/logs  # Logs persistants rotates (incident 2026-04-27)
       - /var/run/docker.sock:/var/run/docker.sock  # Domain Packs — lecture/écriture pour lancer les sidecars
     networks:
       - knowbase_net
@@ -73,6 +57,7 @@ services:
     command: python -Xfrozen_modules=off -m uvicorn main:app --host 0.0.0.0 --port 8000
 
   ingestion-worker:
+    <<: *common-config
     build:
       context: .
       dockerfile: ./app/Dockerfile
@@ -130,6 +115,8 @@ services:
       # INGESTION_JOB_TIMEOUT: "5400"       # Auto: MAX_DOCUMENT_PROCESSING_TIME * 1.5
 
       CUDA_VISIBLE_DEVICES: "0"  # Exposer GPU comme device 0 dans le container (mapping de host device 1)
+      SERVICE_NAME: worker  # Pour logs persistants /app/logs/worker/worker.log
+      LOGS_DIR: /app/logs
     ports:
       - "5679:5679"  # Debug port for worker
     volumes:
@@ -140,6 +127,7 @@ services:
       - ./tests:/app/tests
       - ./poc:/app/poc
       - ./benchmark:/app/benchmark
+      - ./logs:/app/logs  # Logs persistants rotates (incident 2026-04-27)
       - /var/run/docker.sock:/var/run/docker.sock  # Domain Packs — lancer les sidecars NER
     networks:
       - knowbase_net
@@ -147,7 +135,58 @@ services:
     entrypoint: ["/app/entrypoint-worker.sh"]
     command: python -m knowbase.ingestion.queue
 
+  ingestion-worker-2:
+    <<: *common-config
+    # Worker secondaire pour parallélisme V2 (option A — équivalent BURST_MAX_CONCURRENT_DOCS=2 sans EC2)
+    # Réutilise l'image sap-kb-worker:latest du worker primaire.
+    # Pas de réservation GPU (partage best-effort, fallback CPU si conflit).
+    # Pas de port debug exposé (5679 déjà pris par worker primaire).
+    image: sap-kb-worker:latest
+    container_name: knowbase-worker-2
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - qdrant
+    stop_grace_period: 15s
+    shm_size: '2gb'
+    env_file:
+      - .env
+    environment:
+      TZ: Europe/Paris
+      PYTHONPATH: /app:/app/src
+      HF_HOME: /data/models
+      ONNXTR_CACHE_DIR: /data/models/onnxtr
+      KNOWBASE_DATA_DIR: /data
+      REDIS_URL: redis://redis:6379/0
+      OSMOSIS_API_URL: http://app:8000
+      T2T5_JUDGE_PROVIDER: llamacpp
+      T2T5_JUDGE_MODEL_NAME: m-prometheus-14b
+      RAGAS_JUDGE_PROVIDER: llamacpp
+      RAGAS_JUDGE_MODEL: m-prometheus-14b
+      LLAMACPP_URL: http://prometheus-judge:8000
+      OLLAMA_URL: http://host.docker.internal:11434
+      DEV_MODE: "false"
+      MAX_DOCUMENT_PROCESSING_TIME: "3600"
+      SERVICE_NAME: worker-2  # Pour logs persistants /app/logs/worker-2/worker-2.log
+      LOGS_DIR: /app/logs
+    volumes:
+      - ./app:/app
+      - ./data:/data
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./tests:/app/tests
+      - ./poc:/app/poc
+      - ./benchmark:/app/benchmark
+      - ./logs:/app/logs  # Logs persistants rotates (incident 2026-04-27)
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - knowbase_net
+    working_dir: /app
+    entrypoint: ["/app/entrypoint-worker.sh"]
+    command: python -m knowbase.ingestion.queue
+
   folder-watcher:
+    <<: *common-config
     build:
       context: .
       dockerfile: ./app/Dockerfile
@@ -155,7 +194,6 @@ services:
     container_name: knowbase-watcher
     depends_on:
       - redis
-    stop_grace_period: 10s
     env_file:
       - .env
     environment:
@@ -175,6 +213,7 @@ services:
     restart: unless-stopped
 
   frontend:
+    <<: *common-config
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
@@ -182,7 +221,6 @@ services:
     container_name: knowbase-frontend
     depends_on:
       - app
-    stop_grace_period: 10s
     env_file:
       - .env
     environment:

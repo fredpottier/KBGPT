@@ -8,11 +8,20 @@
 
 version: '3.8'
 
+# Rotation Docker json-file (incident 2026-04-27 — eviter perte de logs au recreate).
+x-default-logging: &default-logging
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "20m"
+      max-file: "10"
+
 services:
   # ===================================
   # LOKI - Log Aggregation System
   # ===================================
   loki:
+    <<: *default-logging
     image: grafana/loki:2.9.3
     container_name: knowbase-loki
     environment:
@@ -37,6 +46,7 @@ services:
   # PROMTAIL - Log Collector Agent
   # ===================================
   promtail:
+    <<: *default-logging
     image: grafana/promtail:2.9.3
     container_name: knowbase-promtail
     environment:
@@ -58,6 +68,7 @@ services:
   # GRAFANA - Visualization Dashboard
   # ===================================
   grafana:
+    <<: *default-logging
     image: grafana/grafana:10.2.3
     container_name: knowbase-grafana
     ports:

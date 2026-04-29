@@ -1229,8 +1229,20 @@ class LLMRouter:
 
             default_model = self._config.get("default_model", "gpt-4o")
             if model != default_model:
-                logger.info(f"[LLM_ROUTER] Fallback emergency to {default_model}")
-                return self._call_openai(default_model, messages, temperature, max_tokens, task_type, **kwargs)
+                # Bug fix 2026-04-27 : le fallback envoyait vers OpenAI quel que soit le model,
+                # ce qui causait "invalid model ID" si default_model = Qwen. On route maintenant
+                # selon le prefixe du modele.
+                if "Qwen" in default_model or "/" in default_model:
+                    logger.info(f"[LLM_ROUTER] Fallback emergency to {default_model} via DeepInfra")
+                    return self._call_deepinfra(default_model, messages, temperature, max_tokens, task_type, **kwargs)
+                elif default_model.startswith("claude"):
+                    logger.info(f"[LLM_ROUTER] Fallback emergency to {default_model} via Anthropic")
+                    # Pas d'implem _call_anthropic ici, fallback raise plutot que pretendre
+                    logger.error(f"[LLM_ROUTER] No Anthropic fallback path implemented, propagating error")
+                    raise
+                else:
+                    logger.info(f"[LLM_ROUTER] Fallback emergency to {default_model} via OpenAI")
+                    return self._call_openai(default_model, messages, temperature, max_tokens, task_type, **kwargs)
             raise
 
     async def acomplete(
@@ -1382,8 +1394,16 @@ class LLMRouter:
 
             default_model = self._config.get("default_model", "gpt-4o")
             if model != default_model:
-                logger.info(f"[LLM_ROUTER:ASYNC] Fallback emergency to {default_model}")
-                return await self._call_openai_async(default_model, messages, temperature, max_tokens, task_type, **kwargs)
+                # Bug fix 2026-04-27 : routing par prefixe du modele (ne plus appeler OpenAI sur Qwen).
+                if "Qwen" in default_model or "/" in default_model:
+                    logger.info(f"[LLM_ROUTER:ASYNC] Fallback emergency to {default_model} via DeepInfra")
+                    return await self._call_deepinfra_async(default_model, messages, temperature, max_tokens, task_type, **kwargs)
+                elif default_model.startswith("claude"):
+                    logger.error(f"[LLM_ROUTER:ASYNC] No Anthropic async fallback path, propagating error")
+                    raise
+                else:
+                    logger.info(f"[LLM_ROUTER:ASYNC] Fallback emergency to {default_model} via OpenAI")
+                    return await self._call_openai_async(default_model, messages, temperature, max_tokens, task_type, **kwargs)
             raise
 
     def _call_openai(
