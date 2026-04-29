@@ -120,7 +120,7 @@ export function DrilldownModal({ isOpen, onClose, drilldownKey }: Props) {
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="3xl" scrollBehavior="inside">
       <ModalOverlay />
-      <ModalContent bg="var(--bg-secondary)" color="var(--text-primary)">
+      <ModalContent bg="var(--bg-surface)" color="var(--fg-primary)">
         <ModalHeader borderBottom="1px solid" borderColor="var(--border-default)">
           {data?.title ?? 'Chargement...'}
         </ModalHeader>
@@ -129,7 +129,7 @@ export function DrilldownModal({ isOpen, onClose, drilldownKey }: Props) {
           {loading && (
             <VStack py={10}>
               <Spinner size="lg" color="brand.400" />
-              <Text fontSize="sm" color="var(--text-muted)">
+              <Text fontSize="sm" color="var(--fg-muted)">
                 Chargement du drill-down...
               </Text>
             </VStack>
@@ -144,7 +144,7 @@ export function DrilldownModal({ isOpen, onClose, drilldownKey }: Props) {
           {data && !loading && !error && (
             <VStack align="stretch" spacing={3}>
               <HStack>
-                <Text fontSize="xs" color="var(--text-muted)">
+                <Text fontSize="xs" color="var(--fg-muted)">
                   {data.total_available} ligne(s) affichee(s)
                 </Text>
               </HStack>
@@ -153,7 +153,7 @@ export function DrilldownModal({ isOpen, onClose, drilldownKey }: Props) {
                   <Thead>
                     <Tr>
                       {data.columns.map((col) => (
-                        <Th key={col} color="var(--text-muted)" borderColor="var(--border-default)">
+                        <Th key={col} color="var(--fg-muted)" borderColor="var(--border-default)">
                           {COLUMN_LABELS[col] ?? col}
                         </Th>
                       ))}
@@ -161,13 +161,13 @@ export function DrilldownModal({ isOpen, onClose, drilldownKey }: Props) {
                   </Thead>
                   <Tbody>
                     {data.rows.map((row, idx) => (
-                      <Tr key={idx} _hover={{ bg: 'var(--bg-primary)' }}>
+                      <Tr key={idx} _hover={{ bg: 'var(--bg-canvas)' }}>
                         {data.columns.map((col) => (
                           <Td
                             key={col}
                             borderColor="var(--border-default)"
                             fontSize="xs"
-                            color="var(--text-primary)"
+                            color="var(--fg-primary)"
                           >
                             {renderCell(col, row[col])}
                           </Td>

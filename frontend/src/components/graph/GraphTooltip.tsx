@@ -54,14 +54,14 @@ export default function GraphTooltip({ node, position, isVisible }: GraphTooltip
           transition={{ duration: 0.15 }}
         >
           <Box
-            bg="white"
+            bg="bg.canvas"
             borderRadius="lg"
             boxShadow="lg"
             p={3}
             minW="200px"
             maxW="300px"
             border="1px solid"
-            borderColor="gray.200"
+            borderColor="border.default"
           >
             <VStack align="stretch" spacing={2}>
               {/* Nom et type */}
@@ -93,7 +93,7 @@ export default function GraphTooltip({ node, position, isVisible }: GraphTooltip
               <VStack align="stretch" spacing={1}>
                 {/* Confiance */}
                 <Box>
-                  <HStack justify="space-between" fontSize="xs" color="gray.600">
+                  <HStack justify="space-between" fontSize="xs" color="fg.secondary">
                     <Text>Confiance</Text>
                     <Text fontWeight="medium">{Math.round(node.confidence * 100)}%</Text>
                   </HStack>
@@ -109,14 +109,14 @@ export default function GraphTooltip({ node, position, isVisible }: GraphTooltip
                 </Box>
 
                 {/* Mentions */}
-                <HStack justify="space-between" fontSize="xs" color="gray.600">
+                <HStack justify="space-between" fontSize="xs" color="fg.secondary">
                   <Text>Mentions</Text>
                   <Text fontWeight="medium">{node.mentionCount}</Text>
                 </HStack>
 
                 {/* Documents */}
                 {node.documentCount !== undefined && node.documentCount > 0 && (
-                  <HStack justify="space-between" fontSize="xs" color="gray.600">
+                  <HStack justify="space-between" fontSize="xs" color="fg.secondary">
                     <Text>Documents</Text>
                     <Text fontWeight="medium">{node.documentCount}</Text>
                   </HStack>
@@ -124,7 +124,7 @@ export default function GraphTooltip({ node, position, isVisible }: GraphTooltip
               </VStack>
 
               {/* Hint interaction */}
-              <Text fontSize="xs" color="gray.400" textAlign="center" mt={1}>
+              <Text fontSize="xs" color="fg.muted" textAlign="center" mt={1}>
                 Cliquez pour explorer
               </Text>
             </VStack>

@@ -190,7 +190,7 @@ export default function WikiHomePage() {
       <Container maxW="7xl" py={8} mt={16}>
         <HStack justify="center" py={20}>
           <Spinner size="lg" color="brand.400" />
-          <Text color="var(--text-muted)">Chargement de l'Atlas...</Text>
+          <Text color="var(--fg-muted)">Chargement de l'Atlas...</Text>
         </HStack>
       </Container>
     )
@@ -199,8 +199,8 @@ export default function WikiHomePage() {
   if (!data) {
     return (
       <Container maxW="7xl" py={8} mt={16}>
-        <Box bg="var(--bg-secondary)" rounded="xl" p={8} textAlign="center" borderWidth="1px" borderColor="var(--border-default)">
-          <Text color="var(--text-muted)">Impossible de charger les donnees de l'Atlas.</Text>
+        <Box bg="var(--bg-surface)" rounded="xl" p={8} textAlign="center" borderWidth="1px" borderColor="var(--border-default)">
+          <Text color="var(--fg-muted)">Impossible de charger les donnees de l'Atlas.</Text>
         </Box>
       </Container>
     )
@@ -260,24 +260,24 @@ export default function WikiHomePage() {
     <Container maxW="7xl" py={8} mt={16}>
       {/* Hero — Introduction editoriale contextuelle */}
       <Box mb={10}>
-        <Heading size="lg" color="var(--text-primary)" mb={4}>
+        <Heading size="lg" color="var(--fg-primary)" mb={4}>
           Knowledge Atlas
         </Heading>
 
         {/* Resume editorial si domain_context disponible */}
         {domain_context?.domain_summary && (
-          <Text color="var(--text-secondary)" fontSize="md" lineHeight="tall" maxW="800px" mb={3}>
+          <Text color="var(--fg-secondary)" fontSize="md" lineHeight="tall" maxW="800px" mb={3}>
             {domain_context.domain_summary}
           </Text>
         )}
 
         {/* Paragraphe narratif dynamique */}
         {narrativeText ? (
-          <Text color="var(--text-muted)" fontSize="sm" lineHeight="tall" maxW="800px" mb={5}>
+          <Text color="var(--fg-muted)" fontSize="sm" lineHeight="tall" maxW="800px" mb={5}>
             {narrativeText}
           </Text>
         ) : !domain_context?.domain_summary ? (
-          <Text color="var(--text-secondary)" fontSize="md" lineHeight="tall" maxW="800px" mb={5}>
+          <Text color="var(--fg-secondary)" fontSize="md" lineHeight="tall" maxW="800px" mb={5}>
             Bienvenue dans l'Atlas de connaissances. Explorez les domaines ci-dessous pour
             acceder aux articles de synthese generes a partir de la base documentaire.
           </Text>
@@ -286,22 +286,22 @@ export default function WikiHomePage() {
         {/* Indicateurs + barre de couverture */}
         <Flex gap={6} wrap="wrap" mb={4}>
           <HStack spacing={2}>
-            <Icon as={FiFileText} color="var(--text-muted)" boxSize={4} />
-            <Text color="var(--text-muted)" fontSize="sm">
-              <Text as="span" color="var(--text-primary)" fontWeight="semibold">{corpus_stats.total_documents}</Text> documents analyses
+            <Icon as={FiFileText} color="var(--fg-muted)" boxSize={4} />
+            <Text color="var(--fg-muted)" fontSize="sm">
+              <Text as="span" color="var(--fg-primary)" fontWeight="semibold">{corpus_stats.total_documents}</Text> documents analyses
             </Text>
           </HStack>
           <HStack spacing={2}>
-            <Icon as={FiDatabase} color="var(--text-muted)" boxSize={4} />
-            <Text color="var(--text-muted)" fontSize="sm">
-              <Text as="span" color="var(--text-primary)" fontWeight="semibold">{corpus_stats.total_claims.toLocaleString()}</Text> faits extraits
+            <Icon as={FiDatabase} color="var(--fg-muted)" boxSize={4} />
+            <Text color="var(--fg-muted)" fontSize="sm">
+              <Text as="span" color="var(--fg-primary)" fontWeight="semibold">{corpus_stats.total_claims.toLocaleString()}</Text> faits extraits
             </Text>
           </HStack>
           {corpus_stats.total_articles > 0 && (
             <HStack spacing={2}>
-              <Icon as={FiLayers} color="var(--text-muted)" boxSize={4} />
-              <Text color="var(--text-muted)" fontSize="sm">
-                <Link as={NextLink} href="/wiki/articles" color="var(--text-primary)" fontWeight="semibold">
+              <Icon as={FiLayers} color="var(--fg-muted)" boxSize={4} />
+              <Text color="var(--fg-muted)" fontSize="sm">
+                <Link as={NextLink} href="/wiki/articles" color="var(--fg-primary)" fontWeight="semibold">
                   {corpus_stats.total_articles} articles
                 </Link> de synthese disponibles
               </Text>
@@ -310,7 +310,7 @@ export default function WikiHomePage() {
           {contradictionCount > 0 && (
             <HStack spacing={2}>
               <Icon as={FiAlertTriangle} color="orange.400" boxSize={4} />
-              <Text color="var(--text-muted)" fontSize="sm">
+              <Text color="var(--fg-muted)" fontSize="sm">
                 <Text as="span" color="orange.400" fontWeight="semibold">{contradictionCount}</Text> contradictions detectees
               </Text>
             </HStack>
@@ -321,14 +321,14 @@ export default function WikiHomePage() {
         {corpus_stats.coverage_pct > 0 && corpus_stats.total_entities > 0 && (
           <Box maxW="400px">
             <HStack justify="space-between" mb={1}>
-              <Text color="var(--text-muted)" fontSize="xs">Couverture du corpus</Text>
-              <Text color="var(--text-primary)" fontSize="xs" fontWeight="semibold">{corpus_stats.coverage_pct}%</Text>
+              <Text color="var(--fg-muted)" fontSize="xs">Couverture du corpus</Text>
+              <Text color="var(--fg-primary)" fontSize="xs" fontWeight="semibold">{corpus_stats.coverage_pct}%</Text>
             </HStack>
             <Progress
               value={corpus_stats.coverage_pct}
               size="xs"
               rounded="full"
-              bg="var(--bg-secondary)"
+              bg="var(--bg-surface)"
               sx={{
                 '& > div': {
                   background: corpus_stats.coverage_pct > 50
@@ -346,7 +346,7 @@ export default function WikiHomePage() {
         <Box mb={10}>
           <HStack spacing={2} mb={4}>
             <Icon as={FiTarget} color="brand.400" boxSize={4} />
-            <Text color="var(--text-muted)" fontSize="xs" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider">
+            <Text color="var(--fg-muted)" fontSize="xs" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider">
               Ce que couvre ce corpus
             </Text>
           </HStack>
@@ -378,10 +378,10 @@ export default function WikiHomePage() {
                         transition="all 0.15s"
                         cursor="pointer"
                       >
-                        <Text color="var(--text-primary)" fontSize={fontSize} fontWeight="medium">
+                        <Text color="var(--fg-primary)" fontSize={fontSize} fontWeight="medium">
                           {entity.name}
                         </Text>
-                        <Text color="var(--text-muted)" fontSize="xs">
+                        <Text color="var(--fg-muted)" fontSize="xs">
                           {entity.claim_count} faits
                         </Text>
                       </Box>
@@ -397,15 +397,15 @@ export default function WikiHomePage() {
                       px={px}
                       py={py}
                       rounded="lg"
-                      bg="var(--bg-secondary)"
+                      bg="var(--bg-surface)"
                       borderWidth="1px"
                       borderColor="var(--border-default)"
                       opacity={0.6}
                     >
-                      <Text color="var(--text-muted)" fontSize={fontSize} fontWeight="medium">
+                      <Text color="var(--fg-muted)" fontSize={fontSize} fontWeight="medium">
                         {entity.name}
                       </Text>
-                      <Text color="var(--text-muted)" fontSize="xs">
+                      <Text color="var(--fg-muted)" fontSize="xs">
                         {entity.claim_count} faits
                       </Text>
                     </Box>
@@ -422,7 +422,7 @@ export default function WikiHomePage() {
         <Box mb={10}>
           <HStack spacing={2} mb={4}>
             <Icon as={FiStar} color="purple.400" boxSize={4} />
-            <Text color="var(--text-muted)" fontSize="xs" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider">
+            <Text color="var(--fg-muted)" fontSize="xs" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider">
               Commencer par
             </Text>
           </HStack>
@@ -449,7 +449,7 @@ export default function WikiHomePage() {
                   transition="all 0.2s"
                 >
                   <Icon as={FiStar} color="purple.400" boxSize={4} flexShrink={0} />
-                  <Text color="var(--text-primary)" fontSize="sm" fontWeight="medium" noOfLines={2}>
+                  <Text color="var(--fg-primary)" fontSize="sm" fontWeight="medium" noOfLines={2}>
                     {item.title}
                   </Text>
                 </HStack>
@@ -461,7 +461,7 @@ export default function WikiHomePage() {
 
       {/* Domaines de connaissance — approche editoriale */}
       <VStack spacing={6} align="stretch" mb={10}>
-        <Text color="var(--text-muted)" fontSize="xs" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider">
+        <Text color="var(--fg-muted)" fontSize="xs" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider">
           Explorer par domaine
         </Text>
 
@@ -484,7 +484,7 @@ export default function WikiHomePage() {
               {/* Titre + description editoriale */}
               <HStack spacing={3} mb={2} align="baseline">
                 <Link as={NextLink} href={`/wiki/domain/${domain.domain_key}`} _hover={{ textDecoration: 'none' }}>
-                  <Heading size="md" color="var(--text-primary)" _hover={{ color: 'brand.400' }} transition="color 0.15s">
+                  <Heading size="md" color="var(--fg-primary)" _hover={{ color: 'brand.400' }} transition="color 0.15s">
                     {domain.name}
                   </Heading>
                 </Link>
@@ -495,7 +495,7 @@ export default function WikiHomePage() {
                 )}
               </HStack>
 
-              <Text color="var(--text-secondary)" fontSize="sm" lineHeight="tall" mb={4} maxW="700px">
+              <Text color="var(--fg-secondary)" fontSize="sm" lineHeight="tall" mb={4} maxW="700px">
                 {description}
               </Text>
 
@@ -522,7 +522,7 @@ export default function WikiHomePage() {
               {/* Articles — les points d'entree cliquables */}
               {domain.articles.length > 0 ? (
                 <Box>
-                  <Text color="var(--text-muted)" fontSize="xs" mb={2} fontWeight="medium">
+                  <Text color="var(--fg-muted)" fontSize="xs" mb={2} fontWeight="medium">
                     Articles disponibles :
                   </Text>
                   <Wrap spacing={2}>
@@ -534,7 +534,7 @@ export default function WikiHomePage() {
                           _hover={{ textDecoration: 'none' }}
                         >
                           <HStack
-                            bg="var(--bg-secondary)"
+                            bg="var(--bg-surface)"
                             px={3}
                             py={1.5}
                             rounded="md"
@@ -545,7 +545,7 @@ export default function WikiHomePage() {
                             transition="all 0.15s"
                           >
                             <Box w="6px" h="6px" rounded="full" bg={TIER_DOTS[article.tier] || 'gray.500'} />
-                            <Text color="var(--text-primary)" fontSize="sm">{article.title}</Text>
+                            <Text color="var(--fg-primary)" fontSize="sm">{article.title}</Text>
                           </HStack>
                         </Link>
                       </WrapItem>
@@ -560,7 +560,7 @@ export default function WikiHomePage() {
                   </Wrap>
                 </Box>
               ) : (
-                <Text color="var(--text-muted)" fontSize="sm" fontStyle="italic">
+                <Text color="var(--fg-muted)" fontSize="sm" fontStyle="italic">
                   Les articles de ce domaine sont en cours de generation.
                 </Text>
               )}
@@ -593,10 +593,10 @@ export default function WikiHomePage() {
                 <HStack key={i} spacing={3} align="start">
                   <Icon as={SpotIcon} color={color} boxSize={4} mt={0.5} flexShrink={0} />
                   <Box>
-                    <Text color="var(--text-primary)" fontSize="sm" fontWeight="medium">
+                    <Text color="var(--fg-primary)" fontSize="sm" fontWeight="medium">
                       {spot.domain}
                     </Text>
-                    <Text color="var(--text-muted)" fontSize="xs">
+                    <Text color="var(--fg-muted)" fontSize="xs">
                       {spot.detail}
                     </Text>
                   </Box>
@@ -609,11 +609,11 @@ export default function WikiHomePage() {
 
       {/* Articles recents */}
       {recent_articles.length > 0 && (
-        <Box bg="var(--bg-secondary)" rounded="xl" p={6} borderWidth="1px" borderColor="var(--border-default)">
+        <Box bg="var(--bg-surface)" rounded="xl" p={6} borderWidth="1px" borderColor="var(--border-default)">
           <HStack mb={4} justify="space-between">
             <HStack>
-              <Icon as={FiClock} color="var(--text-muted)" boxSize={4} />
-              <Text color="var(--text-muted)" fontSize="xs" fontWeight="semibold" textTransform="uppercase">
+              <Icon as={FiClock} color="var(--fg-muted)" boxSize={4} />
+              <Text color="var(--fg-muted)" fontSize="xs" fontWeight="semibold" textTransform="uppercase">
                 Derniers articles ajoutes
               </Text>
             </HStack>
@@ -638,9 +638,9 @@ export default function WikiHomePage() {
                 >
                   <Icon as={FiBook} color="brand.400" boxSize={4} flexShrink={0} />
                   <Box>
-                    <Text color="var(--text-primary)" fontSize="sm" fontWeight="medium">{a.title}</Text>
+                    <Text color="var(--fg-primary)" fontSize="sm" fontWeight="medium">{a.title}</Text>
                     {a.updated_at && (
-                      <Text color="var(--text-muted)" fontSize="xs">
+                      <Text color="var(--fg-muted)" fontSize="xs">
                         {new Date(a.updated_at).toLocaleDateString('fr-FR')}
                       </Text>
                     )}

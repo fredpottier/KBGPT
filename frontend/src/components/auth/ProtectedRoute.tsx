@@ -40,7 +40,7 @@ export function ProtectedRoute({ children, requireRole }: ProtectedRouteProps) {
       <Center h="100vh">
         <VStack spacing={4}>
           <Spinner size="xl" color="brand.500" thickness="4px" />
-          <Text color="gray.600">Loading...</Text>
+          <Text color="fg.secondary">Loading...</Text>
         </VStack>
       </Center>
     )
@@ -59,10 +59,10 @@ export function ProtectedRoute({ children, requireRole }: ProtectedRouteProps) {
           <Text fontSize="xl" color="red.500">
             ⛔ Insufficient Permissions
           </Text>
-          <Text color="gray.600">
+          <Text color="fg.secondary">
             You need the role "{requireRole}" to access this page.
           </Text>
-          <Text color="gray.500" fontSize="sm">
+          <Text color="fg.muted" fontSize="sm">
             Your role: {user?.role}
           </Text>
         </VStack>

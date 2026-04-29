@@ -268,9 +268,9 @@ export default function KnowledgeProofPanel({ proof }: KnowledgeProofPanelProps)
               bg="rgba(156, 163, 175, 0.1)"
               borderRadius="md"
               border="1px dashed"
-              borderColor="gray.500"
+              borderColor="border.strong"
             >
-              <Text fontSize="xs" color="gray.400">
+              <Text fontSize="xs" color="fg.muted">
                 Hors perimetre - Information indicative
               </Text>
             </Box>

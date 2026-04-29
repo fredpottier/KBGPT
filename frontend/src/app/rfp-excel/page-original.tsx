@@ -275,7 +275,7 @@ export default function RfpExcelPage() {
       <VStack spacing={6} align="stretch">
         <Box>
           <Heading size="lg" mb={2}>RFP Excel</Heading>
-          <Text color="gray.600">
+          <Text color="fg.secondary">
             Gestion des fichiers Excel pour les RFP - Questions/Réponses et remplissage automatique
           </Text>
         </Box>
@@ -329,7 +329,7 @@ export default function RfpExcelPage() {
                             ? "Déposez les fichiers Excel ici"
                             : "Glissez-déposez des fichiers Excel ou cliquez pour parcourir"}
                         </Text>
-                        <Text fontSize="sm" color="gray.500">
+                        <Text fontSize="sm" color="fg.muted">
                           Formats acceptés: .xlsx, .xls
                         </Text>
                       </VStack>
@@ -475,7 +475,7 @@ export default function RfpExcelPage() {
                             ? "Déposez les fichiers RFP ici"
                             : "Glissez-déposez des fichiers RFP Excel ou cliquez pour parcourir"}
                         </Text>
-                        <Text fontSize="sm" color="gray.500">
+                        <Text fontSize="sm" color="fg.muted">
                           Formats acceptés: .xlsx, .xls
                         </Text>
                       </VStack>

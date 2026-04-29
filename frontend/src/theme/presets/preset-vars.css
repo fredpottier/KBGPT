@@ -1,0 +1,307 @@
+/* ============================================================================
+   OSMOSIS — Multi-preset Design Tokens
+   ============================================================================
+
+   Convention canonique (= Fusion). Toutes les variables suivent ce naming :
+
+   - --bg-canvas       fond de page
+   - --bg-surface      cards/modals/élevés
+   - --bg-surface-alt  surfaces secondaires/hover
+   - --bg-overlay      modal scrim
+   - --bg-hover        hover état (alias --bg-surface-alt si non défini)
+
+   - --fg-primary      texte principal
+   - --fg-secondary    texte support
+   - --fg-muted        labels, métadonnées
+   - --fg-disabled     état désactivé
+   - --fg-inverse      texte sur fond contrasté
+
+   - --accent          accent principal (liens, CTA)
+   - --accent-hover    accent hover
+   - --accent-soft     fond accent doux
+   - --accent-on       texte sur fond accent
+   - --accent-glow     glow effect (preset-spécifique, peut être absent)
+
+   - --border-default  divider standard
+   - --border-strong   divider haute intensité
+   - --border-faint    séparateur subtil
+
+   - --success-base / --warning-base / --error-base / --info-base
+     (+ -soft, -on, -border pour chaque)
+
+   - --motion-fast / --motion-base / --motion-slow
+
+   Sélection :
+     <html data-preset="fusion" data-theme="light">       (default)
+     <html data-preset="fusion" data-theme="dark">
+     <html data-preset="dark-elegance" data-theme="dark">
+     <html data-preset="dark-elegance" data-theme="light">
+   ============================================================================ */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+/* ============================================================================
+   TYPOGRAPHY (preset-independent, defined once)
+   ============================================================================ */
+:root {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, ui-monospace, monospace;
+  --font-display: var(--font-sans);
+
+  --text-xs:   11px;
+  --text-sm:   12px;
+  --text-base: 14px;
+  --text-md:   16px;
+  --text-lg:   18px;
+  --text-xl:   22px;
+  --text-2xl:  28px;
+  --text-3xl:  36px;
+  --text-4xl:  48px;
+  --text-5xl:  64px;
+
+  --tracking-display: -0.03em;
+  --tracking-tight:   -0.015em;
+  --tracking-normal:  0;
+  --tracking-mono:    0.14em;
+  --tracking-wide:    0.18em;
+
+  --leading-tight:   1.15;
+  --leading-snug:    1.35;
+  --leading-normal:  1.55;
+  --leading-relaxed: 1.7;
+
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* Spacing (4px base) */
+  --space-1:  4px;  --space-2:  8px;  --space-3: 12px;  --space-4: 16px;
+  --space-5: 20px;  --space-6: 24px;  --space-7: 32px;  --space-8: 40px;
+  --space-9: 48px;  --space-10: 64px; --space-11: 80px; --space-12: 96px;
+
+  /* Borders */
+  --border-1: 1px;
+  --border-2: 2px;
+}
+
+/* ============================================================================
+   PRESET = FUSION (canonical, light mode default)
+   ============================================================================ */
+:root,
+[data-preset="fusion"],
+[data-preset="fusion"][data-theme="light"] {
+  color-scheme: light;
+
+  --brand-graphite: #0E1116;
+  --brand-paper:    #F5F4EF;
+  --brand-viridian: #2E5D4E;
+  --brand-ink:      #5A5F68;
+
+  --viridian-50:  #E4EDE9;
+  --viridian-100: #C7DBD2;
+  --viridian-200: #9DC0B1;
+  --viridian-300: #6FA28D;
+  --viridian-400: #4A8470;
+  --viridian-500: #2E5D4E;
+  --viridian-600: #244B3F;
+  --viridian-700: #1B3A31;
+  --viridian-800: #122821;
+
+  --bg-canvas:      #F5F4EF;
+  --bg-surface:     #FFFFFF;
+  --bg-surface-alt: #EEEDE6;
+  --bg-overlay:     rgba(14, 17, 22, 0.55);
+  --bg-hover:       #EEEDE6;
+
+  --border-default: #D8D6CD;
+  --border-strong:  #9A978C;
+  --border-faint:   #E5E4DE;
+
+  --fg-primary:    #0E1116;
+  --fg-secondary:  #3E4147;
+  --fg-muted:      #5A5F68;
+  --fg-disabled:   #9A978C;
+  --fg-inverse:    #F5F4EF;
+
+  --accent:        #2E5D4E;
+  --accent-hover:  #244B3F;
+  --accent-soft:   #E4EDE9;
+  --accent-on:     #F5F4EF;
+  --accent-glow:   rgba(46, 93, 78, 0.12);
+
+  --success-base:  #1C6540;  --success-soft: #E2F0E9;  --success-on: #F5F4EF;  --success-border:#1C6540;
+  --warning-base:  #755A08;  --warning-soft: #F3ECD4;  --warning-on: #F5F4EF;  --warning-border:#755A08;
+  --error-base:    #A63432;  --error-soft:   #F2DCDB;  --error-on:   #F5F4EF;  --error-border:  #A63432;
+  --info-base:     #2E4A7A;  --info-soft:    #DEE5F0;  --info-on:    #F5F4EF;  --info-border:   #2E4A7A;
+
+  --radius-none: 0;
+  --radius-sm:   2px;
+  --radius-md:   4px;
+  --radius-pill: 999px;
+
+  --shadow-none:  none;
+  --shadow-sm:    0 1px 2px rgba(14, 17, 22, 0.06);
+  --shadow-md:    0 2px 8px rgba(14, 17, 22, 0.08);
+  --shadow-lg:    0 8px 24px rgba(14, 17, 22, 0.12);
+  --shadow-modal: 0 20px 60px rgba(14, 17, 22, 0.20);
+
+  --motion-instant: 0ms;
+  --motion-fast:    120ms;
+  --motion-base:    200ms;
+  --motion-slow:    320ms;
+  --easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --easing-emphasis: cubic-bezier(0.3, 0, 0, 1);
+  --easing-exit:     cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* ============================================================================
+   PRESET = FUSION (dark mode)
+   ============================================================================ */
+[data-preset="fusion"][data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-canvas:      #0E1116;
+  --bg-surface:     #15181F;
+  --bg-surface-alt: #1C1F26;
+  --bg-overlay:     rgba(0, 0, 0, 0.7);
+  --bg-hover:       #1C1F26;
+
+  --border-default: #2A2E36;
+  --border-strong:  #4A4E58;
+  --border-faint:   #1F222A;
+
+  --fg-primary:    #F5F4EF;
+  --fg-secondary:  #C9C7BF;
+  --fg-muted:      #9A9DA4;
+  --fg-disabled:   #5A5F68;
+  --fg-inverse:    #0E1116;
+
+  --accent:        #5EC28C;
+  --accent-hover:  #7FD3A3;
+  --accent-soft:   #1E3A2D;
+  --accent-on:     #0E1116;
+  --accent-glow:   rgba(94, 194, 140, 0.15);
+
+  --success-base:  #5EC28C;  --success-soft: #1E3A2D;  --success-on: #0E1116;  --success-border:#5EC28C;
+  --warning-base:  #D4B04E;  --warning-soft: #3A2F0E;  --warning-on: #0E1116;  --warning-border:#D4B04E;
+  --error-base:    #E0706E;  --error-soft:   #3A1514;  --error-on:   #0E1116;  --error-border:  #E0706E;
+  --info-base:     #7A9BD4;  --info-soft:    #132139;  --info-on:    #0E1116;  --info-border:   #7A9BD4;
+
+  --shadow-sm:    0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md:    0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-lg:    0 8px 24px rgba(0, 0, 0, 0.6);
+  --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.7);
+}
+
+/* ============================================================================
+   PRESET = DARK-ELEGANCE (legacy — charcoal + blue-slate + teal)
+   Dark mode is the canonical for this preset.
+   ============================================================================ */
+[data-preset="dark-elegance"],
+[data-preset="dark-elegance"][data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-canvas:      #111118;
+  --bg-surface:     #171724;
+  --bg-surface-alt: #1e1e32;
+  --bg-overlay:     rgba(0, 0, 0, 0.7);
+  --bg-hover:       #2a2a40;
+
+  --border-default: #454570;
+  --border-strong:  #5B7FFF;
+  --border-faint:   #2a2a40;
+
+  --fg-primary:    #f4f4f5;
+  --fg-secondary:  #a1a1aa;
+  --fg-muted:      #8b8b95;
+  --fg-disabled:   #5a5a6a;
+  --fg-inverse:    #18181b;
+
+  --accent:        #5B7FFF;
+  --accent-hover:  #7B9AFF;
+  --accent-soft:   rgba(91, 127, 255, 0.15);
+  --accent-on:     #ffffff;
+  --accent-glow:   rgba(91, 127, 255, 0.15);
+
+  --success-base:  #22c55e;  --success-soft: rgba(34, 197, 94, 0.15);  --success-on: #ffffff;  --success-border:#22c55e;
+  --warning-base:  #f59e0b;  --warning-soft: rgba(245, 158, 11, 0.15); --warning-on: #18181b;  --warning-border:#f59e0b;
+  --error-base:    #ef4444;  --error-soft:   rgba(239, 68, 68, 0.15);  --error-on:   #ffffff;  --error-border:  #ef4444;
+  --info-base:     #3b82f6;  --info-soft:    rgba(59, 130, 246, 0.15); --info-on:    #ffffff;  --info-border:   #3b82f6;
+
+  --radius-none: 0;
+  --radius-sm:   4px;
+  --radius-md:   8px;
+  --radius-pill: 999px;
+
+  --shadow-sm:    0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md:    0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg:    0 12px 40px rgba(0, 0, 0, 0.5);
+  --shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.7);
+
+  --motion-instant: 0ms;
+  --motion-fast:    150ms;
+  --motion-base:    200ms;
+  --motion-slow:    300ms;
+  --easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --easing-emphasis: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --easing-exit:     cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* ============================================================================
+   PRESET = DARK-ELEGANCE (light variant — fallback friendly)
+   ============================================================================ */
+[data-preset="dark-elegance"][data-theme="light"] {
+  color-scheme: light;
+
+  --bg-canvas:      #ffffff;
+  --bg-surface:     #f8f9fb;
+  --bg-surface-alt: #f1f3f5;
+  --bg-overlay:     rgba(0, 0, 0, 0.5);
+  --bg-hover:       #e5e7eb;
+
+  --border-default: #d1d5db;
+  --border-strong:  #4A6AE5;
+  --border-faint:   #e5e7eb;
+
+  --fg-primary:    #111827;
+  --fg-secondary:  #4b5563;
+  --fg-muted:      #6b7280;
+  --fg-disabled:   #9ca3af;
+  --fg-inverse:    #ffffff;
+
+  --accent:        #4A6AE5;
+  --accent-hover:  #5B7FFF;
+  --accent-soft:   rgba(74, 106, 229, 0.10);
+  --accent-on:     #ffffff;
+  --accent-glow:   rgba(74, 106, 229, 0.12);
+
+  --success-base:  #16a34a;  --success-soft: rgba(34, 197, 94, 0.10);  --success-on: #ffffff;  --success-border:#16a34a;
+  --warning-base:  #d97706;  --warning-soft: rgba(245, 158, 11, 0.10); --warning-on: #ffffff;  --warning-border:#d97706;
+  --error-base:    #dc2626;  --error-soft:   rgba(239, 68, 68, 0.10);  --error-on:   #ffffff;  --error-border:  #dc2626;
+  --info-base:     #2563eb;  --info-soft:    rgba(59, 130, 246, 0.10); --info-on:    #ffffff;  --info-border:   #2563eb;
+
+  --shadow-sm:    0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md:    0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg:    0 12px 40px rgba(0, 0, 0, 0.12);
+  --shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.20);
+}
+
+/* ============================================================================
+   LEGACY ALIASES — pour compat pendant le refactor des composants.
+   À supprimer une fois tous les composants migrés vers la convention canonique.
+   ============================================================================ */
+:root {
+  --bg-primary:        var(--bg-canvas);
+  --bg-secondary:      var(--bg-surface);
+  --bg-tertiary:       var(--bg-surface-alt);
+  --text-primary:      var(--fg-primary);
+  --text-secondary:    var(--fg-secondary);
+  --text-muted:        var(--fg-muted);
+  --accent-primary:    var(--accent);
+  --accent-secondary:  var(--accent-hover);
+  --border-active:     var(--border-strong);
+  --transition-fast:   var(--motion-fast) var(--easing-standard);
+  --transition-normal: var(--motion-base) var(--easing-standard);
+  --transition-spring: var(--motion-slow) var(--easing-emphasis);
+}

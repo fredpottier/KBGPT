@@ -42,11 +42,11 @@ export default function Header({ title, onMenuClick }: HeaderProps) {
   if (!isAuthenticated) {
     return (
       <Box
-        bg="white"
+        bg="bg.canvas"
         px={4}
         h="16"
         borderBottom="1px"
-        borderBottomColor="gray.200"
+        borderBottomColor="border.default"
         shadow="sm"
       >
         <Flex h="100%" alignItems="center" justifyContent="space-between">
@@ -59,7 +59,7 @@ export default function Header({ title, onMenuClick }: HeaderProps) {
               icon={<HamburgerIcon />}
             />
             {title && (
-              <Text fontSize="xl" fontWeight="semibold" color="gray.800">
+              <Text fontSize="xl" fontWeight="semibold" color="fg.primary">
                 {title}
               </Text>
             )}
@@ -76,11 +76,11 @@ export default function Header({ title, onMenuClick }: HeaderProps) {
   // Utilisateur authentifié
   return (
     <Box
-      bg="white"
+      bg="bg.canvas"
       px={4}
       h="16"
       borderBottom="1px"
-      borderBottomColor="gray.200"
+      borderBottomColor="border.default"
       shadow="sm"
     >
       <Flex h="100%" alignItems="center" justifyContent="space-between">
@@ -96,7 +96,7 @@ export default function Header({ title, onMenuClick }: HeaderProps) {
 
           {/* Page title */}
           {title && (
-            <Text fontSize="xl" fontWeight="semibold" color="gray.800">
+            <Text fontSize="xl" fontWeight="semibold" color="fg.primary">
               {title}
             </Text>
           )}
@@ -145,7 +145,7 @@ export default function Header({ title, onMenuClick }: HeaderProps) {
                       <Text fontSize="sm" fontWeight="medium">
                         {user?.full_name || user?.email?.split('@')[0]}
                       </Text>
-                      <Text fontSize="xs" color="gray.500">
+                      <Text fontSize="xs" color="fg.muted">
                         {user?.role}
                       </Text>
                     </Box>

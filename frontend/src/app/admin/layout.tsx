@@ -37,6 +37,7 @@ import {
   FiAlertTriangle,
   FiActivity,
   FiMenu,
+  FiDroplet,
 } from 'react-icons/fi'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
@@ -62,6 +63,7 @@ const ADMIN_SECTIONS: SidebarSection[] = [
       { label: 'GPU & Compute', href: '/admin/gpu', icon: FiCpu },
       { label: 'Backup & Restore', href: '/admin/backup', icon: FiArchive },
       { label: 'Configuration', href: '/admin/settings', icon: FiSettings },
+      { label: 'Apparence (theme)', href: '/admin/theme', icon: FiDroplet },
     ],
   },
   {
@@ -124,8 +126,8 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
             rounded="lg"
             cursor="pointer"
             bg={isActive('/admin') ? 'var(--accent-glow)' : 'transparent'}
-            color={isActive('/admin') ? 'brand.400' : 'var(--text-secondary)'}
-            _hover={{ bg: 'var(--bg-hover)', color: 'var(--text-primary)' }}
+            color={isActive('/admin') ? 'brand.400' : 'var(--fg-secondary)'}
+            _hover={{ bg: 'var(--bg-hover)', color: 'var(--fg-primary)' }}
             transition="all 0.15s"
           >
             <Icon as={FiHome} boxSize={4} />
@@ -144,7 +146,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
             <Text
               fontSize="xs"
               fontWeight="semibold"
-              color="var(--text-muted)"
+              color="var(--fg-muted)"
               textTransform="uppercase"
               letterSpacing="wider"
             >
@@ -160,8 +162,8 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
                   rounded="lg"
                   cursor="pointer"
                   bg={isActive(item.href) ? 'var(--accent-glow)' : 'transparent'}
-                  color={isActive(item.href) ? 'brand.400' : 'var(--text-secondary)'}
-                  _hover={{ bg: 'var(--bg-hover)', color: 'var(--text-primary)' }}
+                  color={isActive(item.href) ? 'brand.400' : 'var(--fg-secondary)'}
+                  _hover={{ bg: 'var(--bg-hover)', color: 'var(--fg-primary)' }}
                   transition="all 0.15s"
                   borderLeft={isActive(item.href) ? '2px solid' : '2px solid transparent'}
                   borderColor={isActive(item.href) ? 'brand.400' : 'transparent'}
@@ -196,7 +198,7 @@ export default function AdminLayout({
           <Box
             w="240px"
             minH="calc(100vh - 64px)"
-            bg="var(--bg-secondary)"
+            bg="var(--bg-canvas)"
             borderRight="1px solid"
             borderColor="var(--border-default)"
             position="sticky"
@@ -219,16 +221,16 @@ export default function AdminLayout({
             left={2}
             zIndex={10}
             onClick={onOpen}
-            color="var(--text-muted)"
-            _hover={{ color: 'var(--text-primary)' }}
+            color="var(--fg-muted)"
+            _hover={{ color: 'var(--fg-primary)' }}
           />
         )}
 
         {/* Mobile drawer */}
         <Drawer isOpen={isOpen} placement="left" onClose={onClose}>
           <DrawerOverlay />
-          <DrawerContent bg="var(--bg-secondary)" maxW="260px" mt="64px">
-            <DrawerCloseButton color="var(--text-muted)" />
+          <DrawerContent bg="var(--bg-canvas)" maxW="260px" mt="64px">
+            <DrawerCloseButton color="var(--fg-muted)" />
             <DrawerBody p={0}>
               <SidebarContent onClose={onClose} />
             </DrawerBody>

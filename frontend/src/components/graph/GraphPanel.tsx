@@ -116,9 +116,9 @@ export default function GraphPanel({
         position="relative"
         w="40px"
         h="full"
-        bg="gray.100"
+        bg="bg.surface-alt"
         borderLeft="1px solid"
-        borderColor="gray.200"
+        borderColor="border.default"
         display="flex"
         alignItems="center"
         justifyContent="center"
@@ -155,9 +155,9 @@ export default function GraphPanel({
       minW={minWidth}
       maxW={maxWidth}
       h="full"
-      bg="white"
+      bg="bg.canvas"
       borderLeft="1px solid"
-      borderColor="gray.200"
+      borderColor="border.default"
       display="flex"
       flexDirection="column"
     >
@@ -166,13 +166,13 @@ export default function GraphPanel({
         px={3}
         py={2}
         borderBottom="1px solid"
-        borderColor="gray.100"
+        borderColor="border.faint"
         align="center"
         justify="space-between"
-        bg="gray.50"
+        bg="bg.surface"
       >
         <HStack spacing={2}>
-          <Text fontWeight="semibold" fontSize="sm" color="gray.700">
+          <Text fontWeight="semibold" fontSize="sm" color="fg.secondary">
             Knowledge Graph
           </Text>
           {hasData && (
@@ -229,10 +229,10 @@ export default function GraphPanel({
           px={3}
           py={1}
           borderBottom="1px solid"
-          borderColor="gray.100"
+          borderColor="border.faint"
           gap={2}
           fontSize="xs"
-          color="gray.500"
+          color="fg.muted"
           flexWrap="wrap"
         >
           {stats.query > 0 && (
@@ -255,7 +255,7 @@ export default function GraphPanel({
           )}
           {stats.context > 0 && (
             <HStack spacing={1}>
-              <Box w={2} h={2} borderRadius="full" bg="gray.400" />
+              <Box w={2} h={2} borderRadius="full" bg="border.default" />
               <Text>{stats.context}</Text>
             </HStack>
           )}
@@ -285,7 +285,7 @@ export default function GraphPanel({
           px={3}
           py={2}
           borderTop="1px solid"
-          borderColor="gray.200"
+          borderColor="border.default"
           bg="blue.50"
         >
           <HStack justify="space-between">

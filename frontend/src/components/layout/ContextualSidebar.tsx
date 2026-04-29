@@ -132,9 +132,9 @@ export default function ContextualSidebar({ section }: ContextualSidebarProps) {
 
   return (
     <Box
-      bg="white"
+      bg="bg.canvas"
       borderRight="1px"
-      borderRightColor="gray.200"
+      borderRightColor="border.default"
       w={64}
       h="full"
       shadow="sm"

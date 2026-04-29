@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { darkTheme } from '@/theme'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { LocaleProvider } from '@/contexts/LocaleContext'
+import { PresetThemeProvider } from '@/theme/PresetThemeProvider'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -32,15 +33,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ChakraProvider theme={darkTheme}>
-        <ColorModeScript initialColorMode={darkTheme.config.initialColorMode} />
-        <LocaleProvider>
-          <AuthProvider>
-            {children}
-            <ReactQueryDevtools initialIsOpen={false} />
-          </AuthProvider>
-        </LocaleProvider>
-      </ChakraProvider>
+      <PresetThemeProvider>
+        <ChakraProvider theme={darkTheme}>
+          <ColorModeScript initialColorMode={darkTheme.config.initialColorMode} />
+          <LocaleProvider>
+            <AuthProvider>
+              {children}
+              <ReactQueryDevtools initialIsOpen={false} />
+            </AuthProvider>
+          </LocaleProvider>
+        </ChakraProvider>
+      </PresetThemeProvider>
     </QueryClientProvider>
   )
 }

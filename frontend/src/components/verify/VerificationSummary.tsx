@@ -137,13 +137,13 @@ export function VerificationSummary({ summary }: VerificationSummaryProps) {
           <Box
             w={`${getPercent(fallback)}%`}
             h="100%"
-            bg="gray.400"
+            bg="border.default"
             transition="width 0.3s"
           />
           <Box
             w={`${getPercent(unknown)}%`}
             h="100%"
-            bg="gray.600"
+            bg="fg.muted"
             transition="width 0.3s"
           />
         </HStack>

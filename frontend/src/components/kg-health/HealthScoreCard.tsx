@@ -44,7 +44,7 @@ function ScoreGauge({ score, zone }: { score: number; zone: 'green' | 'yellow' |
         <Text fontSize="4xl" fontWeight="800" color={color} lineHeight={1}>
           {score.toFixed(0)}
         </Text>
-        <Text fontSize="xs" color="var(--text-muted)" mt={1}>
+        <Text fontSize="xs" color="var(--fg-muted)" mt={1}>
           /100
         </Text>
       </Flex>
@@ -65,7 +65,7 @@ function StatCard({
 }) {
   return (
     <Box
-      bg="var(--bg-secondary)"
+      bg="var(--bg-surface)"
       borderRadius="lg"
       p={3}
       borderWidth="1px"
@@ -74,10 +74,10 @@ function StatCard({
       <HStack spacing={3}>
         <Icon as={icon} color={color} boxSize={4} />
         <Box>
-          <Text fontSize="lg" fontWeight="700" color="var(--text-primary)" lineHeight={1.1}>
+          <Text fontSize="lg" fontWeight="700" color="var(--fg-primary)" lineHeight={1.1}>
             {typeof value === 'number' ? value.toLocaleString() : value}
           </Text>
-          <Text fontSize="2xs" color="var(--text-muted)">
+          <Text fontSize="2xs" color="var(--fg-muted)">
             {label}
           </Text>
         </Box>
@@ -89,7 +89,7 @@ function StatCard({
 export function HealthScoreCard({ data }: { data: KGHealthScoreResponse }) {
   return (
     <Box
-      bg="var(--bg-secondary)"
+      bg="var(--bg-surface)"
       borderRadius="xl"
       p={6}
       borderWidth="1px"
@@ -101,17 +101,17 @@ export function HealthScoreCard({ data }: { data: KGHealthScoreResponse }) {
 
         <VStack align="start" spacing={2} flex={1}>
           <HStack spacing={2}>
-            <Text fontSize="xs" color="var(--text-muted)" textTransform="uppercase" letterSpacing="wide">
+            <Text fontSize="xs" color="var(--fg-muted)" textTransform="uppercase" letterSpacing="wide">
               Score global KG Health
             </Text>
             <Badge colorScheme={zoneScheme(data.global_status.zone)} fontSize="2xs" px={2}>
               {data.global_status.label}
             </Badge>
           </HStack>
-          <Text fontSize="xl" fontWeight="700" color="var(--text-primary)" lineHeight={1.2}>
+          <Text fontSize="xl" fontWeight="700" color="var(--fg-primary)" lineHeight={1.2}>
             Diagnostic intrinseque de la qualite du Knowledge Graph
           </Text>
-          <Text fontSize="sm" color="var(--text-muted)">
+          <Text fontSize="sm" color="var(--fg-muted)">
             Calcule en {data.compute_duration_ms} ms &middot; 4 familles &middot; pondere
           </Text>
         </VStack>

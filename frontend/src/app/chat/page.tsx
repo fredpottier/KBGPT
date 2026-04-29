@@ -825,7 +825,7 @@ export default function ChatPage() {
         {/* Header avec Session Selector */}
         <Box
           flexShrink={0}
-          bg="bg.secondary"
+          bg="bg.canvas"
           py={3}
           px={4}
           borderBottom="1px"
@@ -899,7 +899,7 @@ export default function ChatPage() {
         {/* Zone de saisie */}
         <Box
           flexShrink={0}
-          bg="bg.secondary"
+          bg="bg.canvas"
           borderTop="1px"
           borderColor="border.default"
           p={4}

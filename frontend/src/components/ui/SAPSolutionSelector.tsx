@@ -233,7 +233,7 @@ export default function SAPSolutionSelector({
           {isLoadingSolutions && (
             <HStack>
               <Spinner size="sm" />
-              <Text fontSize="sm" color="gray.500">
+              <Text fontSize="sm" color="fg.muted">
                 Chargement des solutions SAP...
               </Text>
             </HStack>

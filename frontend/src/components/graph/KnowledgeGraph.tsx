@@ -395,7 +395,7 @@ export default function KnowledgeGraph({
       position="relative"
       w="full"
       h="full"
-      bg="white"
+      bg="bg.canvas"
       borderRadius="md"
       overflow="hidden"
     >
@@ -412,7 +412,7 @@ export default function KnowledgeGraph({
         >
           <VStack>
             <Spinner size="lg" color="brand.500" />
-            <Text fontSize="sm" color="gray.500">
+            <Text fontSize="sm" color="fg.muted">
               Calcul du graphe...
             </Text>
           </VStack>
@@ -471,7 +471,7 @@ export default function KnowledgeGraph({
         py={1}
         borderRadius="md"
         fontSize="xs"
-        color="gray.500"
+        color="fg.muted"
       >
         {limitedNodes.length} concepts • {limitedEdges.length} relations
       </Box>

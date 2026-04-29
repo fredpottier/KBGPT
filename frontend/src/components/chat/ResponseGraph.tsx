@@ -309,10 +309,10 @@ function MiniGraph({
         h={height}
         align="center"
         justify="center"
-        bg="gray.50"
+        bg="bg.surface"
         borderRadius="md"
       >
-        <Text fontSize="xs" color="gray.400">
+        <Text fontSize="xs" color="fg.muted">
           Aucun concept
         </Text>
       </Flex>
@@ -320,7 +320,7 @@ function MiniGraph({
   }
 
   return (
-    <Box position="relative" w="100%" h={height} bg="white" borderRadius="md" border="1px solid" borderColor="gray.200">
+    <Box position="relative" w="100%" h={height} bg="bg.canvas" borderRadius="md" border="1px solid" borderColor="border.default">
       <svg
         ref={svgRef}
         width="100%"
@@ -434,18 +434,18 @@ function ConceptInfoPanel({
 
   return (
     <Box
-      bg="white"
+      bg="bg.canvas"
       p={4}
       borderRadius="md"
       border="1px solid"
-      borderColor="gray.200"
+      borderColor="border.default"
       shadow="md"
       maxW="350px"
       maxH="600px"
       overflowY="auto"
     >
       <Flex justify="space-between" align="flex-start" mb={2}>
-        <Text fontWeight="bold" fontSize="md" color="gray.800">
+        <Text fontWeight="bold" fontSize="md" color="fg.primary">
           {node.name}
         </Text>
         <IconButton
@@ -468,7 +468,7 @@ function ConceptInfoPanel({
                 Pourquoi ce concept ?
               </Text>
             </HStack>
-            <Text fontSize="sm" color="gray.700" lineHeight="1.5">
+            <Text fontSize="sm" color="fg.secondary" lineHeight="1.5">
               {conceptExplanation.why_used}
             </Text>
             {conceptExplanation.role_in_answer && (
@@ -512,30 +512,30 @@ function ConceptInfoPanel({
       {/* Informations de base */}
       <VStack align="stretch" spacing={2}>
         <HStack>
-          <Text fontSize="sm" color="gray.500" w="80px">Type:</Text>
+          <Text fontSize="sm" color="fg.muted" w="80px">Type:</Text>
           <Badge colorScheme="blue" variant="subtle">{getTypeLabel(node.type)}</Badge>
         </HStack>
         <HStack>
-          <Text fontSize="sm" color="gray.500" w="80px">Rôle:</Text>
+          <Text fontSize="sm" color="fg.muted" w="80px">Rôle:</Text>
           <Badge colorScheme={getRoleColor(node.role)} variant="outline">
             {getRoleLabel(node.role)}
           </Badge>
         </HStack>
         {node.confidence !== undefined && (
           <HStack>
-            <Text fontSize="sm" color="gray.500" w="80px">Confiance:</Text>
+            <Text fontSize="sm" color="fg.muted" w="80px">Confiance:</Text>
             <Text fontSize="sm" fontWeight="medium">{Math.round(node.confidence * 100)}%</Text>
           </HStack>
         )}
         {node.mentionCount !== undefined && node.mentionCount > 0 && (
           <HStack>
-            <Text fontSize="sm" color="gray.500" w="80px">Mentions:</Text>
+            <Text fontSize="sm" color="fg.muted" w="80px">Mentions:</Text>
             <Text fontSize="sm">{node.mentionCount} occurrence{node.mentionCount > 1 ? 's' : ''}</Text>
           </HStack>
         )}
         {node.documentCount !== undefined && node.documentCount > 0 && (
           <HStack>
-            <Text fontSize="sm" color="gray.500" w="80px">Documents:</Text>
+            <Text fontSize="sm" color="fg.muted" w="80px">Documents:</Text>
             <Text fontSize="sm">{node.documentCount} document{node.documentCount > 1 ? 's' : ''}</Text>
           </HStack>
         )}
@@ -545,31 +545,31 @@ function ConceptInfoPanel({
       {outgoingRelations.length > 0 && (
         <>
           <Divider my={3} />
-          <Text fontSize="xs" fontWeight="semibold" color="gray.600" mb={2}>
+          <Text fontSize="xs" fontWeight="semibold" color="fg.secondary" mb={2}>
             🔗 Relations sortantes ({outgoingRelations.length})
           </Text>
           <VStack align="stretch" spacing={1}>
             {outgoingRelations.slice(0, 5).map(({ edge, targetNode }, idx) => (
-              <Box key={idx} fontSize="xs" bg="gray.50" p={2} borderRadius="sm">
+              <Box key={idx} fontSize="xs" bg="bg.surface" p={2} borderRadius="sm">
                 <HStack spacing={1} flexWrap="wrap">
                   <Badge size="sm" colorScheme={edge.isUsed ? 'green' : 'gray'} variant="subtle">
                     {getRelationLabel(edge.relationType)}
                   </Badge>
-                  <Text color="gray.400">→</Text>
-                  <Text fontWeight="medium" color="gray.700">{targetNode?.name}</Text>
+                  <Text color="fg.muted">→</Text>
+                  <Text fontWeight="medium" color="fg.secondary">{targetNode?.name}</Text>
                 </HStack>
                 {edge.isInferred && (
                   <Text fontSize="xs" color="orange.500" mt={1}>⚡ Relation inférée</Text>
                 )}
                 {edge.confidence < 1 && (
-                  <Text fontSize="xs" color="gray.400">
+                  <Text fontSize="xs" color="fg.muted">
                     Confiance: {Math.round(edge.confidence * 100)}%
                   </Text>
                 )}
               </Box>
             ))}
             {outgoingRelations.length > 5 && (
-              <Text fontSize="xs" color="gray.400" fontStyle="italic">
+              <Text fontSize="xs" color="fg.muted" fontStyle="italic">
                 +{outgoingRelations.length - 5} autres relations...
               </Text>
             )}
@@ -581,15 +581,15 @@ function ConceptInfoPanel({
       {incomingRelations.length > 0 && (
         <>
           <Divider my={3} />
-          <Text fontSize="xs" fontWeight="semibold" color="gray.600" mb={2}>
+          <Text fontSize="xs" fontWeight="semibold" color="fg.secondary" mb={2}>
             🔙 Relations entrantes ({incomingRelations.length})
           </Text>
           <VStack align="stretch" spacing={1}>
             {incomingRelations.slice(0, 5).map(({ edge, sourceNode }, idx) => (
-              <Box key={idx} fontSize="xs" bg="gray.50" p={2} borderRadius="sm">
+              <Box key={idx} fontSize="xs" bg="bg.surface" p={2} borderRadius="sm">
                 <HStack spacing={1} flexWrap="wrap">
-                  <Text fontWeight="medium" color="gray.700">{sourceNode?.name}</Text>
-                  <Text color="gray.400">→</Text>
+                  <Text fontWeight="medium" color="fg.secondary">{sourceNode?.name}</Text>
+                  <Text color="fg.muted">→</Text>
                   <Badge size="sm" colorScheme={edge.isUsed ? 'green' : 'gray'} variant="subtle">
                     {getRelationLabel(edge.relationType)}
                   </Badge>
@@ -600,7 +600,7 @@ function ConceptInfoPanel({
               </Box>
             ))}
             {incomingRelations.length > 5 && (
-              <Text fontSize="xs" color="gray.400" fontStyle="italic">
+              <Text fontSize="xs" color="fg.muted" fontStyle="italic">
                 +{incomingRelations.length - 5} autres relations...
               </Text>
             )}
@@ -612,7 +612,7 @@ function ConceptInfoPanel({
       {outgoingRelations.length === 0 && incomingRelations.length === 0 && (
         <>
           <Divider my={3} />
-          <Text fontSize="xs" color="gray.400" fontStyle="italic">
+          <Text fontSize="xs" color="fg.muted" fontStyle="italic">
             Aucune relation directe dans ce graphe
           </Text>
         </>
@@ -654,12 +654,12 @@ function ExplorationSection({
             <HStack
               key={idx}
               p={1}
-              bg="white"
+              bg="bg.canvas"
               borderRadius="sm"
               _hover={{ bg: 'purple.100', cursor: onSearch ? 'pointer' : 'default' }}
               onClick={() => onSearch && onSearch(suggestion.action_value)}
             >
-              <Text fontSize="2xs" color="gray.700" noOfLines={1} flex={1}>
+              <Text fontSize="2xs" color="fg.secondary" noOfLines={1} flex={1}>
                 {suggestion.title}
               </Text>
             </HStack>
@@ -674,12 +674,12 @@ function ExplorationSection({
             <HStack
               key={idx}
               p={1}
-              bg="white"
+              bg="bg.canvas"
               borderRadius="sm"
               _hover={{ bg: 'purple.100', cursor: onSearch ? 'pointer' : 'default' }}
               onClick={() => onSearch && onSearch(q.question)}
             >
-              <Text fontSize="2xs" color="gray.600" noOfLines={1} flex={1}>
+              <Text fontSize="2xs" color="fg.secondary" noOfLines={1} flex={1}>
                 {q.question}
               </Text>
             </HStack>
@@ -738,7 +738,7 @@ function ResponseGraphComponent({
   }
 
   return (
-    <Box mt={1} borderTop="1px solid" borderColor="gray.100" pt={1}>
+    <Box mt={1} borderTop="1px solid" borderColor="border.faint" pt={1}>
       {/* 🌊 Phase 3.5+: ProofGraphViewer prioritaire si disponible */}
       {useProofGraph ? (
         <ProofGraphViewer
@@ -754,7 +754,7 @@ function ResponseGraphComponent({
               spacing={1}
               cursor="pointer"
               onClick={() => setIsExpanded(!isExpanded)}
-              _hover={{ bg: 'gray.50' }}
+              _hover={{ bg: 'bg.surface' }}
               px={1.5}
               py={0.5}
               borderRadius="sm"
@@ -763,11 +763,11 @@ function ResponseGraphComponent({
               <Icon
                 as={isExpanded ? ChevronUpIcon : ChevronDownIcon}
                 boxSize={3}
-                color="gray.400"
+                color="fg.muted"
               />
               <HStack spacing={0.5}>
                 <Box w={1.5} h={1.5} borderRadius="full" bg="teal.400" />
-                <Text fontSize="2xs" color="gray.500" fontWeight="medium">
+                <Text fontSize="2xs" color="fg.muted" fontWeight="medium">
                   Graph
                 </Text>
               </HStack>
@@ -797,7 +797,7 @@ function ResponseGraphComponent({
           {/* Legacy: Contenu dépliable du graphe - seulement si nodes */}
           {nodeCount > 0 && (
             <Collapse in={isExpanded}>
-              <Box mt={1} p={1.5} bg="gray.50" borderRadius="sm">
+              <Box mt={1} p={1.5} bg="bg.surface" borderRadius="sm">
                 <Flex gap={3}>
                   {/* Graphe - taille minimale pour interface pro */}
                   <Box flex="1">
@@ -822,7 +822,7 @@ function ResponseGraphComponent({
                 </Flex>
 
                 {/* Légende ultra-compacte */}
-                <HStack mt={1} spacing={2} fontSize="2xs" color="gray.400" justify="center">
+                <HStack mt={1} spacing={2} fontSize="2xs" color="fg.muted" justify="center">
                   <HStack spacing={0.5}>
                     <Box w={1.5} h={1.5} borderRadius="full" bg={GRAPH_COLORS.query} />
                     <Text>Query</Text>
@@ -884,7 +884,7 @@ function ResponseGraphComponent({
                   flex="1"
                   h="600px"
                   border="1px solid"
-                  borderColor="gray.200"
+                  borderColor="border.default"
                   borderRadius="md"
                   overflow="hidden"
                 >
@@ -911,7 +911,7 @@ function ResponseGraphComponent({
                 )}
               </Flex>
               {/* Légende */}
-              <HStack mt={4} spacing={4} fontSize="sm" color="gray.600" justify="center">
+              <HStack mt={4} spacing={4} fontSize="sm" color="fg.secondary" justify="center">
                 <HStack spacing={1}>
                   <Box w={3} h={3} borderRadius="full" bg={GRAPH_COLORS.query} />
                   <Text>Question ({queryCount})</Text>
@@ -929,7 +929,7 @@ function ResponseGraphComponent({
                   <Text>Contexte</Text>
                 </HStack>
               </HStack>
-              <Text mt={2} fontSize="xs" color="gray.400" textAlign="center">
+              <Text mt={2} fontSize="xs" color="fg.muted" textAlign="center">
                 Cliquez sur un concept pour voir ses détails • Utilisez la molette pour zoomer • Glissez pour déplacer
               </Text>
             </ModalBody>

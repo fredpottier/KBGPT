@@ -76,7 +76,7 @@ export default function KGHealthPage() {
     return (
       <VStack py={20} spacing={4}>
         <Spinner size="lg" color="brand.400" thickness="3px" />
-        <Text color="var(--text-muted)" fontSize="sm">
+        <Text color="var(--fg-muted)" fontSize="sm">
           Calcul du KG Health en cours...
         </Text>
       </VStack>
@@ -102,11 +102,11 @@ export default function KGHealthPage() {
       <VStack align="start" spacing={1} mb={6}>
         <HStack spacing={3}>
           <Icon as={FiActivity} color="brand.400" boxSize={5} />
-          <Text fontSize="xl" fontWeight="700" color="var(--text-primary)">
+          <Text fontSize="xl" fontWeight="700" color="var(--fg-primary)">
             KG Health Cockpit
           </Text>
         </HStack>
-        <Text fontSize="sm" color="var(--text-muted)">
+        <Text fontSize="sm" color="var(--fg-muted)">
           Diagnostic intrinseque de la qualite du Knowledge Graph (independant du corpus de questions)
         </Text>
       </VStack>

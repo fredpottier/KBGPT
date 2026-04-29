@@ -53,7 +53,7 @@ export default function CoverageBars({ sources }: CoverageBarsProps) {
                   {pct}%
                 </Text>
               </HStack>
-              <Box bg="gray.700" rounded="full" h="6px">
+              <Box bg="bg.surface-alt" rounded="full" h="6px">
                 <Box
                   bg={getBarColor(source.doc_type)}
                   h="6px"

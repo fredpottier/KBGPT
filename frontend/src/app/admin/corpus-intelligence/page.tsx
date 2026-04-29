@@ -129,7 +129,7 @@ function HeatmapView({ data }: { data: HeatmapData }) {
         `translate(${marginLeft + i * (cellSize + cellGap) + cellSize / 2}, ${marginTop - 8}) rotate(-50)`
       )
       .attr('text-anchor', 'start')
-      .attr('fill', 'var(--text-muted)')
+      .attr('fill', 'var(--fg-muted)')
       .attr('font-size', '10px')
       .attr('font-family', 'var(--chakra-fonts-body)')
       .text((d: HeatmapDoc) => d.label.length > 35 ? d.label.slice(0, 32) + '...' : d.label)
@@ -143,7 +143,7 @@ function HeatmapView({ data }: { data: HeatmapData }) {
       .attr('x', marginLeft - 10)
       .attr('y', (_d: string, i: number) => marginTop + i * (cellSize + cellGap) + cellSize / 2 + 4)
       .attr('text-anchor', 'end')
-      .attr('fill', 'var(--text-primary)')
+      .attr('fill', 'var(--fg-primary)')
       .attr('font-size', '12px')
       .attr('font-weight', '500')
       .attr('font-family', 'var(--chakra-fonts-body)')
@@ -282,15 +282,15 @@ function HeatmapView({ data }: { data: HeatmapData }) {
       .attr('transform', `translate(${legendX}, ${legendY})`)
       .call(legendAxis)
       .selectAll('text')
-      .attr('fill', 'var(--text-muted)')
+      .attr('fill', 'var(--fg-muted)')
       .attr('font-size', '9px')
 
-    g.selectAll('.domain, .tick line').attr('stroke', 'var(--text-muted)')
+    g.selectAll('.domain, .tick line').attr('stroke', 'var(--fg-muted)')
 
     g.append('text')
       .attr('x', legendX + legendWidth + 10)
       .attr('y', legendY - 2)
-      .attr('fill', 'var(--text-muted)')
+      .attr('fill', 'var(--fg-muted)')
       .attr('font-size', '10px')
       .text('claims')
 
@@ -404,11 +404,11 @@ function BubbleChartView({ data }: { data: BubbleData }) {
     g.append('g')
       .attr('transform', `translate(0,${innerH})`)
       .call(xAxis)
-      .selectAll('text').attr('fill', 'var(--text-muted)').attr('font-size', '10px')
+      .selectAll('text').attr('fill', 'var(--fg-muted)').attr('font-size', '10px')
 
     g.append('g')
       .call(yAxis)
-      .selectAll('text').attr('fill', 'var(--text-muted)').attr('font-size', '10px')
+      .selectAll('text').attr('fill', 'var(--fg-muted)').attr('font-size', '10px')
 
     g.selectAll('.tick line')
       .attr('stroke', 'rgba(255,255,255,0.05)')
@@ -421,14 +421,14 @@ function BubbleChartView({ data }: { data: BubbleData }) {
       .attr('x', margin.left + innerW / 2)
       .attr('y', height - 10)
       .attr('text-anchor', 'middle')
-      .attr('fill', 'var(--text-muted)')
+      .attr('fill', 'var(--fg-muted)')
       .attr('font-size', '12px')
       .text('Couverture (nombre de sources)')
 
     svg.append('text')
       .attr('transform', `translate(16, ${margin.top + innerH / 2}) rotate(-90)`)
       .attr('text-anchor', 'middle')
-      .attr('fill', 'var(--text-muted)')
+      .attr('fill', 'var(--fg-muted)')
       .attr('font-size', '12px')
       .text('Densite (claims par source)')
 
@@ -515,7 +515,7 @@ function BubbleChartView({ data }: { data: BubbleData }) {
       .attr('x', (d: any) => xScale(d.docs))
       .attr('y', (d: any) => yScale(d.density) + 4)
       .attr('text-anchor', 'middle')
-      .attr('fill', 'var(--text-primary)')
+      .attr('fill', 'var(--fg-primary)')
       .attr('font-size', (d: any) => d.claims > medianClaims * 3 ? '11px' : '9px')
       .attr('font-weight', '600')
       .attr('pointer-events', 'none')
@@ -532,17 +532,17 @@ function BubbleChartView({ data }: { data: BubbleData }) {
       <HStack spacing={6} mt={2} px={4} justify="center" flexWrap="wrap">
         <HStack spacing={2}>
           <Box w="12px" h="12px" borderRadius="full" bg="rgba(99, 102, 241, 0.4)" border="1.5px solid rgba(99, 102, 241, 0.7)" />
-          <Text fontSize="xs" color="var(--text-muted)">Aucune contradiction</Text>
+          <Text fontSize="xs" color="var(--fg-muted)">Aucune contradiction</Text>
         </HStack>
         <HStack spacing={2}>
           <Box w="12px" h="12px" borderRadius="full" bg="rgba(249, 115, 22, 0.4)" border="1.5px solid rgba(249, 115, 22, 0.7)" />
-          <Text fontSize="xs" color="var(--text-muted)">Contradictions moderees</Text>
+          <Text fontSize="xs" color="var(--fg-muted)">Contradictions moderees</Text>
         </HStack>
         <HStack spacing={2}>
           <Box w="12px" h="12px" borderRadius="full" bg="rgba(239, 68, 68, 0.4)" border="1.5px solid rgba(239, 68, 68, 0.75)" />
-          <Text fontSize="xs" color="var(--text-muted)">Contradictions elevees</Text>
+          <Text fontSize="xs" color="var(--fg-muted)">Contradictions elevees</Text>
         </HStack>
-        <Text fontSize="xs" color="var(--text-muted)">Taille = nombre de claims</Text>
+        <Text fontSize="xs" color="var(--fg-muted)">Taille = nombre de claims</Text>
       </HStack>
       <Box
         ref={tooltipRef}
@@ -604,7 +604,7 @@ export default function CorpusIntelligencePage() {
     return (
       <VStack py={20} spacing={4}>
         <Spinner size="lg" color="brand.400" thickness="3px" />
-        <Text color="var(--text-muted)" fontSize="sm">Analyse du corpus en cours...</Text>
+        <Text color="var(--fg-muted)" fontSize="sm">Analyse du corpus en cours...</Text>
       </VStack>
     )
   }
@@ -613,7 +613,7 @@ export default function CorpusIntelligencePage() {
     return (
       <Box bg="rgba(239, 68, 68, 0.08)" border="1px solid rgba(239, 68, 68, 0.2)" borderRadius="xl" p={6} mx={4}>
         <Text color="red.400" fontWeight="600">Erreur</Text>
-        <Text color="var(--text-muted)" fontSize="sm" mt={1}>{error}</Text>
+        <Text color="var(--fg-muted)" fontSize="sm" mt={1}>{error}</Text>
       </Box>
     )
   }
@@ -622,10 +622,10 @@ export default function CorpusIntelligencePage() {
     <Box>
       {/* Header */}
       <VStack align="start" spacing={1} mb={6}>
-        <Text fontSize="xl" fontWeight="700" color="var(--text-primary)">
+        <Text fontSize="xl" fontWeight="700" color="var(--fg-primary)">
           Corpus Intelligence
         </Text>
-        <Text fontSize="sm" color="var(--text-muted)">
+        <Text fontSize="sm" color="var(--fg-muted)">
           Analyse visuelle de la couverture et des tensions du corpus
         </Text>
       </VStack>
@@ -659,7 +659,7 @@ export default function CorpusIntelligencePage() {
           <Tab
             fontSize="sm"
             fontWeight="600"
-            color="var(--text-muted)"
+            color="var(--fg-muted)"
             _selected={{ color: 'white', bg: 'rgba(99, 102, 241, 0.2)', borderColor: 'brand.500' }}
             borderWidth="1px"
             borderColor="transparent"
@@ -670,7 +670,7 @@ export default function CorpusIntelligencePage() {
           <Tab
             fontSize="sm"
             fontWeight="600"
-            color="var(--text-muted)"
+            color="var(--fg-muted)"
             _selected={{ color: 'white', bg: 'rgba(99, 102, 241, 0.2)', borderColor: 'brand.500' }}
             borderWidth="1px"
             borderColor="transparent"
@@ -683,14 +683,14 @@ export default function CorpusIntelligencePage() {
         <TabPanels>
           <TabPanel p={0}>
             <Box
-              bg="var(--bg-secondary)"
+              bg="var(--bg-surface)"
               borderRadius="xl"
               borderWidth="1px"
               borderColor="var(--border-default)"
               p={4}
               overflow="hidden"
             >
-              <Text fontSize="xs" color="var(--text-muted)" mb={4} fontWeight="500">
+              <Text fontSize="xs" color="var(--fg-muted)" mb={4} fontWeight="500">
                 Densite de claims par concept et document source — les zones chaudes indiquent une couverture dense.
                 Les cellules <Text as="span" color="green.400" fontWeight="600">vertes</Text> indiquent le document principal pour chaque concept.
                 Les cellules a <Text as="span" color="yellow.400" fontWeight="600">bordure doree</Text> indiquent le concept dominant de chaque document.
@@ -701,14 +701,14 @@ export default function CorpusIntelligencePage() {
 
           <TabPanel p={0}>
             <Box
-              bg="var(--bg-secondary)"
+              bg="var(--bg-surface)"
               borderRadius="xl"
               borderWidth="1px"
               borderColor="var(--border-default)"
               p={4}
               overflow="hidden"
             >
-              <Text fontSize="xs" color="var(--text-muted)" mb={4} fontWeight="500">
+              <Text fontSize="xs" color="var(--fg-muted)" mb={4} fontWeight="500">
                 Chaque bulle represente un concept — X = nombre de sources, Y = densite (claims/source), taille = importance, couleur = contradictions
               </Text>
               {bubbleData && <BubbleChartView data={bubbleData} />}

@@ -80,7 +80,7 @@ const theme = extendTheme({
   styles: {
     global: {
       body: {
-        bg: 'gray.50',
+        bg: 'bg.surface',
         color: 'gray.800',
       },
     },

@@ -67,8 +67,8 @@ export default function AtlasPage() {
     return (
       <Container maxW="1200px" py={12}>
         <VStack spacing={4}>
-          <Spinner size="xl" color="var(--accent-primary)" />
-          <Text color="var(--text-secondary)">Chargement de l&apos;Atlas...</Text>
+          <Spinner size="xl" color="var(--accent)" />
+          <Text color="var(--fg-secondary)">Chargement de l&apos;Atlas...</Text>
         </VStack>
       </Container>
     )
@@ -78,9 +78,9 @@ export default function AtlasPage() {
     return (
       <Container maxW="1200px" py={12}>
         <VStack spacing={4} textAlign="center">
-          <Icon as={FiBookOpen} boxSize={12} color="var(--text-muted)" />
-          <Heading size="lg" color="var(--text-primary)">Atlas non disponible</Heading>
-          <Text color="var(--text-secondary)">
+          <Icon as={FiBookOpen} boxSize={12} color="var(--fg-muted)" />
+          <Heading size="lg" color="var(--fg-primary)">Atlas non disponible</Heading>
+          <Text color="var(--fg-secondary)">
             L&apos;Atlas narratif n&apos;a pas encore ete genere. Lancez le script build_narrative_topics.py
             puis generate_atlas_content.py.
           </Text>
@@ -90,20 +90,20 @@ export default function AtlasPage() {
   }
 
   return (
-    <Box minH="100vh" bg="var(--bg-primary)">
+    <Box minH="100vh" bg="var(--bg-canvas)">
       <Container maxW="1100px" py={10}>
         {/* Header */}
         <VStack spacing={6} mb={10} textAlign="center">
           <HStack spacing={3}>
-            <Icon as={FiBookOpen} boxSize={8} color="var(--accent-primary)" />
-            <Heading size="xl" color="var(--text-primary)" fontWeight="800">
+            <Icon as={FiBookOpen} boxSize={8} color="var(--accent)" />
+            <Heading size="xl" color="var(--fg-primary)" fontWeight="800">
               Atlas documentaire
             </Heading>
           </HStack>
 
           {/* Stats pills */}
           <HStack spacing={4} flexWrap="wrap" justify="center">
-            <Badge px={3} py={1} rounded="full" bg="rgba(99,102,241,0.1)" color="var(--accent-primary)" fontSize="sm">
+            <Badge px={3} py={1} rounded="full" bg="rgba(99,102,241,0.1)" color="var(--accent)" fontSize="sm">
               <HStack spacing={1}><Icon as={FiFileText} boxSize={3} /><Text>{data.total_docs} documents</Text></HStack>
             </Badge>
             <Badge px={3} py={1} rounded="full" bg="rgba(16,185,129,0.1)" color="#10B981" fontSize="sm">
@@ -117,7 +117,7 @@ export default function AtlasPage() {
           {/* Introduction */}
           {data.introduction && (
             <Text
-              color="var(--text-secondary)" fontSize="md" maxW="800px"
+              color="var(--fg-secondary)" fontSize="md" maxW="800px"
               lineHeight="1.7" px={4} textAlign="left"
             >
               {data.introduction}
@@ -131,14 +131,14 @@ export default function AtlasPage() {
         <Tabs variant="soft-rounded" colorScheme="blue">
           <TabList mb={6} justifyContent="center">
             <Tab
-              _selected={{ bg: 'rgba(99,102,241,0.15)', color: 'var(--accent-primary)' }}
-              color="var(--text-secondary)" fontWeight="600"
+              _selected={{ bg: 'rgba(99,102,241,0.15)', color: 'var(--accent)' }}
+              color="var(--fg-secondary)" fontWeight="600"
             >
               <HStack spacing={2}><Icon as={FiLayers} /><Text>Par produit</Text></HStack>
             </Tab>
             <Tab
               _selected={{ bg: 'rgba(16,185,129,0.15)', color: '#10B981' }}
-              color="var(--text-secondary)" fontWeight="600"
+              color="var(--fg-secondary)" fontWeight="600"
             >
               <HStack spacing={2}><Icon as={FiGrid} /><Text>Par theme</Text></HStack>
             </Tab>
@@ -151,7 +151,7 @@ export default function AtlasPage() {
                 {data.roots.map(root => (
                   <Box key={root.root_id}>
                     <HStack mb={4} spacing={3}>
-                      <Heading size="md" color="var(--text-primary)">
+                      <Heading size="md" color="var(--fg-primary)">
                         {root.name}
                       </Heading>
                       <Badge colorScheme="purple" variant="subtle" fontSize="xs">
@@ -175,13 +175,13 @@ export default function AtlasPage() {
                   <Box
                     key={i}
                     p={5} rounded="xl"
-                    bg="var(--bg-secondary)"
+                    bg="var(--bg-surface)"
                     borderWidth="1px" borderColor="var(--border-default)"
                     _hover={{ borderColor: '#10B981', transform: 'translateY(-2px)' }}
                     transition="all 0.2s"
                   >
                     <HStack justify="space-between" mb={3}>
-                      <Heading size="sm" color="var(--text-primary)">
+                      <Heading size="sm" color="var(--fg-primary)">
                         {theme.label}
                       </Heading>
                       <Badge colorScheme="green" variant="subtle" fontSize="xs">
@@ -190,12 +190,12 @@ export default function AtlasPage() {
                     </HStack>
                     <VStack align="start" spacing={1}>
                       {theme.topic_labels.slice(0, 3).map((label, j) => (
-                        <Text key={j} fontSize="xs" color="var(--text-muted)" noOfLines={1}>
+                        <Text key={j} fontSize="xs" color="var(--fg-muted)" noOfLines={1}>
                           {label}
                         </Text>
                       ))}
                       {theme.topic_labels.length > 3 && (
-                        <Text fontSize="xs" color="var(--text-muted)" fontStyle="italic">
+                        <Text fontSize="xs" color="var(--fg-muted)" fontStyle="italic">
                           +{theme.topic_labels.length - 3} perspectives
                         </Text>
                       )}
@@ -216,24 +216,24 @@ function TopicCard({ topic }: { topic: AtlasTopic }) {
     <NextLink href={`/atlas/topic/${topic.topic_id}`} passHref>
       <Box
         p={5} rounded="xl" cursor="pointer"
-        bg="var(--bg-secondary)"
+        bg="var(--bg-surface)"
         borderWidth="1px" borderColor="var(--border-default)"
-        _hover={{ borderColor: 'var(--accent-primary)', transform: 'translateY(-2px)', shadow: 'md' }}
+        _hover={{ borderColor: 'var(--accent)', transform: 'translateY(-2px)', shadow: 'md' }}
         transition="all 0.2s"
       >
         <HStack justify="space-between" mb={2}>
           <Badge colorScheme="blue" variant="subtle" fontSize="xs">
             {topic.perspective_count}P
           </Badge>
-          <Badge variant="outline" fontSize="xs" color="var(--text-muted)">
+          <Badge variant="outline" fontSize="xs" color="var(--fg-muted)">
             {topic.claim_count} claims
           </Badge>
         </HStack>
-        <Heading size="sm" color="var(--text-primary)" mb={2} noOfLines={2}>
+        <Heading size="sm" color="var(--fg-primary)" mb={2} noOfLines={2}>
           {topic.title}
         </Heading>
         {topic.executive_summary && (
-          <Text fontSize="xs" color="var(--text-secondary)" noOfLines={3} lineHeight="1.5">
+          <Text fontSize="xs" color="var(--fg-secondary)" noOfLines={3} lineHeight="1.5">
             {topic.executive_summary}
           </Text>
         )}
@@ -247,7 +247,7 @@ function TopicCard({ topic }: { topic: AtlasTopic }) {
           </HStack>
         )}
         <HStack mt={3} justify="flex-end">
-          <Text fontSize="xs" color="var(--accent-primary)" fontWeight="600">
+          <Text fontSize="xs" color="var(--accent)" fontWeight="600">
             Lire <Icon as={FiArrowRight} boxSize={3} />
           </Text>
         </HStack>

@@ -49,21 +49,21 @@ function SimpleSourceItem({
   return (
     <Box
       p={2}
-      bg="gray.50"
-      _dark={{ bg: 'gray.700' }}
+      bg="bg.surface"
+      _dark={{ bg: 'bg.surface-alt' }}
       borderRadius="md"
       cursor={onClick ? 'pointer' : 'default'}
-      _hover={onClick ? { bg: 'gray.100', _dark: { bg: 'gray.600' } } : undefined}
+      _hover={onClick ? { bg: 'bg.surface-alt', _dark: { bg: 'fg.muted' } } : undefined}
       onClick={onClick}
       transition="background 0.2s"
     >
       {/* Extrait */}
-      <Text fontSize="xs" color="gray.700" _dark={{ color: 'gray.200' }} fontStyle="italic">
+      <Text fontSize="xs" color="fg.secondary" _dark={{ color: 'gray.200' }} fontStyle="italic">
         "{source.excerpt}"
       </Text>
 
       {/* Nom du document */}
-      <Text fontSize="10px" color="gray.500" mt={1} fontWeight="medium">
+      <Text fontSize="10px" color="fg.muted" mt={1} fontWeight="medium">
         — {source.document.title}
       </Text>
     </Box>
@@ -87,15 +87,15 @@ export default function AssertionPopover({
         </Box>
       </PopoverTrigger>
       <PopoverContent
-        bg="white"
-        _dark={{ bg: 'gray.800' }}
-        borderColor="gray.200"
-        _dark-borderColor="gray.600"
+        bg="bg.canvas"
+        _dark={{ bg: 'bg.surface' }}
+        borderColor="border.default"
+        _dark-borderColor="border.strong"
         boxShadow="md"
         maxW="350px"
         _focus={{ boxShadow: 'md' }}
       >
-        <PopoverArrow bg="white" _dark={{ bg: 'gray.800' }} />
+        <PopoverArrow bg="bg.canvas" _dark={{ bg: 'bg.surface' }} />
         <PopoverBody p={2}>
           <VStack spacing={2} align="stretch">
             {/* Sources si disponibles */}
@@ -109,14 +109,14 @@ export default function AssertionPopover({
                   />
                 ))}
                 {relatedSources.length > 3 && (
-                  <Text fontSize="10px" color="gray.400" textAlign="center">
+                  <Text fontSize="10px" color="fg.muted" textAlign="center">
                     +{relatedSources.length - 3} autres sources
                   </Text>
                 )}
               </>
             ) : (
               /* Fallback: juste le statut si pas de sources */
-              <Text fontSize="xs" color="gray.500" fontStyle="italic">
+              <Text fontSize="xs" color="fg.muted" fontStyle="italic">
                 {STATUS_LABELS[assertion.status]}
               </Text>
             )}

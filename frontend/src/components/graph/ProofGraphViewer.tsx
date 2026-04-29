@@ -112,11 +112,11 @@ function EvidencePanel({
 
   return (
     <Box
-      bg="white"
+      bg="bg.canvas"
       p={4}
       borderRadius="md"
       border="1px solid"
-      borderColor="gray.200"
+      borderColor="border.default"
       shadow="lg"
       maxW="400px"
       maxH="500px"
@@ -124,12 +124,12 @@ function EvidencePanel({
     >
       <Flex justify="space-between" align="flex-start" mb={3}>
         <VStack align="start" spacing={1}>
-          <Text fontWeight="bold" fontSize="md" color="gray.800">
+          <Text fontWeight="bold" fontSize="md" color="fg.primary">
             Preuve de relation
           </Text>
           <HStack spacing={1} flexWrap="wrap">
             <Badge colorScheme="orange" fontSize="xs">{sourceNode?.name || edge.source}</Badge>
-            <Text fontSize="sm" color="gray.500">{relationLabel}</Text>
+            <Text fontSize="sm" color="fg.muted">{relationLabel}</Text>
             <Badge colorScheme="green" fontSize="xs">{targetNode?.name || edge.target}</Badge>
           </HStack>
         </VStack>
@@ -147,19 +147,19 @@ function EvidencePanel({
       {/* Métadonnées de la relation */}
       <VStack align="stretch" spacing={2} mb={3}>
         <HStack>
-          <Text fontSize="sm" color="gray.500" w="100px">Confiance:</Text>
+          <Text fontSize="sm" color="fg.muted" w="100px">Confiance:</Text>
           <Badge colorScheme={edge.confidence > 0.7 ? 'green' : edge.confidence > 0.4 ? 'yellow' : 'red'}>
             {Math.round(edge.confidence * 100)}%
           </Badge>
         </HStack>
         <HStack>
-          <Text fontSize="sm" color="gray.500" w="100px">Sur chemin:</Text>
+          <Text fontSize="sm" color="fg.muted" w="100px">Sur chemin:</Text>
           <Badge colorScheme={edge.isOnPath ? 'green' : 'gray'}>
             {edge.isOnPath ? 'Oui (preuve directe)' : 'Non'}
           </Badge>
         </HStack>
         <HStack>
-          <Text fontSize="sm" color="gray.500" w="100px">Sources:</Text>
+          <Text fontSize="sm" color="fg.muted" w="100px">Sources:</Text>
           <Text fontSize="sm">{edge.evidenceCount} document{edge.evidenceCount > 1 ? 's' : ''}</Text>
         </HStack>
       </VStack>
@@ -167,13 +167,13 @@ function EvidencePanel({
       <Divider mb={3} />
 
       {/* Évidences */}
-      <Text fontSize="sm" fontWeight="semibold" color="gray.700" mb={2}>
+      <Text fontSize="sm" fontWeight="semibold" color="fg.secondary" mb={2}>
         Extraits justificatifs
       </Text>
 
       {edge.evidences.length === 0 ? (
-        <Box p={3} bg="gray.50" borderRadius="md">
-          <Text fontSize="sm" color="gray.500" fontStyle="italic">
+        <Box p={3} bg="bg.surface" borderRadius="md">
+          <Text fontSize="sm" color="fg.muted" fontStyle="italic">
             Aucun extrait disponible pour cette relation
           </Text>
         </Box>
@@ -182,7 +182,7 @@ function EvidencePanel({
           {edge.evidences.map((evidence, idx) => (
             <Box key={idx} p={3} bg="blue.50" borderRadius="md" border="1px solid" borderColor="blue.100">
               {evidence.quote && (
-                <Text fontSize="sm" color="gray.700" fontStyle="italic" mb={2}>
+                <Text fontSize="sm" color="fg.secondary" fontStyle="italic" mb={2}>
                   "{evidence.quote}"
                 </Text>
               )}
@@ -219,28 +219,28 @@ function ProofGraphLegend() {
     <VStack align="start" spacing={1} fontSize="xs">
       <HStack spacing={2}>
         <Box w={3} h={3} borderRadius="full" bg={PROOF_COLORS.query} />
-        <Text color="gray.600">Question</Text>
+        <Text color="fg.secondary">Question</Text>
       </HStack>
       <HStack spacing={2}>
         <Box w={3} h={3} borderRadius="full" bg={PROOF_COLORS.used} />
-        <Text color="gray.600">Utilisé</Text>
+        <Text color="fg.secondary">Utilisé</Text>
       </HStack>
       <HStack spacing={2}>
         <Box w={3} h={3} borderRadius="full" bg={PROOF_COLORS.bridge} />
-        <Text color="gray.600">Pont</Text>
+        <Text color="fg.secondary">Pont</Text>
       </HStack>
       <HStack spacing={2}>
         <Box w={3} h={3} borderRadius="full" bg={PROOF_COLORS.context} />
-        <Text color="gray.600">Contexte</Text>
+        <Text color="fg.secondary">Contexte</Text>
       </HStack>
       <Divider my={1} />
       <HStack spacing={2}>
         <Box w={4} h={0.5} bg={PROOF_COLORS.edge.onPath} />
-        <Text color="gray.600">Chemin de preuve</Text>
+        <Text color="fg.secondary">Chemin de preuve</Text>
       </HStack>
       <HStack spacing={2}>
         <Box w={4} h={0.5} bg={PROOF_COLORS.edge.normal} borderStyle="dashed" borderWidth={1} />
-        <Text color="gray.600">Autre relation</Text>
+        <Text color="fg.secondary">Autre relation</Text>
       </HStack>
     </VStack>
   );
@@ -486,14 +486,14 @@ function ProofGraphD3({
 
   if (proofGraph.nodes.length === 0) {
     return (
-      <Flex w="100%" h={height} align="center" justify="center" bg="gray.50" borderRadius="md">
-        <Text fontSize="sm" color="gray.500">Aucun concept à afficher</Text>
+      <Flex w="100%" h={height} align="center" justify="center" bg="bg.surface" borderRadius="md">
+        <Text fontSize="sm" color="fg.muted">Aucun concept à afficher</Text>
       </Flex>
     );
   }
 
   return (
-    <Box position="relative" w="100%" h={height} bg="white" borderRadius="md" border="1px solid" borderColor="gray.200">
+    <Box position="relative" w="100%" h={height} bg="bg.canvas" borderRadius="md" border="1px solid" borderColor="border.default">
       <svg ref={svgRef} width="100%" height={height} style={{ display: 'block' }} />
     </Box>
   );
@@ -511,8 +511,8 @@ function ConfidenceTrail({
 }) {
   if (proofGraph.paths.length === 0) {
     return (
-      <Box p={4} bg="gray.50" borderRadius="md">
-        <Text fontSize="sm" color="gray.500">Aucun chemin de preuve disponible</Text>
+      <Box p={4} bg="bg.surface" borderRadius="md">
+        <Text fontSize="sm" color="fg.muted">Aucun chemin de preuve disponible</Text>
       </Box>
     );
   }
@@ -520,7 +520,7 @@ function ConfidenceTrail({
   return (
     <VStack align="stretch" spacing={3} p={2}>
       {proofGraph.paths.slice(0, 3).map((path, pathIdx) => (
-        <Box key={path.pathId} p={3} bg="white" borderRadius="md" border="1px solid" borderColor="gray.200">
+        <Box key={path.pathId} p={3} bg="bg.canvas" borderRadius="md" border="1px solid" borderColor="border.default">
           <HStack spacing={2} mb={2}>
             <Badge colorScheme="green" fontSize="xs">Chemin {pathIdx + 1}</Badge>
             <Badge colorScheme="blue" variant="outline" fontSize="xs">
@@ -558,13 +558,13 @@ function ConfidenceTrail({
                         boxShadow="0 0 0 2px gray"
                       />
                       {!isLast && (
-                        <Box w="2px" h="30px" bg="gray.300" />
+                        <Box w="2px" h="30px" bg="border.default" />
                       )}
                     </VStack>
 
                     {/* Contenu du noeud */}
                     <VStack align="start" spacing={0} flex={1}>
-                      <Text fontSize="sm" fontWeight="medium" color="gray.700">
+                      <Text fontSize="sm" fontWeight="medium" color="fg.secondary">
                         {node?.name || nodeId}
                       </Text>
                       <HStack spacing={1}>
@@ -581,7 +581,7 @@ function ConfidenceTrail({
                            node?.role === 'used' ? 'Utilisé' : 'Pont'}
                         </Badge>
                         {node?.confidence && (
-                          <Text fontSize="2xs" color="gray.400">
+                          <Text fontSize="2xs" color="fg.muted">
                             {Math.round(node.confidence * 100)}%
                           </Text>
                         )}
@@ -604,7 +604,7 @@ function ConfidenceTrail({
                         onEdgeClick?.(edgeToNext, srcNode, tgtNode);
                       }}
                     >
-                      <Text fontSize="xs" color="gray.500">↓</Text>
+                      <Text fontSize="xs" color="fg.muted">↓</Text>
                       <Badge
                         colorScheme={edgeToNext.isOnPath ? 'green' : 'gray'}
                         variant="outline"
@@ -612,7 +612,7 @@ function ConfidenceTrail({
                       >
                         {RELATION_LABELS[edgeToNext.relationType] || edgeToNext.relationType}
                       </Badge>
-                      <Text fontSize="2xs" color="gray.400">
+                      <Text fontSize="2xs" color="fg.muted">
                         ({Math.round(edgeToNext.confidence * 100)}%)
                       </Text>
                       <InfoIcon boxSize={2.5} color="blue.400" />
@@ -669,22 +669,22 @@ function ProofGraphViewerComponent({
   }
 
   return (
-    <Box mt={1} borderTop="1px solid" borderColor="gray.100" pt={1}>
+    <Box mt={1} borderTop="1px solid" borderColor="border.faint" pt={1}>
       {/* Header compact */}
       <HStack
         spacing={1}
         cursor="pointer"
         onClick={() => setIsExpanded(!isExpanded)}
-        _hover={{ bg: 'gray.50' }}
+        _hover={{ bg: 'bg.surface' }}
         px={1.5}
         py={0.5}
         borderRadius="sm"
         transition="background 0.2s"
       >
-        <Box as={isExpanded ? ChevronUpIcon : ChevronDownIcon} boxSize={3} color="gray.400" />
+        <Box as={isExpanded ? ChevronUpIcon : ChevronDownIcon} boxSize={3} color="fg.muted" />
         <HStack spacing={0.5}>
           <Box w={1.5} h={1.5} borderRadius="full" bg="teal.400" />
-          <Text fontSize="2xs" color="gray.500" fontWeight="medium">
+          <Text fontSize="2xs" color="fg.muted" fontWeight="medium">
             Proof Graph
           </Text>
         </HStack>
@@ -717,12 +717,12 @@ function ProofGraphViewerComponent({
 
       {/* Contenu dépliable */}
       <Collapse in={isExpanded}>
-        <Box mt={1} p={2} bg="gray.50" borderRadius="sm">
+        <Box mt={1} p={2} bg="bg.surface" borderRadius="sm">
           {/* Mode Switch: Graph | Trail */}
           <HStack spacing={1} mb={2} justify="center">
             <HStack
               spacing={0}
-              bg="gray.200"
+              bg="bg.surface-alt"
               p={0.5}
               borderRadius="md"
             >
@@ -801,7 +801,7 @@ function ProofGraphViewerComponent({
           {/* Stats et légende compacts - seulement en mode graphe */}
           {viewMode === 'graph' && (
           <Flex mt={2} justify="space-between" align="center">
-            <HStack spacing={2} fontSize="2xs" color="gray.400">
+            <HStack spacing={2} fontSize="2xs" color="fg.muted">
               <HStack spacing={0.5}>
                 <Box w={1.5} h={1.5} borderRadius="full" bg={PROOF_COLORS.query} />
                 <Text>Question</Text>
@@ -815,7 +815,7 @@ function ProofGraphViewerComponent({
                 <Text>Pont</Text>
               </HStack>
             </HStack>
-            <Text fontSize="2xs" color="gray.400">
+            <Text fontSize="2xs" color="fg.muted">
               Cliquez sur une relation pour voir les preuves
             </Text>
           </Flex>
@@ -839,7 +839,7 @@ function ProofGraphViewerComponent({
           <ModalBody pb={6}>
             <Flex gap={4}>
               {/* Graphe avec labels */}
-              <Box flex="1" h="600px" border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden">
+              <Box flex="1" h="600px" border="1px solid" borderColor="border.default" borderRadius="md" overflow="hidden">
                 <ProofGraphD3
                   proofGraph={proofGraph}
                   width={1000}
@@ -852,7 +852,7 @@ function ProofGraphViewerComponent({
               {/* Panneau latéral */}
               <VStack w="350px" align="stretch" spacing={4}>
                 {/* Légende */}
-                <Box p={3} bg="gray.50" borderRadius="md">
+                <Box p={3} bg="bg.surface" borderRadius="md">
                   <Text fontSize="sm" fontWeight="semibold" mb={2}>Légende</Text>
                   <ProofGraphLegend />
                 </Box>
@@ -873,7 +873,7 @@ function ProofGraphViewerComponent({
                         Sélectionnez une relation
                       </Text>
                     </HStack>
-                    <Text fontSize="sm" color="gray.600">
+                    <Text fontSize="sm" color="fg.secondary">
                       Cliquez sur une ligne entre deux concepts pour voir les preuves documentaires qui justifient cette relation.
                     </Text>
                   </Box>
@@ -887,7 +887,7 @@ function ProofGraphViewerComponent({
                     </Text>
                     <VStack align="stretch" spacing={2}>
                       {proofGraph.paths.slice(0, 3).map((path, idx) => (
-                        <Box key={path.pathId} p={2} bg="white" borderRadius="sm">
+                        <Box key={path.pathId} p={2} bg="bg.canvas" borderRadius="sm">
                           <HStack spacing={1} flexWrap="wrap">
                             {path.nodeIds.map((nodeId, nodeIdx) => {
                               const node = proofGraph.nodes.find(n => n.id === nodeId);
@@ -903,13 +903,13 @@ function ProofGraphViewerComponent({
                                     {node?.name || nodeId.slice(0, 10)}
                                   </Badge>
                                   {nodeIdx < path.nodeIds.length - 1 && (
-                                    <Text color="gray.400">→</Text>
+                                    <Text color="fg.muted">→</Text>
                                   )}
                                 </HStack>
                               );
                             })}
                           </HStack>
-                          <Text fontSize="xs" color="gray.500" mt={1}>
+                          <Text fontSize="xs" color="fg.muted" mt={1}>
                             Confiance: {Math.round(path.totalConfidence * 100)}%
                           </Text>
                         </Box>
@@ -920,7 +920,7 @@ function ProofGraphViewerComponent({
               </VStack>
             </Flex>
 
-            <Text mt={4} fontSize="xs" color="gray.400" textAlign="center">
+            <Text mt={4} fontSize="xs" color="fg.muted" textAlign="center">
               Molette pour zoomer • Glissez pour déplacer • Cliquez sur une relation pour les preuves
             </Text>
           </ModalBody>

@@ -73,9 +73,9 @@ function DefinitionSection({ definition }: { definition: ConceptCard['definition
         <InfoIcon color="blue.500" />
         <Heading size="sm">Définition</Heading>
       </HStack>
-      <Box bg="gray.50" p={3} borderRadius="md" borderLeft="3px solid" borderColor="blue.400">
+      <Box bg="bg.surface" p={3} borderRadius="md" borderLeft="3px solid" borderColor="blue.400">
         <Text fontSize="sm">{definition.text}</Text>
-        <HStack mt={2} fontSize="xs" color="gray.500">
+        <HStack mt={2} fontSize="xs" color="fg.muted">
           <Text>{definition.sourceCount} source{definition.sourceCount > 1 ? 's' : ''}</Text>
           <Text>•</Text>
           <Text>Consensus: {Math.round(definition.consensusScore * 100)}%</Text>
@@ -123,9 +123,9 @@ function RelationsSection({
             <Box
               key={idx}
               p={2}
-              bg="gray.50"
+              bg="bg.surface"
               borderRadius="md"
-              _hover={{ bg: 'gray.100', cursor: 'pointer' }}
+              _hover={{ bg: 'bg.surface-alt', cursor: 'pointer' }}
               onClick={() => onConceptClick(rel.targetId)}
             >
               <HStack justify="space-between">
@@ -133,7 +133,7 @@ function RelationsSection({
                   <Text fontSize="sm" fontWeight="medium">
                     {rel.targetName}
                   </Text>
-                  <Text fontSize="xs" color="gray.500">
+                  <Text fontSize="xs" color="fg.muted">
                     {RELATION_TYPE_LABELS[rel.relationType] || rel.relationType}
                   </Text>
                 </VStack>
@@ -145,7 +145,7 @@ function RelationsSection({
                   >
                     {rel.direction === 'outgoing' ? '→' : rel.direction === 'incoming' ? '←' : '↔'}
                   </Badge>
-                  <Text fontSize="xs" color="gray.400">
+                  <Text fontSize="xs" color="fg.muted">
                     {Math.round(rel.confidence * 100)}%
                   </Text>
                 </VStack>
@@ -192,7 +192,7 @@ function SourcesSection({
           <Box
             key={idx}
             p={2}
-            bg="gray.50"
+            bg="bg.surface"
             borderRadius="md"
             borderLeft="3px solid"
             borderColor={
@@ -201,7 +201,7 @@ function SourcesSection({
               source.documentType === 'DOCX' ? 'blue.400' :
               'gray.400'
             }
-            _hover={{ bg: 'gray.100', cursor: 'pointer' }}
+            _hover={{ bg: 'bg.surface-alt', cursor: 'pointer' }}
             onClick={() => onSourceClick(source.documentId)}
           >
             <HStack justify="space-between">
@@ -209,7 +209,7 @@ function SourcesSection({
                 <Text fontSize="sm" fontWeight="medium" noOfLines={1}>
                   {source.documentName}
                 </Text>
-                <Text fontSize="xs" color="gray.500" noOfLines={2}>
+                <Text fontSize="xs" color="fg.muted" noOfLines={2}>
                   {source.excerpt}
                 </Text>
               </VStack>
@@ -217,7 +217,7 @@ function SourcesSection({
                 <Badge colorScheme="gray" fontSize="xs">
                   {source.documentType}
                 </Badge>
-                <Text fontSize="xs" color="gray.400">
+                <Text fontSize="xs" color="fg.muted">
                   {source.mentionCount}x
                 </Text>
               </VStack>
@@ -282,7 +282,7 @@ function TimelineSection({ timeline }: { timeline: TimelineEvent[] }) {
                 }
               />
               <VStack align="start" spacing={0} flex="1">
-                <Text fontSize="xs" color="gray.500">{event.date}</Text>
+                <Text fontSize="xs" color="fg.muted">{event.date}</Text>
                 <Text fontSize="sm">{event.event}</Text>
               </VStack>
             </HStack>
@@ -398,7 +398,7 @@ export default function ConceptCardPanel({
             <VStack align="start" spacing={1}>
               <Heading size="md">{concept.canonicalName}</Heading>
               {concept.fullName && concept.fullName !== concept.canonicalName && (
-                <Text fontSize="sm" color="gray.500">
+                <Text fontSize="sm" color="fg.muted">
                   {concept.fullName}
                 </Text>
               )}
@@ -420,7 +420,7 @@ export default function ConceptCardPanel({
           ) : error ? (
             <Text color="red.500">{error}</Text>
           ) : (
-            <Text color="gray.500">Sélectionnez un concept</Text>
+            <Text color="fg.muted">Sélectionnez un concept</Text>
           )}
         </DrawerHeader>
 
@@ -436,7 +436,7 @@ export default function ConceptCardPanel({
               {/* Confiance */}
               <Box>
                 <HStack justify="space-between" fontSize="sm" mb={1}>
-                  <Text color="gray.600">Confiance</Text>
+                  <Text color="fg.secondary">Confiance</Text>
                   <Text fontWeight="medium">{Math.round(concept.confidence * 100)}%</Text>
                 </HStack>
                 <Progress
@@ -453,7 +453,7 @@ export default function ConceptCardPanel({
               {/* Aliases */}
               {concept.aliases.length > 0 && (
                 <Box>
-                  <Text fontSize="sm" color="gray.600" mb={1}>
+                  <Text fontSize="sm" color="fg.secondary" mb={1}>
                     Aussi connu sous:
                   </Text>
                   <Wrap>

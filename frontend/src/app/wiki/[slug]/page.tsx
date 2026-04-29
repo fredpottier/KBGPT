@@ -326,7 +326,7 @@ export default function WikiArticlePage() {
               </Text>
               <Tooltip label="Signal d'exploitation : mesure la couverture et cohérence des preuves" hasArrow>
                 <HStack>
-                  <Box flex={1} bg="gray.700" rounded="full" h="8px">
+                  <Box flex={1} bg="bg.surface-alt" rounded="full" h="8px">
                     <Box
                       bg={`${confidenceColor(article.generation_confidence)}.400`}
                       h="8px"

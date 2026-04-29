@@ -149,9 +149,9 @@ export default function ExcelPreviewTable({ sheetData, onColumnSelect }: ExcelPr
       </HStack>
 
       {/* Contrôles de navigation */}
-      <Box border="1px" borderColor="gray.200" borderRadius="md" p={4} bg="gray.50">
+      <Box border="1px" borderColor="border.default" borderRadius="md" p={4} bg="bg.surface">
         <VStack spacing={4}>
-          <Text fontWeight="medium" color="gray.700">Navigation dans le tableau</Text>
+          <Text fontWeight="medium" color="fg.secondary">Navigation dans le tableau</Text>
 
           <Flex wrap="wrap" gap={6} justify="center" align="center">
             {/* Navigation lignes */}
@@ -164,7 +164,7 @@ export default function ExcelPreviewTable({ sheetData, onColumnSelect }: ExcelPr
                 onClick={() => setStartRow(Math.max(0, startRow - ROWS_TO_DISPLAY))}
                 isDisabled={startRow === 0}
               />
-              <Text fontSize="sm" color="gray.600">
+              <Text fontSize="sm" color="fg.secondary">
                 {startRow + 1}-{Math.min(startRow + ROWS_TO_DISPLAY, sheetData.total_rows)} / {sheetData.total_rows}
               </Text>
               <IconButton
@@ -186,7 +186,7 @@ export default function ExcelPreviewTable({ sheetData, onColumnSelect }: ExcelPr
                 onClick={() => setStartColumn(Math.max(0, startColumn - COLUMNS_TO_DISPLAY))}
                 isDisabled={startColumn === 0}
               />
-              <Text fontSize="sm" color="gray.600">
+              <Text fontSize="sm" color="fg.secondary">
                 {getColumnLetter(startColumn)}-{getColumnLetter(Math.min(startColumn + COLUMNS_TO_DISPLAY - 1, sheetData.total_columns - 1))} / {getColumnLetter(sheetData.total_columns - 1)}
               </Text>
               <IconButton
@@ -239,12 +239,12 @@ export default function ExcelPreviewTable({ sheetData, onColumnSelect }: ExcelPr
       </Box>
 
       {/* Tableau de prévisualisation */}
-      <Box border="1px" borderColor="gray.200" borderRadius="md" maxHeight="500px" overflowY="auto" overflowX="hidden">
+      <Box border="1px" borderColor="border.default" borderRadius="md" maxHeight="500px" overflowY="auto" overflowX="hidden">
         <TableContainer>
           <Table size="sm" variant="simple">
             <Thead>
               <Tr>
-                <Th width="40px" position="sticky" top="0" bg="white" zIndex={1}>
+                <Th width="40px" position="sticky" top="0" bg="bg.canvas" zIndex={1}>
                   #
                 </Th>
                 {Array.from({ length: Math.min(COLUMNS_TO_DISPLAY, sheetData.total_columns - startColumn) }, (_, i) => {
@@ -258,7 +258,7 @@ export default function ExcelPreviewTable({ sheetData, onColumnSelect }: ExcelPr
                       key={index}
                       position="sticky"
                       top="0"
-                      bg="white"
+                      bg="bg.canvas"
                       zIndex={1}
                       cursor={isAvailable ? 'pointer' : 'default'}
                       onClick={isAvailable ? () => handleColumnClick(index) : undefined}
@@ -286,7 +286,7 @@ export default function ExcelPreviewTable({ sheetData, onColumnSelect }: ExcelPr
                 .slice(startRow, startRow + ROWS_TO_DISPLAY)
                 .map((row, rowIndex) => (
                 <Tr key={rowIndex}>
-                  <Td fontWeight="medium" bg="gray.50">
+                  <Td fontWeight="medium" bg="bg.surface">
                     {startRow + rowIndex + 1}
                   </Td>
                   {row

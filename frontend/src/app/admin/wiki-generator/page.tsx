@@ -343,7 +343,7 @@ export default function WikiGeneratorPage() {
             label="Tier 3 sans article"
             missing={gaps.t3}
             total={scoring.tier3_count}
-            color="gray.500"
+            color="fg.muted"
             desc="Concepts spécifiques"
           />
         </SimpleGrid>
@@ -363,13 +363,13 @@ export default function WikiGeneratorPage() {
 
         <Flex gap={6} wrap="wrap" align="end" mb={4}>
           <Box>
-            <Text fontSize="sm" color="var(--text-secondary)" mb={1}>Périmètre</Text>
+            <Text fontSize="sm" color="var(--fg-secondary)" mb={1}>Périmètre</Text>
             <Select
               value={maxTier}
               onChange={e => setMaxTier(Number(e.target.value))}
               size="sm" w="220px"
-              bg="var(--bg-tertiary)" color="var(--text-primary)" borderColor="var(--border-default)"
-              sx={{ '& option': { background: 'var(--bg-tertiary)', color: 'var(--text-primary)' } }}
+              bg="var(--bg-surface-alt)" color="var(--fg-primary)" borderColor="var(--border-default)"
+              sx={{ '& option': { background: 'var(--bg-surface-alt)', color: 'var(--fg-primary)' } }}
             >
               <option value={1}>Tier 1 uniquement ({gaps.t1} manquants)</option>
               <option value={2}>Tier 1 + 2 ({gaps.t1 + gaps.t2} manquants)</option>
@@ -378,7 +378,7 @@ export default function WikiGeneratorPage() {
           </Box>
 
           <Box>
-            <Text fontSize="sm" color="var(--text-secondary)" mb={1}>Nombre d'articles</Text>
+            <Text fontSize="sm" color="var(--fg-secondary)" mb={1}>Nombre d'articles</Text>
             <HStack spacing={2}>
               <NumberInput
                 value={generateAll ? missingConcepts.length : maxArticles}
@@ -386,10 +386,10 @@ export default function WikiGeneratorPage() {
                 min={1} max={9999} size="sm" w="100px"
                 isDisabled={generateAll}
               >
-                <NumberInputField bg="var(--bg-tertiary)" color="var(--text-primary)" borderColor="var(--border-default)" />
+                <NumberInputField bg="var(--bg-surface-alt)" color="var(--fg-primary)" borderColor="var(--border-default)" />
                 <NumberInputStepper borderColor="var(--border-default)">
-                  <NumberIncrementStepper color="var(--text-secondary)" />
-                  <NumberDecrementStepper color="var(--text-secondary)" />
+                  <NumberIncrementStepper color="var(--fg-secondary)" />
+                  <NumberDecrementStepper color="var(--fg-secondary)" />
                 </NumberInputStepper>
               </NumberInput>
               <Button
@@ -405,13 +405,13 @@ export default function WikiGeneratorPage() {
           </Box>
 
           <Box>
-            <Text fontSize="sm" color="var(--text-secondary)" mb={1}>Langue</Text>
+            <Text fontSize="sm" color="var(--fg-secondary)" mb={1}>Langue</Text>
             <Select
               value={language}
               onChange={e => setLanguage(e.target.value)}
               size="sm" w="140px"
-              bg="var(--bg-tertiary)" color="var(--text-primary)" borderColor="var(--border-default)"
-              sx={{ '& option': { background: 'var(--bg-tertiary)', color: 'var(--text-primary)' } }}
+              bg="var(--bg-surface-alt)" color="var(--fg-primary)" borderColor="var(--border-default)"
+              sx={{ '& option': { background: 'var(--bg-surface-alt)', color: 'var(--fg-primary)' } }}
             >
               <option value="français">Français</option>
               <option value="english">English</option>
@@ -485,7 +485,7 @@ export default function WikiGeneratorPage() {
                               job.status === 'completed' ? 'green.400' :
                               job.status === 'failed' ? 'red.400' :
                               job.status === 'running' ? 'blue.400' :
-                              job.status === 'cancelled' ? 'orange.400' : 'var(--text-muted)'
+                              job.status === 'cancelled' ? 'orange.400' : 'var(--fg-muted)'
                             }>
                               {job.status === 'completed' ? 'Créé' :
                                job.status === 'failed' ? 'Échec' :
@@ -606,7 +606,7 @@ export default function WikiGeneratorPage() {
                               job.status === 'failed' ? 'red.400' :
                               job.status === 'running' ? 'blue.400' :
                               job.status === 'cancelled' ? 'orange.400' :
-                              job.status === 'skipped' ? 'gray.400' : 'var(--text-muted)'
+                              job.status === 'skipped' ? 'gray.400' : 'var(--fg-muted)'
                             }>
                               {job.status === 'completed' ? 'Linké' :
                                job.status === 'failed' ? 'Échec' :

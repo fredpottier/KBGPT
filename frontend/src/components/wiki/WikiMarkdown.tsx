@@ -108,8 +108,8 @@ const markdownComponents: Components = {
       )
     }
     return (
-      <Box as="pre" bg="gray.900" p={4} rounded="md" overflowX="auto" mb={3}>
-        <Code display="block" whiteSpace="pre" fontSize="sm" color="gray.200">
+      <Box as="pre" bg="bg.canvas" p={4} rounded="md" overflowX="auto" mb={3}>
+        <Code display="block" whiteSpace="pre" fontSize="sm" color="fg.muted">
           {children}
         </Code>
       </Box>

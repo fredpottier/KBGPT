@@ -83,12 +83,12 @@ export default function CoverageMapPanel({ coverage }: CoverageMapPanelProps) {
         bg="bg.secondary"
         borderRadius="lg"
         border="1px dashed"
-        borderColor="gray.500"
+        borderColor="border.strong"
         p={4}
       >
         <HStack spacing={2}>
-          <Icon as={FiMap} boxSize={4} color="gray.400" />
-          <Text fontSize="xs" color="gray.400">
+          <Icon as={FiMap} boxSize={4} color="fg.muted" />
+          <Text fontSize="xs" color="fg.muted">
             {coverage.message}
           </Text>
         </HStack>

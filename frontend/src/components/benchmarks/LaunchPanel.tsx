@@ -78,7 +78,7 @@ export function LaunchPanel({
             fontSize="sm"
             color="var(--text-primary, #f8fafc)"
             maxW="180px"
-            _placeholder={{ color: 'var(--text-muted)', opacity: 0.5 }}
+            _placeholder={{ color: 'var(--fg-muted)', opacity: 0.5 }}
             _focus={{ borderColor: '#5B7FFF', outline: 'none' }}
           />
         </Box>
@@ -98,7 +98,7 @@ export function LaunchPanel({
             fontSize="sm"
             color="var(--text-primary, #f8fafc)"
             w="100%"
-            _placeholder={{ color: 'var(--text-muted)', opacity: 0.5 }}
+            _placeholder={{ color: 'var(--fg-muted)', opacity: 0.5 }}
             _focus={{ borderColor: '#5B7FFF', outline: 'none' }}
           />
         </Box>

@@ -14,20 +14,20 @@ export default function RfpPage() {
         <Heading size="lg" mb={2}>
           RFP Excel
         </Heading>
-        <Text color="gray.600">
+        <Text color="fg.secondary">
           Génération et remplissage automatique de fichiers Excel RFP
         </Text>
       </Box>
 
       <Box
-        bg="white"
+        bg="bg.canvas"
         p={8}
         borderRadius="lg"
         shadow="sm"
         border="1px"
-        borderColor="gray.200"
+        borderColor="border.default"
       >
-        <Text color="gray.500" textAlign="center">
+        <Text color="fg.muted" textAlign="center">
           Interface RFP Excel à développer
         </Text>
       </Box>

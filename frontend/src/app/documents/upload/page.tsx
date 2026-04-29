@@ -143,7 +143,7 @@ export default function UploadPage() {
       case 'error':
         return <WarningIcon color="red.500" />
       default:
-        return <AttachmentIcon color="gray.500" />
+        return <AttachmentIcon color="fg.muted" />
     }
   }
 
@@ -167,7 +167,7 @@ export default function UploadPage() {
           <Text fontSize="lg" fontWeight="semibold">
             Upload Documents
           </Text>
-          <Text fontSize="sm" color="gray.600">
+          <Text fontSize="sm" color="fg.secondary">
             Supported formats: PDF, DOC, DOCX, TXT, MD (Max: 50MB)
           </Text>
         </CardHeader>
@@ -186,7 +186,7 @@ export default function UploadPage() {
             <input {...getInputProps()} />
             <Center>
               <VStack spacing={3}>
-                <Icon as={AttachmentIcon} w={10} h={10} color="gray.400" />
+                <Icon as={AttachmentIcon} w={10} h={10} color="fg.muted" />
                 {isDragActive ? (
                   <Text>Drop the files here...</Text>
                 ) : (
@@ -194,7 +194,7 @@ export default function UploadPage() {
                     <Text fontWeight="medium">
                       Drag & drop files here, or click to select
                     </Text>
-                    <Text fontSize="sm" color="gray.500">
+                    <Text fontSize="sm" color="fg.muted">
                       Upload multiple files at once
                     </Text>
                   </VStack>
@@ -242,7 +242,7 @@ export default function UploadPage() {
           <CardBody>
             <VStack spacing={3} align="stretch">
               {uploadFiles.map((uploadFile, index) => (
-                <Box key={index} p={4} border="1px" borderColor="gray.200" borderRadius="md">
+                <Box key={index} p={4} border="1px" borderColor="border.default" borderRadius="md">
                   <Flex justify="space-between" align="center" mb={2}>
                     <HStack spacing={3} flex="1">
                       {getStatusIcon(uploadFile.status)}
@@ -250,7 +250,7 @@ export default function UploadPage() {
                         <Text fontSize="sm" fontWeight="medium" noOfLines={1}>
                           {uploadFile.file.name}
                         </Text>
-                        <Text fontSize="xs" color="gray.500">
+                        <Text fontSize="xs" color="fg.muted">
                           {formatFileSize(uploadFile.file.size)}
                         </Text>
                       </VStack>

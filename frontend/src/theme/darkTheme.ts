@@ -74,68 +74,70 @@ const colors = {
   },
 }
 
-// Semantic tokens — réagissent automatiquement au colorMode dark/light
+// Semantic tokens — pointent vers les CSS vars canoniques (multi-preset).
+// Le preset actif (Fusion / Dark Elegance) est defini par data-preset sur <html>
+// dans preset-vars.css (cf. PresetThemeProvider).
 const semanticTokens = {
   colors: {
-    'bg.primary': { default: paletteLight.dark[900], _dark: palette.dark[900] },
-    'bg.secondary': { default: paletteLight.dark[800], _dark: palette.dark[800] },
-    'bg.tertiary': { default: paletteLight.dark[700], _dark: palette.dark[700] },
-    'bg.hover': { default: paletteLight.dark[600], _dark: palette.dark[600] },
-    'bg.active': { default: paletteLight.dark[500], _dark: palette.dark[500] },
+    // Surfaces (legacy + canonical)
+    'bg.primary':   'var(--bg-canvas)',
+    'bg.canvas':    'var(--bg-canvas)',
+    'bg.secondary': 'var(--bg-surface)',
+    'bg.surface':   'var(--bg-surface)',
+    'bg.tertiary':  'var(--bg-surface-alt)',
+    'bg.hover':     'var(--bg-hover)',
+    'bg.active':    'var(--bg-surface-alt)',
 
-    'surface.default': { default: paletteLight.dark[700], _dark: palette.dark[700] },
-    'surface.raised': { default: paletteLight.dark[600], _dark: palette.dark[600] },
-    'surface.overlay': { default: paletteLight.dark[800], _dark: palette.dark[800] },
+    'surface.default': 'var(--bg-surface)',
+    'surface.raised':  'var(--bg-surface-alt)',
+    'surface.overlay': 'var(--bg-overlay)',
 
-    'border.default': { default: paletteLight.dark[400], _dark: palette.dark[400] },
-    'border.muted': { default: paletteLight.dark[500], _dark: palette.dark[500] },
-    'border.active': { default: palette.accent.primary, _dark: palette.accent.primary },
+    // Borders
+    'border.default': 'var(--border-default)',
+    'border.muted':   'var(--border-faint)',
+    'border.active':  'var(--border-strong)',
 
-    'text.primary': { default: paletteLight.text.primary, _dark: palette.text.primary },
-    'text.secondary': { default: paletteLight.text.secondary, _dark: palette.text.secondary },
-    'text.muted': { default: paletteLight.text.muted, _dark: palette.text.muted },
-    'text.inverse': { default: paletteLight.text.inverse, _dark: palette.text.inverse },
+    // Texts (legacy + canonical)
+    'text.primary':   'var(--fg-primary)',
+    'fg.primary':     'var(--fg-primary)',
+    'text.secondary': 'var(--fg-secondary)',
+    'fg.secondary':   'var(--fg-secondary)',
+    'text.muted':     'var(--fg-muted)',
+    'fg.muted':       'var(--fg-muted)',
+    'text.inverse':   'var(--fg-inverse)',
+    'fg.inverse':     'var(--fg-inverse)',
+
+    // Accent (suit le preset)
+    'accent':         'var(--accent)',
+    'accent.hover':   'var(--accent-hover)',
+    'accent.soft':    'var(--accent-soft)',
+    'accent.on':      'var(--accent-on)',
+    // brand.* override pour ColorScheme="brand"
+    'brand.50':       'var(--accent-soft)',
+    'brand.400':      'var(--accent-hover)',
+    'brand.500':      'var(--accent)',
+    'brand.600':      'var(--accent-hover)',
+  },
+  radii: {
+    none: 'var(--radius-none)',
+    sm:   'var(--radius-sm)',
+    md:   'var(--radius-md)',
+    lg:   'var(--radius-md)',
+    xl:   'var(--radius-md)',
+    '2xl':'var(--radius-md)',
+    full: 'var(--radius-pill)',
   },
 }
 
-// Styles globaux
+// Styles globaux — minimaux. Le fond/text sont gérés par globals.css (var(--bg-canvas)).
+// Évite que Chakra override les CSS vars du preset.
 const styles = {
   global: {
     'html, body': {
-      bg: 'bg.primary',
-      color: 'text.primary',
       fontFamily: typography.fonts.body,
       lineHeight: typography.lineHeights.normal,
       WebkitFontSmoothing: 'antialiased',
       MozOsxFontSmoothing: 'grayscale',
-    },
-
-    // Scrollbar custom
-    '::-webkit-scrollbar': {
-      width: '8px',
-      height: '8px',
-    },
-    '::-webkit-scrollbar-track': {
-      bg: 'bg.secondary',
-    },
-    '::-webkit-scrollbar-thumb': {
-      bg: 'border.default',
-      borderRadius: 'full',
-      '&:hover': {
-        bg: 'border.active',
-      },
-    },
-
-    // Selection
-    '::selection': {
-      bg: 'brand.500',
-      color: 'white',
-    },
-
-    // Focus visible
-    '*:focus-visible': {
-      outline: 'none',
-      boxShadow: shadows.glow.md,
     },
   },
 }
@@ -245,19 +247,19 @@ const components = {
     },
   },
 
-  // Menus dropdown
+  // Menus dropdown — bg.canvas pour eviter le contraste blanc en Fusion light
   Menu: {
     baseStyle: {
       list: {
-        bg: 'surface.default',
+        bg: 'bg.canvas',
         borderColor: 'border.default',
-        borderRadius: radii.xl,
-        boxShadow: 'xl',
+        borderRadius: 'md',
+        boxShadow: 'lg',
         py: 2,
       },
       item: {
         bg: 'transparent',
-        color: 'text.primary',
+        color: 'fg.primary',
         _hover: {
           bg: 'bg.hover',
         },

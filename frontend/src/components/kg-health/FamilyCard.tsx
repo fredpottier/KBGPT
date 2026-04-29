@@ -45,7 +45,7 @@ export function FamilyCard({ family, onDrilldown }: FamilyCardProps) {
 
   return (
     <Box
-      bg="var(--bg-secondary)"
+      bg="var(--bg-surface)"
       borderRadius="xl"
       p={5}
       borderWidth="1px"
@@ -57,10 +57,10 @@ export function FamilyCard({ family, onDrilldown }: FamilyCardProps) {
         <HStack spacing={3} align="start">
           <Icon as={icon} color={color} boxSize={5} mt={0.5} />
           <VStack align="start" spacing={0.5}>
-            <Text fontSize="md" fontWeight="700" color="var(--text-primary)">
+            <Text fontSize="md" fontWeight="700" color="var(--fg-primary)">
               {family.label}
             </Text>
-            <Text fontSize="xs" color="var(--text-muted)" maxW="340px">
+            <Text fontSize="xs" color="var(--fg-muted)" maxW="340px">
               {description}
             </Text>
           </VStack>
@@ -71,7 +71,7 @@ export function FamilyCard({ family, onDrilldown }: FamilyCardProps) {
             <Text fontSize="2xl" fontWeight="800" color={color} lineHeight={1}>
               {family.score.toFixed(0)}
             </Text>
-            <Text fontSize="xs" color="var(--text-muted)">
+            <Text fontSize="xs" color="var(--fg-muted)">
               /100
             </Text>
           </HStack>

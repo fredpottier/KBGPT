@@ -409,7 +409,7 @@ export default function RfpExcelPageImproved() {
       <VStack spacing={6} align="stretch">
         <Box>
           <Heading size="lg" mb={2}>RFP Excel</Heading>
-          <Text color="gray.600">
+          <Text color="fg.secondary">
             Analyse intelligente des fichiers Excel avec prévisualisation et sélection visuelle des colonnes
           </Text>
         </Box>
@@ -494,7 +494,7 @@ export default function RfpExcelPageImproved() {
                                 </Text>
                               </>
                             )}
-                            <Text fontSize="sm" color="gray.500">
+                            <Text fontSize="sm" color="fg.muted">
                               Formats acceptés: .xlsx, .xls
                             </Text>
                           </VStack>
@@ -653,7 +653,7 @@ export default function RfpExcelPageImproved() {
                                 </Text>
                               </>
                             )}
-                            <Text fontSize="sm" color="gray.500">
+                            <Text fontSize="sm" color="fg.muted">
                               Formats acceptés: .xlsx, .xls
                             </Text>
                           </VStack>
@@ -732,7 +732,7 @@ export default function RfpExcelPageImproved() {
                                     <Text fontSize="sm" fontWeight="medium">
                                       Étendre la recherche à la base de connaissances générale
                                     </Text>
-                                    <Text fontSize="xs" color="gray.600">
+                                    <Text fontSize="xs" color="fg.secondary">
                                       Par défaut, seules les Q/A RFP sont utilisées. Cochez pour inclure tous les documents.
                                     </Text>
                                   </VStack>

@@ -115,7 +115,7 @@ const NavLink = ({ href, children, isActive }: NavLinkProps) => {
       }}
       bg={isActive ? undefined : 'transparent'}
       bgGradient={isActive ? 'linear(to-r, brand.600, accent.600)' : undefined}
-      color={isActive ? 'white' : 'var(--text-secondary)'}
+      color={isActive ? 'white' : 'var(--fg-secondary)'}
       fontWeight={isActive ? 'semibold' : 'medium'}
       transition="all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
       boxShadow={isActive ? '0 0 15px var(--accent-glow)' : 'none'}
@@ -144,7 +144,7 @@ const NavDropdown = ({ label, icon, items, isActive }: NavDropdownProps) => {
         rounded="lg"
         bg={isActive ? undefined : 'transparent'}
         bgGradient={isActive ? 'linear(to-r, brand.600, accent.600)' : undefined}
-        color={isActive ? 'white' : 'var(--text-secondary)'}
+        color={isActive ? 'white' : 'var(--fg-secondary)'}
         fontWeight={isActive ? 'semibold' : 'medium'}
         transition="all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
         boxShadow={isActive ? '0 0 15px var(--accent-glow)' : 'none'}
@@ -161,7 +161,7 @@ const NavDropdown = ({ label, icon, items, isActive }: NavDropdownProps) => {
         </HStack>
       </MenuButton>
       <MenuList
-        bg="surface.default"
+        bg="bg.canvas"
         shadow="xl"
         border="1px"
         borderColor="border.default"
@@ -283,7 +283,7 @@ export default function TopNavigation() {
 
   return (
     <Box
-      bg="bg.secondary"
+      bg="bg.canvas"
       px={6}
       borderBottom="1px"
       borderColor="border.default"
@@ -389,7 +389,7 @@ export default function TopNavigation() {
                   <ChevronDownIcon color="text.secondary" />
                 </HStack>
               </MenuButton>
-              <MenuList bg="surface.default" borderColor="border.default" rounded="xl">
+              <MenuList bg="bg.canvas" borderColor="border.default" rounded="xl">
                 <Box px={3} py={2}>
                   <Text fontSize="sm" fontWeight="medium" color="text.primary">
                     {user?.email}

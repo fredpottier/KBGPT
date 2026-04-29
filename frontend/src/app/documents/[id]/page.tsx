@@ -166,7 +166,7 @@ export default function DocumentDetailPage() {
               <Text fontSize="xl" fontWeight="semibold">
                 {document.title || document.filename}
               </Text>
-              <Text fontSize="sm" color="gray.600">
+              <Text fontSize="sm" color="fg.secondary">
                 {document.filename}
               </Text>
             </VStack>
@@ -182,19 +182,19 @@ export default function DocumentDetailPage() {
               <Text fontWeight="semibold" mb={2}>Basic Information</Text>
               <VStack align="stretch" spacing={2}>
                 <Flex justify="space-between">
-                  <Text color="gray.600">File Type:</Text>
+                  <Text color="fg.secondary">File Type:</Text>
                   <Text fontWeight="medium">{document.file_type.toUpperCase()}</Text>
                 </Flex>
                 <Flex justify="space-between">
-                  <Text color="gray.600">File Size:</Text>
+                  <Text color="fg.secondary">File Size:</Text>
                   <Text fontWeight="medium">{formatFileSize(document.file_size)}</Text>
                 </Flex>
                 <Flex justify="space-between">
-                  <Text color="gray.600">Uploaded:</Text>
+                  <Text color="fg.secondary">Uploaded:</Text>
                   <Text fontWeight="medium">{formatDate(document.created_at)}</Text>
                 </Flex>
                 <Flex justify="space-between">
-                  <Text color="gray.600">Last Updated:</Text>
+                  <Text color="fg.secondary">Last Updated:</Text>
                   <Text fontWeight="medium">{formatDate(document.updated_at)}</Text>
                 </Flex>
               </VStack>
@@ -209,19 +209,19 @@ export default function DocumentDetailPage() {
                   <VStack align="stretch" spacing={2}>
                     {document.metadata.pages && (
                       <Flex justify="space-between">
-                        <Text color="gray.600">Pages:</Text>
+                        <Text color="fg.secondary">Pages:</Text>
                         <Text fontWeight="medium">{document.metadata.pages}</Text>
                       </Flex>
                     )}
                     {document.metadata.word_count && (
                       <Flex justify="space-between">
-                        <Text color="gray.600">Word Count:</Text>
+                        <Text color="fg.secondary">Word Count:</Text>
                         <Text fontWeight="medium">{document.metadata.word_count.toLocaleString()}</Text>
                       </Flex>
                     )}
                     {document.metadata.language && (
                       <Flex justify="space-between">
-                        <Text color="gray.600">Language:</Text>
+                        <Text color="fg.secondary">Language:</Text>
                         <Text fontWeight="medium">{document.metadata.language}</Text>
                       </Flex>
                     )}
@@ -238,7 +238,7 @@ export default function DocumentDetailPage() {
                   <Text fontWeight="semibold" mb={2}>Content Preview</Text>
                   <Box
                     p={4}
-                    bg="gray.50"
+                    bg="bg.surface"
                     borderRadius="md"
                     maxH="300px"
                     overflow="auto"

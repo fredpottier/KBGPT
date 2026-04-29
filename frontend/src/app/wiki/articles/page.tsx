@@ -246,7 +246,7 @@ export default function WikiArticlesPage() {
                       <Text color="text.muted" fontSize="xs">{a.sections_count} sections</Text>
                     </HStack>
                     <HStack>
-                      <Box flex={1} bg="gray.700" rounded="full" h="4px">
+                      <Box flex={1} bg="bg.surface-alt" rounded="full" h="4px">
                         <Box
                           bg={`${confidenceColor(a.generation_confidence)}.400`}
                           h="4px"

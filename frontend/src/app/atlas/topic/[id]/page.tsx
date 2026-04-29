@@ -69,7 +69,7 @@ export default function AtlasArticlePage() {
   if (loading) {
     return (
       <Container maxW="900px" py={12}>
-        <VStack><Spinner size="xl" color="var(--accent-primary)" /></VStack>
+        <VStack><Spinner size="xl" color="var(--accent)" /></VStack>
       </Container>
     )
   }
@@ -77,18 +77,18 @@ export default function AtlasArticlePage() {
   if (!article || article.title === 'Not found') {
     return (
       <Container maxW="900px" py={12}>
-        <Text color="var(--text-secondary)">Article non trouve.</Text>
+        <Text color="var(--fg-secondary)">Article non trouve.</Text>
       </Container>
     )
   }
 
   return (
-    <Box minH="100vh" bg="var(--bg-primary)">
+    <Box minH="100vh" bg="var(--bg-canvas)">
       <Container maxW="900px" py={8}>
         {/* Breadcrumb */}
-        <Breadcrumb mb={6} fontSize="sm" color="var(--text-muted)">
+        <Breadcrumb mb={6} fontSize="sm" color="var(--fg-muted)">
           <BreadcrumbItem>
-            <BreadcrumbLink as={NextLink} href="/atlas" color="var(--accent-primary)">
+            <BreadcrumbLink as={NextLink} href="/atlas" color="var(--accent)">
               <HStack spacing={1}><Icon as={FiBookOpen} boxSize={3} /><Text>Atlas</Text></HStack>
             </BreadcrumbLink>
           </BreadcrumbItem>
@@ -99,12 +99,12 @@ export default function AtlasArticlePage() {
 
         {/* Article header */}
         <VStack spacing={4} align="start" mb={8}>
-          <Heading size="lg" color="var(--text-primary)" lineHeight="1.3">
+          <Heading size="lg" color="var(--fg-primary)" lineHeight="1.3">
             {article.title}
           </Heading>
 
           <HStack spacing={3} flexWrap="wrap">
-            <Badge px={2} py={0.5} rounded="md" bg="rgba(99,102,241,0.1)" color="var(--accent-primary)" fontSize="xs">
+            <Badge px={2} py={0.5} rounded="md" bg="rgba(99,102,241,0.1)" color="var(--accent)" fontSize="xs">
               <HStack spacing={1}><Icon as={FiDatabase} boxSize={3} /><Text>{article.total_claims} faits</Text></HStack>
             </Badge>
             <Badge px={2} py={0.5} rounded="md" bg="rgba(16,185,129,0.1)" color="#10B981" fontSize="xs">
@@ -120,9 +120,9 @@ export default function AtlasArticlePage() {
             <Box
               p={5} rounded="xl" w="100%"
               bg="rgba(99,102,241,0.05)"
-              borderLeft="4px solid var(--accent-primary)"
+              borderLeft="4px solid var(--accent)"
             >
-              <Text fontSize="sm" color="var(--text-secondary)" lineHeight="1.7" fontStyle="italic">
+              <Text fontSize="sm" color="var(--fg-secondary)" lineHeight="1.7" fontStyle="italic">
                 {article.executive_summary}
               </Text>
             </Box>
@@ -136,7 +136,7 @@ export default function AtlasArticlePage() {
           {article.sections.map((section, i) => (
             <Box key={section.perspective_id} id={`section-${i}`}>
               <HStack mb={3} spacing={2}>
-                <Heading size="md" color="var(--text-primary)">
+                <Heading size="md" color="var(--fg-primary)">
                   {section.title}
                 </Heading>
                 <Badge variant="subtle" colorScheme="gray" fontSize="10px">
@@ -145,13 +145,13 @@ export default function AtlasArticlePage() {
               </HStack>
               {section.content ? (
                 <Text
-                  color="var(--text-secondary)" fontSize="sm" lineHeight="1.8"
+                  color="var(--fg-secondary)" fontSize="sm" lineHeight="1.8"
                   whiteSpace="pre-wrap"
                 >
                   {section.content}
                 </Text>
               ) : (
-                <Text color="var(--text-muted)" fontSize="sm" fontStyle="italic">
+                <Text color="var(--fg-muted)" fontSize="sm" fontStyle="italic">
                   Contenu en cours de generation...
                 </Text>
               )}
@@ -165,8 +165,8 @@ export default function AtlasArticlePage() {
             <Divider borderColor="var(--border-default)" my={8} />
             <VStack spacing={4} align="start">
               <HStack spacing={2}>
-                <Icon as={FiLink} color="var(--text-muted)" />
-                <Heading size="sm" color="var(--text-primary)">Articles connexes</Heading>
+                <Icon as={FiLink} color="var(--fg-muted)" />
+                <Heading size="sm" color="var(--fg-primary)">Articles connexes</Heading>
               </HStack>
               <VStack spacing={2} align="stretch" w="100%">
                 {article.related_topics.map(rel => {
@@ -175,17 +175,17 @@ export default function AtlasArticlePage() {
                     <NextLink key={rel.topic_id} href={`/atlas/topic/${rel.topic_id}`} passHref>
                       <HStack
                         p={3} rounded="lg" cursor="pointer"
-                        bg="var(--bg-secondary)" borderWidth="1px" borderColor="var(--border-default)"
-                        _hover={{ borderColor: 'var(--accent-primary)' }}
+                        bg="var(--bg-surface)" borderWidth="1px" borderColor="var(--border-default)"
+                        _hover={{ borderColor: 'var(--accent)' }}
                         transition="all 0.15s"
                       >
                         <Badge colorScheme={roleInfo.color} variant="subtle" fontSize="10px" minW="70px" textAlign="center">
                           {roleInfo.label}
                         </Badge>
-                        <Text fontSize="sm" color="var(--text-primary)" flex={1} noOfLines={1}>
+                        <Text fontSize="sm" color="var(--fg-primary)" flex={1} noOfLines={1}>
                           {rel.title}
                         </Text>
-                        <Icon as={FiArrowLeft} color="var(--text-muted)" transform="rotate(180deg)" />
+                        <Icon as={FiArrowLeft} color="var(--fg-muted)" transform="rotate(180deg)" />
                       </HStack>
                     </NextLink>
                   )
@@ -197,7 +197,7 @@ export default function AtlasArticlePage() {
 
         {/* Footer */}
         <Box mt={10} pt={6} borderTopWidth="1px" borderColor="var(--border-default)">
-          <Text fontSize="xs" color="var(--text-muted)" textAlign="center">
+          <Text fontSize="xs" color="var(--fg-muted)" textAlign="center">
             Article genere automatiquement a partir de {article.total_claims} faits verifies
             extraits de {article.total_docs} documents source.
             {article.generated_at && ` Derniere generation : ${new Date(article.generated_at).toLocaleDateString('fr-FR')}.`}

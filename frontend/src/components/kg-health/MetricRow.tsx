@@ -22,7 +22,7 @@ export function MetricRow({ metric, onDrilldown }: MetricRowProps) {
       <HStack justify="space-between" align="center" spacing={4}>
         <VStack align="start" spacing={0.5} flex={1}>
           <HStack spacing={2}>
-            <Text fontSize="sm" color="var(--text-primary)" fontWeight="600">
+            <Text fontSize="sm" color="var(--fg-primary)" fontWeight="600">
               {metric.label}
             </Text>
             <Badge
@@ -48,7 +48,7 @@ export function MetricRow({ metric, onDrilldown }: MetricRowProps) {
               </Button>
             )}
           </HStack>
-          <Text fontSize="xs" color="var(--text-muted)">
+          <Text fontSize="xs" color="var(--fg-muted)">
             {metric.description}
           </Text>
         </VStack>
@@ -58,14 +58,14 @@ export function MetricRow({ metric, onDrilldown }: MetricRowProps) {
             value={pctValue}
             size="sm"
             borderRadius="full"
-            bg="var(--bg-primary)"
+            bg="var(--bg-canvas)"
             sx={{
               '& > div': {
                 background: zoneGradient(metric.status.zone),
               },
             }}
           />
-          <Text fontSize="2xs" color="var(--text-muted)" textAlign="right" mt={0.5}>
+          <Text fontSize="2xs" color="var(--fg-muted)" textAlign="right" mt={0.5}>
             poids {(metric.weight * 100).toFixed(0)}%
           </Text>
         </Box>

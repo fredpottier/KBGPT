@@ -57,7 +57,7 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
     <Box mt={6}>
       <Text
         fontSize="xs"
-        color="var(--text-muted)"
+        color="var(--fg-muted)"
         textTransform="uppercase"
         letterSpacing="wide"
         mb={3}
@@ -68,7 +68,7 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
       <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={4} mb={4}>
         {/* Worst docs */}
         <Box
-          bg="var(--bg-secondary)"
+          bg="var(--bg-surface)"
           borderRadius="xl"
           p={5}
           borderWidth="1px"
@@ -77,7 +77,7 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
           <HStack justify="space-between" mb={3}>
             <HStack spacing={2}>
               <Icon as={FiFileText} color="red.400" boxSize={4} />
-              <Text fontSize="sm" fontWeight="600" color="var(--text-primary)">
+              <Text fontSize="sm" fontWeight="600" color="var(--fg-primary)">
                 Documents mal extraits
               </Text>
             </HStack>
@@ -93,7 +93,7 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
           </HStack>
 
           {data.worst_docs.length === 0 ? (
-            <Text fontSize="sm" color="var(--text-muted)">
+            <Text fontSize="sm" color="var(--fg-muted)">
               Aucun document detecte.
             </Text>
           ) : (
@@ -101,7 +101,7 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
               {data.worst_docs.slice(0, 5).map((d) => (
                 <Box key={d.doc_id}>
                   <HStack justify="space-between" mb={1}>
-                    <Text fontSize="xs" color="var(--text-primary)" noOfLines={1} flex={1}>
+                    <Text fontSize="xs" color="var(--fg-primary)" noOfLines={1} flex={1}>
                       {formatDocId(d.doc_id)}
                     </Text>
                     <HStack spacing={2}>
@@ -120,7 +120,7 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
                     value={d.linkage_rate * 100}
                     size="xs"
                     borderRadius="full"
-                    bg="var(--bg-primary)"
+                    bg="var(--bg-canvas)"
                     colorScheme={d.linkage_rate < 0.1 ? 'red' : d.linkage_rate < 0.3 ? 'orange' : 'yellow'}
                   />
                 </Box>
@@ -131,7 +131,7 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
 
         {/* Top hubs */}
         <Box
-          bg="var(--bg-secondary)"
+          bg="var(--bg-surface)"
           borderRadius="xl"
           p={5}
           borderWidth="1px"
@@ -140,7 +140,7 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
           <HStack justify="space-between" mb={3}>
             <HStack spacing={2}>
               <Icon as={FiTarget} color="orange.400" boxSize={4} />
-              <Text fontSize="sm" fontWeight="600" color="var(--text-primary)">
+              <Text fontSize="sm" fontWeight="600" color="var(--fg-primary)">
                 Entites dominantes
               </Text>
             </HStack>
@@ -156,18 +156,18 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
           </HStack>
 
           {data.top_hubs.length === 0 ? (
-            <Text fontSize="sm" color="var(--text-muted)">
+            <Text fontSize="sm" color="var(--fg-muted)">
               Aucun hub notable.
             </Text>
           ) : (
             <VStack spacing={2} align="stretch">
               {data.top_hubs.slice(0, 5).map((h) => (
                 <HStack key={h.entity} justify="space-between" py={1}>
-                  <Text fontSize="xs" color="var(--text-primary)" noOfLines={1} flex={1}>
+                  <Text fontSize="xs" color="var(--fg-primary)" noOfLines={1} flex={1}>
                     {h.entity}
                   </Text>
                   <HStack spacing={2}>
-                    <Text fontSize="2xs" color="var(--text-muted)">
+                    <Text fontSize="2xs" color="var(--fg-muted)">
                       {h.claims} claims
                     </Text>
                     <Badge
@@ -188,7 +188,7 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
         {/* Singletons / composantes */}
         {data.singleton_stats && (
           <Box
-            bg="var(--bg-secondary)"
+            bg="var(--bg-surface)"
             borderRadius="xl"
             p={5}
             borderWidth="1px"
@@ -196,31 +196,31 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
           >
             <HStack spacing={2} mb={3}>
               <Icon as={FiGitBranch} color="purple.400" boxSize={4} />
-              <Text fontSize="sm" fontWeight="600" color="var(--text-primary)">
+              <Text fontSize="sm" fontWeight="600" color="var(--fg-primary)">
                 Fragmentation du graphe
               </Text>
             </HStack>
 
             <SimpleGrid columns={2} spacing={3}>
               <Box>
-                <Text fontSize="xs" color="var(--text-muted)">
+                <Text fontSize="xs" color="var(--fg-muted)">
                   Composante geante
                 </Text>
-                <Text fontSize="lg" fontWeight="700" color="var(--text-primary)">
+                <Text fontSize="lg" fontWeight="700" color="var(--fg-primary)">
                   {data.singleton_stats.giant_component_pct.toFixed(1)}%
                 </Text>
-                <Text fontSize="2xs" color="var(--text-muted)">
+                <Text fontSize="2xs" color="var(--fg-muted)">
                   {data.singleton_stats.giant_component_size.toLocaleString()} nodes
                 </Text>
               </Box>
               <Box>
-                <Text fontSize="xs" color="var(--text-muted)">
+                <Text fontSize="xs" color="var(--fg-muted)">
                   Singletons isoles
                 </Text>
                 <Text fontSize="lg" fontWeight="700" color="orange.400">
                   {data.singleton_stats.singletons.toLocaleString()}
                 </Text>
-                <Text fontSize="2xs" color="var(--text-muted)">
+                <Text fontSize="2xs" color="var(--fg-muted)">
                   / {data.singleton_stats.total_components} composantes
                 </Text>
               </Box>
@@ -231,7 +231,7 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
         {/* Perspective */}
         {perspectiveInfo && (
           <Box
-            bg="var(--bg-secondary)"
+            bg="var(--bg-surface)"
             borderRadius="xl"
             p={5}
             borderWidth="1px"
@@ -239,7 +239,7 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
           >
             <HStack spacing={2} mb={3}>
               <Icon as={FiClock} color={zoneColor(perspectiveInfo.zone)} boxSize={4} />
-              <Text fontSize="sm" fontWeight="600" color="var(--text-primary)">
+              <Text fontSize="sm" fontWeight="600" color="var(--fg-primary)">
                 Couche Perspective
               </Text>
             </HStack>
@@ -253,7 +253,7 @@ export function ActionablesPanel({ data, onDrilldown }: Props) {
                 >
                   {perspectiveInfo.label}
                 </Text>
-                <Text fontSize="xs" color="var(--text-muted)">
+                <Text fontSize="xs" color="var(--fg-muted)">
                   {data.perspective_new_claims} claims non integrees
                 </Text>
               </VStack>

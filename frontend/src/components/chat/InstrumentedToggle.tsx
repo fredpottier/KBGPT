@@ -102,7 +102,7 @@ export default function InstrumentedToggle({
       label={firstVisitTooltip}
       placement="bottom"
       hasArrow
-      bg="gray.700"
+      bg="bg.surface-alt"
       color="white"
       fontSize="xs"
       px={3}

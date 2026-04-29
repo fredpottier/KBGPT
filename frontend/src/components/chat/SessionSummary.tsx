@@ -160,8 +160,8 @@ export default function SessionSummary({ sessionId, sessionTitle }: SessionSumma
             {summaryMutation.isPending ? (
               <VStack py={10} spacing={4}>
                 <Spinner size="xl" color="blue.500" />
-                <Text color="gray.500">Generation du resume en cours...</Text>
-                <Text fontSize="sm" color="gray.400">
+                <Text color="fg.muted">Generation du resume en cours...</Text>
+                <Text fontSize="sm" color="fg.muted">
                   Analyse de la conversation et extraction des points cles
                 </Text>
               </VStack>
@@ -222,7 +222,7 @@ export default function SessionSummary({ sessionId, sessionTitle }: SessionSumma
                               <Box>
                                 <Text>{kp.point}</Text>
                                 {kp.source && (
-                                  <Text fontSize="xs" color="gray.500" fontStyle="italic">
+                                  <Text fontSize="xs" color="fg.muted" fontStyle="italic">
                                     Source: {kp.source}
                                   </Text>
                                 )}
@@ -294,13 +294,13 @@ export default function SessionSummary({ sessionId, sessionTitle }: SessionSumma
                 )}
 
                 {/* Generation info */}
-                <Text fontSize="xs" color="gray.400" textAlign="right">
+                <Text fontSize="xs" color="fg.muted" textAlign="right">
                   Genere le {formatDate(summary.generated_at)}
                 </Text>
               </VStack>
             ) : (
               <VStack py={8} spacing={6}>
-                <Text color="gray.600" textAlign="center">
+                <Text color="fg.secondary" textAlign="center">
                   Choisissez le format de compte-rendu souhaite puis cliquez sur <strong>Generer</strong>
                 </Text>
                 <VStack spacing={3} align="stretch" w="full" maxW="400px">
@@ -315,7 +315,7 @@ export default function SessionSummary({ sessionId, sessionTitle }: SessionSumma
                     _hover={{ borderColor: 'blue.300' }}
                   >
                     <Text fontWeight="semibold">Business</Text>
-                    <Text fontSize="sm" color="gray.500">
+                    <Text fontSize="sm" color="fg.muted">
                       Points cles, actions recommandees, vue synthetique
                     </Text>
                   </Box>
@@ -330,7 +330,7 @@ export default function SessionSummary({ sessionId, sessionTitle }: SessionSumma
                     _hover={{ borderColor: 'blue.300' }}
                   >
                     <Text fontWeight="semibold">Technique</Text>
-                    <Text fontSize="sm" color="gray.500">
+                    <Text fontSize="sm" color="fg.muted">
                       Details techniques, sources, references documentaires
                     </Text>
                   </Box>
@@ -345,7 +345,7 @@ export default function SessionSummary({ sessionId, sessionTitle }: SessionSumma
                     _hover={{ borderColor: 'blue.300' }}
                   >
                     <Text fontWeight="semibold">Executive</Text>
-                    <Text fontSize="sm" color="gray.500">
+                    <Text fontSize="sm" color="fg.muted">
                       Resume ultra-concis pour decision rapide
                     </Text>
                   </Box>

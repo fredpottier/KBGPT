@@ -147,7 +147,7 @@ function ContradictionCard({ item }: { item: Contradiction }) {
               </Badge>
             ))}
             {item.entities.length > 3 && (
-              <Text fontSize="2xs" color="var(--text-muted)">+{item.entities.length - 3}</Text>
+              <Text fontSize="2xs" color="var(--fg-muted)">+{item.entities.length - 3}</Text>
             )}
           </HStack>
         )}
@@ -156,41 +156,41 @@ function ContradictionCard({ item }: { item: Contradiction }) {
       {/* Two claims face-to-face */}
       <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
         {/* Claim 1 */}
-        <Box bg="var(--bg-primary)" borderRadius="lg" p={4} borderWidth="1px" borderColor="rgba(239, 68, 68, 0.15)">
+        <Box bg="var(--bg-canvas)" borderRadius="lg" p={4} borderWidth="1px" borderColor="rgba(239, 68, 68, 0.15)">
           <HStack spacing={2} mb={2}>
             <Box w="8px" h="8px" borderRadius="full" bg="red.400" />
-            <Text fontSize="2xs" color="var(--text-muted)" fontWeight="600" textTransform="uppercase">Source A</Text>
+            <Text fontSize="2xs" color="var(--fg-muted)" fontWeight="600" textTransform="uppercase">Source A</Text>
           </HStack>
-          <Text fontSize="sm" color="var(--text-primary)" lineHeight="tall" mb={2}>
+          <Text fontSize="sm" color="var(--fg-primary)" lineHeight="tall" mb={2}>
             {item.claim1.text}
           </Text>
           <HStack spacing={2} flexWrap="wrap">
-            <Icon as={FiFileText} color="var(--text-muted)" boxSize={3} />
-            <Text fontSize="2xs" color="var(--text-muted)" noOfLines={1}>
+            <Icon as={FiFileText} color="var(--fg-muted)" boxSize={3} />
+            <Text fontSize="2xs" color="var(--fg-muted)" noOfLines={1}>
               {formatDocId(item.claim1.doc_id)}
             </Text>
             {item.claim1.page && (
-              <Text fontSize="2xs" color="var(--text-muted)">p.{item.claim1.page}</Text>
+              <Text fontSize="2xs" color="var(--fg-muted)">p.{item.claim1.page}</Text>
             )}
           </HStack>
         </Box>
 
         {/* Claim 2 */}
-        <Box bg="var(--bg-primary)" borderRadius="lg" p={4} borderWidth="1px" borderColor="rgba(59, 130, 246, 0.15)">
+        <Box bg="var(--bg-canvas)" borderRadius="lg" p={4} borderWidth="1px" borderColor="rgba(59, 130, 246, 0.15)">
           <HStack spacing={2} mb={2}>
             <Box w="8px" h="8px" borderRadius="full" bg="blue.400" />
-            <Text fontSize="2xs" color="var(--text-muted)" fontWeight="600" textTransform="uppercase">Source B</Text>
+            <Text fontSize="2xs" color="var(--fg-muted)" fontWeight="600" textTransform="uppercase">Source B</Text>
           </HStack>
-          <Text fontSize="sm" color="var(--text-primary)" lineHeight="tall" mb={2}>
+          <Text fontSize="sm" color="var(--fg-primary)" lineHeight="tall" mb={2}>
             {item.claim2.text}
           </Text>
           <HStack spacing={2} flexWrap="wrap">
-            <Icon as={FiFileText} color="var(--text-muted)" boxSize={3} />
-            <Text fontSize="2xs" color="var(--text-muted)" noOfLines={1}>
+            <Icon as={FiFileText} color="var(--fg-muted)" boxSize={3} />
+            <Text fontSize="2xs" color="var(--fg-muted)" noOfLines={1}>
               {formatDocId(item.claim2.doc_id)}
             </Text>
             {item.claim2.page && (
-              <Text fontSize="2xs" color="var(--text-muted)">p.{item.claim2.page}</Text>
+              <Text fontSize="2xs" color="var(--fg-muted)">p.{item.claim2.page}</Text>
             )}
           </HStack>
         </Box>
@@ -202,10 +202,10 @@ function ContradictionCard({ item }: { item: Contradiction }) {
           <Button
             size="xs"
             variant="ghost"
-            color="var(--text-muted)"
+            color="var(--fg-muted)"
             onClick={onToggle}
             rightIcon={isOpen ? <FiChevronUp /> : <FiChevronDown />}
-            _hover={{ color: 'var(--text-primary)' }}
+            _hover={{ color: 'var(--fg-primary)' }}
           >
             Citations verbatim
           </Button>
@@ -213,14 +213,14 @@ function ContradictionCard({ item }: { item: Contradiction }) {
             <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3} mt={2}>
               {item.claim1.verbatim && (
                 <Box bg="rgba(239, 68, 68, 0.04)" borderRadius="md" p={3} borderLeftWidth="2px" borderLeftColor="red.800">
-                  <Text fontSize="xs" color="var(--text-secondary)" fontStyle="italic" lineHeight="tall">
+                  <Text fontSize="xs" color="var(--fg-secondary)" fontStyle="italic" lineHeight="tall">
                     "{item.claim1.verbatim}"
                   </Text>
                 </Box>
               )}
               {item.claim2.verbatim && (
                 <Box bg="rgba(59, 130, 246, 0.04)" borderRadius="md" p={3} borderLeftWidth="2px" borderLeftColor="blue.800">
-                  <Text fontSize="xs" color="var(--text-secondary)" fontStyle="italic" lineHeight="tall">
+                  <Text fontSize="xs" color="var(--fg-secondary)" fontStyle="italic" lineHeight="tall">
                     "{item.claim2.verbatim}"
                   </Text>
                 </Box>
@@ -282,11 +282,11 @@ export default function ContradictionsPage() {
       <VStack align="start" spacing={1} mb={6}>
         <HStack spacing={3}>
           <Icon as={FiAlertTriangle} color="orange.400" boxSize={5} />
-          <Text fontSize="xl" fontWeight="700" color="var(--text-primary)">
+          <Text fontSize="xl" fontWeight="700" color="var(--fg-primary)">
             Contradiction Explorer
           </Text>
         </HStack>
-        <Text fontSize="sm" color="var(--text-muted)">
+        <Text fontSize="sm" color="var(--fg-muted)">
           Navigation interactive dans les tensions detectees entre sources documentaires
         </Text>
       </VStack>
@@ -315,8 +315,8 @@ export default function ContradictionsPage() {
       {/* Filters */}
       <HStack spacing={3} mb={6} flexWrap="wrap">
         <Select
-          size="sm" w="200px" bg="var(--bg-secondary)" borderColor="var(--border-default)"
-          color="var(--text-primary)" value={natureFilter}
+          size="sm" w="200px" bg="var(--bg-surface)" borderColor="var(--border-default)"
+          color="var(--fg-primary)" value={natureFilter}
           onChange={(e) => setNatureFilter(e.target.value)}
           sx={{ option: { bg: '#12121a', color: '#f4f4f5' } }}
         >
@@ -329,8 +329,8 @@ export default function ContradictionsPage() {
         </Select>
 
         <Select
-          size="sm" w="160px" bg="var(--bg-secondary)" borderColor="var(--border-default)"
-          color="var(--text-primary)" value={levelFilter}
+          size="sm" w="160px" bg="var(--bg-surface)" borderColor="var(--border-default)"
+          color="var(--fg-primary)" value={levelFilter}
           onChange={(e) => setLevelFilter(e.target.value)}
           sx={{ option: { bg: '#12121a', color: '#f4f4f5' } }}
         >
@@ -340,8 +340,8 @@ export default function ContradictionsPage() {
         </Select>
 
         <Input
-          size="sm" w="200px" bg="var(--bg-secondary)" borderColor="var(--border-default)"
-          color="var(--text-primary)" placeholder="Filtrer par concept..."
+          size="sm" w="200px" bg="var(--bg-surface)" borderColor="var(--border-default)"
+          color="var(--fg-primary)" placeholder="Filtrer par concept..."
           value={entityFilter}
           onChange={(e) => setEntityFilter(e.target.value)}
         />
@@ -351,15 +351,15 @@ export default function ContradictionsPage() {
       {loading ? (
         <VStack py={16} spacing={4}>
           <Spinner size="lg" color="brand.400" thickness="3px" />
-          <Text color="var(--text-muted)" fontSize="sm">Chargement des contradictions...</Text>
+          <Text color="var(--fg-muted)" fontSize="sm">Chargement des contradictions...</Text>
         </VStack>
       ) : error ? (
         <Box bg="rgba(239, 68, 68, 0.08)" border="1px solid rgba(239, 68, 68, 0.2)" borderRadius="xl" p={6}>
           <Text color="red.400">{error}</Text>
         </Box>
       ) : data && data.contradictions.length === 0 ? (
-        <Box bg="var(--bg-secondary)" borderRadius="xl" p={8} textAlign="center" borderWidth="1px" borderColor="var(--border-default)">
-          <Text color="var(--text-muted)">Aucune contradiction trouvee avec ces filtres.</Text>
+        <Box bg="var(--bg-surface)" borderRadius="xl" p={8} textAlign="center" borderWidth="1px" borderColor="var(--border-default)">
+          <Text color="var(--fg-muted)">Aucune contradiction trouvee avec ces filtres.</Text>
         </Box>
       ) : data && (
         <>
@@ -372,18 +372,18 @@ export default function ContradictionsPage() {
           {/* Pagination */}
           <HStack justify="center" mt={6} spacing={4}>
             <Button
-              size="sm" variant="ghost" color="var(--text-muted)"
+              size="sm" variant="ghost" color="var(--fg-muted)"
               leftIcon={<FiChevronLeft />}
               isDisabled={page === 0}
               onClick={() => setPage(p => p - 1)}
             >
               Precedent
             </Button>
-            <Text fontSize="sm" color="var(--text-muted)">
+            <Text fontSize="sm" color="var(--fg-muted)">
               {page * pageSize + 1}-{Math.min((page + 1) * pageSize, data.total)} sur {data.total}
             </Text>
             <Button
-              size="sm" variant="ghost" color="var(--text-muted)"
+              size="sm" variant="ghost" color="var(--fg-muted)"
               rightIcon={<FiChevronRight />}
               isDisabled={(page + 1) * pageSize >= data.total}
               onClick={() => setPage(p => p + 1)}
