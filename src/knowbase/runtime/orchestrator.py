@@ -240,43 +240,48 @@ class RuntimeOrchestrator:
             relations = self._retrieve_kg_relations(plan)
         else:
             # 3.b Pipeline régime standard
-            if plan.regime in (Regime.RAG_LED, Regime.HYBRID):
-                chunks = self._retrieve_qdrant(resolved.raw_query, plan)
+            # Qdrant est appelé d'abord dans TOUS les cas — y compris KG_LED — pour
+            # fournir un ancrage sémantique aux requêtes Cypher (sinon le KG retourne
+            # ses top relations par confidence, sans rapport avec la query utilisateur).
+            chunks = self._retrieve_qdrant(resolved.raw_query, plan)
 
-                # Auto-escalation après retrieval RAG_LED
-                if plan.regime == Regime.RAG_LED:
-                    # Signaux RAG (lifecycle + temporal ambiguity)
-                    plan = self.evidence_planner.maybe_escalate(plan, chunks)
+            # Auto-escalation après retrieval RAG_LED
+            if plan.regime == Regime.RAG_LED:
+                # Signaux RAG (lifecycle + temporal ambiguity)
+                plan = self.evidence_planner.maybe_escalate(plan, chunks)
 
-                    # Signaux KG additionnels (UNRESOLVED_CONFLICT + MULTI_VERSION)
-                    if not plan.escalation_triggered and chunks:
-                        top_ids = [c.get("claim_id") for c in chunks[:5] if c.get("claim_id")]
-                        kg_signals = self.evidence_planner.detect_kg_signals(
-                            top_ids, kg_lookup_fn=self._kg_lookup_for_signals
-                        )
-                        if kg_signals:
-                            plan = self.evidence_planner.maybe_escalate(plan, chunks, signals=kg_signals)
+                # Signaux KG additionnels (UNRESOLVED_CONFLICT + MULTI_VERSION)
+                if not plan.escalation_triggered and chunks:
+                    top_ids = [c.get("claim_id") for c in chunks[:5] if c.get("claim_id")]
+                    kg_signals = self.evidence_planner.detect_kg_signals(
+                        top_ids, kg_lookup_fn=self._kg_lookup_for_signals
+                    )
+                    if kg_signals:
+                        plan = self.evidence_planner.maybe_escalate(plan, chunks, signals=kg_signals)
 
-                    if plan.escalation_triggered:
-                        logger.info(f"[Runtime] Escalation: {plan.escalation_reason}")
+                if plan.escalation_triggered:
+                    logger.info(f"[Runtime] Escalation: {plan.escalation_reason}")
 
-            # Si KG_LED (initial ou après escalation) → traverser le KG
+            # Si KG_LED (initial ou après escalation) ou HYBRID → traverser le KG
+            # avec ancrage sémantique sur les claim_ids retournés par Qdrant.
             if plan.regime in (Regime.KG_LED, Regime.HYBRID):
-                relations = self._retrieve_kg_relations(plan)
+                seed_ids = [c.get("claim_id") for c in chunks if c.get("claim_id")]
+                relations = self._retrieve_kg_relations(plan, seed_claim_ids=seed_ids or None)
 
                 if plan.regime == Regime.HYBRID:
-                    # R5 — fusion HYBRID : on a déjà chunks (RAG branch supérieure),
-                    # on enrichit avec les chunks issus du KG traversal pour couverture
-                    # maximale (typique SYNTHESIS_SUMMARY).
+                    # R5 — fusion HYBRID : on a chunks RAG, on enrichit avec les
+                    # chunks issus du KG traversal pour couverture maximale.
                     kg_chunks = self._retrieve_chunks_from_relations(relations)
                     chunks = self._fuse_rag_kg_chunks(chunks, kg_chunks)
                 else:
-                    # KG_LED pur : récupère les chunks depuis le traversal
-                    if not chunks:
+                    # KG_LED : on garde les chunks RAG (pertinents sémantiquement)
+                    # ET on enrichit avec les chunks issus des relations seedées.
+                    # Si aucune relation seedée trouvée, fallback top-confidence.
+                    if not relations:
+                        relations = self._retrieve_kg_relations(plan)  # sans seed
+                    # Si Qdrant n'a rien trouvé, dériver chunks depuis les relations
+                    if not chunks and relations:
                         chunks = self._retrieve_chunks_from_relations(relations)
-                        # Fallback : si pas de relations, faire un Qdrant pur
-                        if not chunks:
-                            chunks = self._retrieve_qdrant(resolved.raw_query, plan)
 
         # 4. Trust (avec persona thresholds si présents)
         persona_thresholds = None
@@ -534,11 +539,25 @@ class RuntimeOrchestrator:
     # Retrieval Cypher (KG_LED)
     # ------------------------------------------------------------------------
 
-    def _retrieve_kg_relations(self, plan: RetrievalPlan) -> list[dict]:
-        """Récupère les LOGICAL_RELATION pertinentes selon le plan."""
+    def _retrieve_kg_relations(
+        self,
+        plan: RetrievalPlan,
+        seed_claim_ids: Optional[list[str]] = None,
+    ) -> list[dict]:
+        """Récupère les LOGICAL_RELATION pertinentes selon le plan.
+
+        Si seed_claim_ids est fourni (typiquement les claim_ids retournés par
+        Qdrant pour la query), on filtre les relations à celles qui touchent
+        au moins un de ces claims — ancrage sémantique qui évite de remonter
+        des relations top-confidence sans rapport avec la query.
+        """
         with self.neo4j_driver.session() as s:
             # Construction du WHERE clauses
             where_clauses = ["a.tenant_id = $tid", "coalesce(r.legacy, false) = false"]
+
+            # Ancrage sémantique : au moins un côté doit toucher un seed
+            if seed_claim_ids:
+                where_clauses.append("(a.claim_id IN $seeds OR b.claim_id IN $seeds)")
 
             # Filtrage par type
             if plan.relation_types_filter:
@@ -561,6 +580,7 @@ class RuntimeOrchestrator:
                 "tid": self.tenant_id,
                 "types": plan.relation_types_filter or [],
                 "as_of": (plan.temporal_filter or {}).get("as_of_date"),
+                "seeds": seed_claim_ids or [],
             }
 
             query = f"""
