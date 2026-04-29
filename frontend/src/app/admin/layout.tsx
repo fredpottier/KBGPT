@@ -93,6 +93,7 @@ const ADMIN_SECTIONS: SidebarSection[] = [
     items: [
       { label: 'Corpus Intelligence', href: '/admin/corpus-intelligence', icon: FiBarChart2 },
       { label: 'Contradictions', href: '/admin/contradictions', icon: FiAlertTriangle },
+      { label: 'Relations V3.3', href: '/admin/relations', icon: FiActivity },
       { label: 'Audit Corpus', href: '/admin/corpus-audit', icon: FiActivity },
       { label: 'Benchmarks', href: '/admin/benchmarks', icon: FiBarChart2 },
     ],
