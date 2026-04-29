@@ -480,6 +480,16 @@ class RuntimeOrchestrator:
             }
             chunk_pool.append(chunk)
 
+        # Enrichissement structurel : les claims qui portent une SUPERSEDES /
+        # REAFFIRMS / EVOLVES_FROM dans les docs des top hits sont
+        # sémantiquement importants même si Qdrant les a ratés (texte court,
+        # vocabulaire technique). Le reranker triera selon la pertinence.
+        if chunk_pool:
+            top_docs = list({c.get("doc_id") for c in chunk_pool[:5] if c.get("doc_id")})
+            existing_ids = {c.get("claim_id") for c in chunk_pool if c.get("claim_id")}
+            kg_anchors = self._fetch_succession_anchors(top_docs, exclude_ids=existing_ids)
+            chunk_pool.extend(kg_anchors)
+
         # Re-rank avec cross-encoder (filet de sécurité : si indisponible, on garde l'ordre Qdrant)
         chunk_dicts = self._rerank_chunks(query, chunk_pool, top_k=plan.qdrant_top_k)
 
@@ -581,6 +591,52 @@ class RuntimeOrchestrator:
             f"(rerank score range: {out[0].get('score_rerank', 0):.3f} → "
             f"{out[-1].get('score_rerank', 0):.3f})"
         )
+        return out
+
+    def _fetch_succession_anchors(
+        self, doc_ids: list[str], exclude_ids: set[str], limit_per_doc: int = 5
+    ) -> list[dict]:
+        """Renvoie les claims de doc_ids qui portent une LOGICAL_RELATION de
+        type SUPERSEDES / REAFFIRMS / EVOLVES_FROM (non-legacy) — claims
+        structurellement importants pour les questions de cycle de vie.
+
+        Pas un anti-pattern : on cherche les claims qui SONT sources/cibles
+        d'une relation typée dans le KG, pas par regex sur leur texte.
+        """
+        if not doc_ids:
+            return []
+        with self.neo4j_driver.session() as s:
+            rows = s.run(
+                """
+                MATCH (c:Claim)-[r:LOGICAL_RELATION]-()
+                WHERE c.tenant_id = $tid
+                  AND c.doc_id IN $docs
+                  AND r.type IN ['SUPERSEDES', 'REAFFIRMS', 'EVOLVES_FROM']
+                  AND coalesce(r.legacy, false) = false
+                WITH c, r.type AS rel_type
+                RETURN DISTINCT c.claim_id AS claim_id, c.text AS text,
+                       c.doc_id AS doc_id, collect(DISTINCT rel_type) AS relation_types
+                LIMIT $lim
+                """,
+                tid=self.tenant_id,
+                docs=doc_ids,
+                lim=limit_per_doc * len(doc_ids),
+            ).data()
+        out = []
+        for r in rows:
+            cid = r["claim_id"]
+            if cid in exclude_ids:
+                continue
+            out.append({
+                "claim_id": cid,
+                "text": r["text"] or "",
+                "doc_id": r["doc_id"],
+                "score": 0.0,  # neutralise pour laisser le reranker arbitrer
+                "kg_anchor": True,
+                "kg_anchor_relations": r["relation_types"],
+            })
+        if out:
+            logger.info(f"[Runtime] +{len(out)} KG anchor chunks (SUPERSEDES/REAFFIRMS/EVOLVES_FROM)")
         return out
 
     def _fetch_claim_metadata(self, claim_ids: list[str]) -> dict[str, dict]:
