@@ -324,8 +324,15 @@ class RuntimeOrchestrator:
         )
         if not skip_synthesis:
             try:
+                # Pour les modes structurels, injecter le business_block en contexte
+                # (sinon le LLM ne voit que des chunks de texte sans la structure typée).
                 synthesized = self._synthesize_short_answer(
-                    question, chunks[:5], resolved=resolved, persona_profile=persona_profile
+                    question,
+                    chunks[:5],
+                    resolved=resolved,
+                    persona_profile=persona_profile,
+                    business_block=composed.business_block,
+                    relations=relations,
                 )
                 if synthesized:
                     composed.short_answer = synthesized
@@ -687,15 +694,115 @@ class RuntimeOrchestrator:
     # LLM synthesis pour short_answer (R2.B)
     # ------------------------------------------------------------------------
 
+    def _build_structural_preamble(
+        self,
+        resolved: Optional[ResolvedQuery],
+        business_block: Optional[dict],
+        relations: Optional[list[dict]],
+    ) -> Optional[str]:
+        """Génère un préambule structuré pour les modes où le KG porte
+        l'information principale (sans cela, le LLM ne voit que des chunks
+        de texte plat et rate la structure typée).
+
+        Modes concernés : EXPLORATION_RELATIONAL, CONFLICT_RISK, DIFF_EVOLUTION.
+        Pour les autres, return None (chunks suffisent).
+        """
+        if not resolved or not business_block:
+            return None
+
+        block_type = business_block.get("type")
+
+        if block_type == "navigation":  # EXPLORATION_RELATIONAL
+            by_type = business_block.get("relations_by_type", {})
+            if not by_type:
+                return None
+            lines = ["[STRUCTURE KG — relations typées trouvées]"]
+            total = business_block.get("n_total_relations", 0)
+            lines.append(f"Total : {total} relations dans le corpus, réparties par type :")
+            for t, info in sorted(by_type.items(), key=lambda kv: -(kv[1].get("count", 0) if isinstance(kv[1], dict) else kv[1])):
+                count = info.get("count", info) if isinstance(info, dict) else info
+                lines.append(f"  - {t} : {count}")
+                # Top 2 examples
+                examples = info.get("examples", []) if isinstance(info, dict) else []
+                for ex in examples[:2]:
+                    a = (ex.get("claim_a_text") or "")[:120]
+                    b = (ex.get("claim_b_text") or "")[:120]
+                    lines.append(f"      ex. \"{a}\" ↔ \"{b}\"")
+            return "\n".join(lines)
+
+        if block_type == "contradictions":  # CONFLICT_RISK
+            conflicts = business_block.get("conflicts", [])
+            n_real = business_block.get("n_real_conflicts", 0)
+            n_total = business_block.get("n_total_candidates", 0)
+            if not conflicts:
+                return None
+            lines = [f"[STRUCTURE KG — {n_real} contradictions confirmées sur {n_total} candidates]"]
+            for i, c in enumerate(conflicts[:3], 1):
+                a = c.get("claim_a", {})
+                b = c.get("claim_b", {})
+                lines.append(
+                    f"Conflit {i} (conf={c.get('confidence', 0):.2f}, "
+                    f"scope={c.get('scope_alignment', '?')}, "
+                    f"temporal={c.get('temporal_relation', '?')}):"
+                )
+                lines.append(f"  A [{a.get('doc_id')}]: {(a.get('text') or '')[:150]}")
+                lines.append(f"  B [{b.get('doc_id')}]: {(b.get('text') or '')[:150]}")
+                if c.get("reasoning"):
+                    lines.append(f"  → {c['reasoning'][:200]}")
+            return "\n".join(lines)
+
+        if block_type == "diff":  # DIFF_EVOLUTION
+            summary = business_block.get("summary", {})
+            period = business_block.get("period", {})
+            if not summary:
+                return None
+            period_str = ""
+            if period:
+                period_str = f"sur la période {period.get('start')} → {period.get('end')}"
+            lines = [f"[STRUCTURE KG — diff {period_str}]"]
+            lines.append(
+                f"Introduced: {summary.get('introduced', 0)}, "
+                f"Retired: {summary.get('retired', 0)}, "
+                f"Modified: {summary.get('modified', 0)}, "
+                f"Reaffirmed: {summary.get('reaffirmed', 0)}"
+            )
+            return "\n".join(lines)
+
+        if block_type == "snapshot":  # SNAPSHOT_TEMPORAL
+            as_of = business_block.get("as_of")
+            n_active = business_block.get("n_active_at_t", 0)
+            n_total = business_block.get("n_total_valid", 0)
+            if as_of:
+                return f"[STRUCTURE KG — snapshot at {as_of} : {n_active} claims actifs sur {n_total} valides]"
+            return None
+
+        return None
+
     def _synthesize_short_answer(
         self,
         question: str,
         top_chunks: list[dict],
         resolved: Optional[ResolvedQuery] = None,
         persona_profile: Optional[PersonaProfile] = None,
+        business_block: Optional[dict] = None,
+        relations: Optional[list[dict]] = None,
     ) -> Optional[str]:
-        """Appel vLLM pour synthèse 1-3 phrases (mode-aware + persona-aware)."""
+        """Appel vLLM pour synthèse 1-3 phrases (mode-aware + persona-aware).
+
+        Pour les modes structurels (EXPLORATION_RELATIONAL, CONFLICT_RISK,
+        DIFF_EVOLUTION), on injecte un préambule de structure depuis le
+        business_block — sinon le LLM ne voit que des chunks de texte plat
+        et ne peut pas énumérer la structure typée du KG.
+        """
         context_parts = []
+
+        # Préambule structurel mode-aware (R3-R6 calibration synthesis)
+        structural_preamble = self._build_structural_preamble(
+            resolved, business_block, relations
+        )
+        if structural_preamble:
+            context_parts.append(structural_preamble)
+
         for i, c in enumerate(top_chunks, 1):
             doc = c.get("doc_id", "?")
             text = (c.get("text") or "").strip()[:400]
