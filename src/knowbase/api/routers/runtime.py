@@ -97,13 +97,20 @@ async def runtime_query(
     Pipeline runtime V1.1 complet.
 
     Pipeline :
-    1. QueryResolver détecte le mode (1 sur 7)
-    2. EvidencePlanner choisit le régime (RAG_LED/KG_LED/HYBRID)
-    3. Retrieval Qdrant + Cypher + TemporalRetriever
-    4. Auto-escalation RAG_LED → KG_LED si signaux structurels
-    5. TrustEvaluator calcule kg_trust (4 niveaux)
-    6. ResponseComposer compose la réponse en 5 sections + bloc métier modulable
-    7. Synthèse LLM short_answer (R2.B)
+    1. Resolve persona (R6 — compliance_officer / explorer / reader)
+    2. QueryResolver détecte le mode (1 sur 7)
+    3. EvidencePlanner choisit le régime (RAG_LED/KG_LED/HYBRID) + applique persona overrides
+    4. Retrieval Qdrant + Cypher + TemporalRetriever (R3+R4) + fusion HYBRID (R5)
+    5. Auto-escalation RAG_LED → KG_LED si signaux structurels
+    6. TrustEvaluator calcule kg_trust (4 niveaux + thresholds persona-aware R6)
+    7. Fallback strategy (HARD_ABSTENTION strict / SOFT_RAG_DISCLAIMED permissive)
+    8. ResponseComposer compose la réponse en 5 sections + bloc métier modulable
+    9. Synthèse LLM short_answer (mode-aware + persona-aware)
+
+    Persona supportés (R6) :
+    - compliance_officer : strict, audit trail max, hard abstention si trust < 0.55
+    - explorer (default) : permissive, surface contradictions/exceptions
+    - reader : concis, executive style, drill-down minimal
     """
     try:
         orch = _get_orchestrator(tenant_id)

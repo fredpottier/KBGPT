@@ -91,8 +91,16 @@ class TrustEvaluator:
         regime: Regime,
         mode: ResponseMode,
         as_of_date: Optional[date] = None,
+        persona_thresholds: Optional[dict[str, float]] = None,
     ) -> TrustScore:
-        """Calcule le kg_trust score complet."""
+        """
+        Calcule le kg_trust score complet.
+
+        Args:
+            persona_thresholds: optional dict avec overrides
+                {'authoritative': 0.9, 'reliable': 0.75, 'partial': 0.55}
+                (R6 — compliance_officer impose des seuils plus exigeants)
+        """
         provenance = self._score_provenance(chunks)
         inference = self._score_inference(relations)
         recency = self._score_recency(chunks, as_of_date or date.today())
@@ -106,7 +114,7 @@ class TrustEvaluator:
         )
         score = max(0.0, min(1.0, score))
 
-        level = self._level_for(score)
+        level = self._level_for(score, persona_thresholds)
 
         breakdown = {
             "provenance": round(provenance, 3),
@@ -224,12 +232,24 @@ class TrustEvaluator:
 
         return 0.7
 
-    def _level_for(self, score: float) -> TrustLevel:
-        if score >= THRESHOLDS[TrustLevel.AUTHORITATIVE]:
+    def _level_for(
+        self, score: float, persona_thresholds: Optional[dict[str, float]] = None
+    ) -> TrustLevel:
+        # Apply persona overrides if provided (R6)
+        thresholds = dict(THRESHOLDS)
+        if persona_thresholds:
+            if persona_thresholds.get("authoritative") is not None:
+                thresholds[TrustLevel.AUTHORITATIVE] = persona_thresholds["authoritative"]
+            if persona_thresholds.get("reliable") is not None:
+                thresholds[TrustLevel.RELIABLE] = persona_thresholds["reliable"]
+            if persona_thresholds.get("partial") is not None:
+                thresholds[TrustLevel.PARTIAL] = persona_thresholds["partial"]
+
+        if score >= thresholds[TrustLevel.AUTHORITATIVE]:
             return TrustLevel.AUTHORITATIVE
-        if score >= THRESHOLDS[TrustLevel.RELIABLE]:
+        if score >= thresholds[TrustLevel.RELIABLE]:
             return TrustLevel.RELIABLE
-        if score >= THRESHOLDS[TrustLevel.PARTIAL]:
+        if score >= thresholds[TrustLevel.PARTIAL]:
             return TrustLevel.PARTIAL
         return TrustLevel.FALLBACK
 

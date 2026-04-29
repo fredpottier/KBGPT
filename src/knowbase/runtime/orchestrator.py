@@ -29,6 +29,8 @@ from knowbase.runtime.evidence_planner import EvidencePlanner, Regime, Retrieval
 from knowbase.runtime.query_resolver import QueryResolver, ResolvedQuery, ResponseMode
 from knowbase.runtime.response_composer import ComposedResponse, ResponseComposer
 from knowbase.runtime.trust_evaluator import TrustEvaluator
+from knowbase.runtime.personas import PersonaProfile, resolve_persona
+from knowbase.runtime.fallback import decide_fallback, apply_fallback_to_response
 from knowbase.retrieval.temporal_retriever import TemporalRetriever, TemporalQueryResult
 
 
@@ -79,6 +81,7 @@ SYNTHESIS_PROMPT = """Tu es un assistant régulatoire qui synthétise des répon
 
 Question : {question}
 Mode de réponse : {mode}{mode_hint}
+Style attendu : {style}{verbosity_hint}
 
 Voici les passages les plus pertinents trouvés dans le corpus (avec leur metadata) :
 
@@ -86,14 +89,28 @@ Voici les passages les plus pertinents trouvés dans le corpus (avec leur metada
 
 {mode_instruction}
 
-Synthétise une **réponse courte** (1-3 phrases maximum) à la question, en t'appuyant
+Synthétise une **réponse {length_hint}** à la question, en t'appuyant
 **uniquement** sur les passages fournis. Si les passages ne permettent pas de répondre,
 dis-le explicitement.
 
 Ne cite pas explicitement les passages dans ta réponse — ils seront affichés séparément
 dans la section "Preuves".
 
-Réponse courte :"""
+Réponse :"""
+
+
+# Persona overrides pour la synthèse
+SYNTHESIS_STYLE_LABELS = {
+    "factual": "factuel et précis (privilégie les valeurs, dates, références exactes)",
+    "exploratory": "exploratoire (mentionne les nuances, exceptions, contradictions)",
+    "executive": "synthétique exécutif (l'essentiel pour décision rapide)",
+}
+
+SYNTHESIS_VERBOSITY_LENGTH = {
+    "concise": "très courte (1 phrase)",
+    "standard": "courte (1-3 phrases maximum)",
+    "detailed": "détaillée (3-5 phrases avec nuances)",
+}
 
 
 # Instructions par mode injectées dans le synthesis prompt (R3+R4 calibration)
@@ -191,12 +208,20 @@ class RuntimeOrchestrator:
         """
         logger.info(f"[Runtime] Query: {question[:80]}")
 
+        # 0. Resolve persona (R6) — modèle d'overrides
+        persona_profile = resolve_persona(persona_hints)
+        logger.info(f"[Runtime] Persona: {persona_profile.persona.value} (policy={persona_profile.fallback_policy.value})")
+
         # 1. Resolve
         resolved = self.query_resolver.resolve(question, persona_hints=persona_hints)
         logger.info(f"[Runtime] Mode: {resolved.mode.value} (conf={resolved.confidence:.2f})")
 
-        # 2. Plan
+        # 2. Plan (avec persona overrides)
         plan = self.evidence_planner.plan(resolved)
+        # Apply persona overrides on plan
+        if persona_profile.kg_traversal_depth_bonus:
+            plan.kg_traversal_depth = plan.kg_traversal_depth + persona_profile.kg_traversal_depth_bonus
+        plan.use_derived = persona_profile.use_derived_relations
         logger.info(f"[Runtime] Initial regime: {plan.regime.value}")
 
         # 3. Retrieve (selon régime + mode)
@@ -238,25 +263,47 @@ class RuntimeOrchestrator:
             # Si KG_LED (initial ou après escalation) → traverser le KG
             if plan.regime in (Regime.KG_LED, Regime.HYBRID):
                 relations = self._retrieve_kg_relations(plan)
-                # Si KG_LED pur (pas RAG_LED initial), on récupère aussi les chunks
-                # depuis les claims trouvés via traversal
-                if not chunks:
-                    chunks = self._retrieve_chunks_from_relations(relations)
-                    # Fallback : si pas de relations, faire un Qdrant pur
-                    if not chunks:
-                        chunks = self._retrieve_qdrant(resolved.raw_query, plan)
 
-        # 4. Trust
+                if plan.regime == Regime.HYBRID:
+                    # R5 — fusion HYBRID : on a déjà chunks (RAG branch supérieure),
+                    # on enrichit avec les chunks issus du KG traversal pour couverture
+                    # maximale (typique SYNTHESIS_SUMMARY).
+                    kg_chunks = self._retrieve_chunks_from_relations(relations)
+                    chunks = self._fuse_rag_kg_chunks(chunks, kg_chunks)
+                else:
+                    # KG_LED pur : récupère les chunks depuis le traversal
+                    if not chunks:
+                        chunks = self._retrieve_chunks_from_relations(relations)
+                        # Fallback : si pas de relations, faire un Qdrant pur
+                        if not chunks:
+                            chunks = self._retrieve_qdrant(resolved.raw_query, plan)
+
+        # 4. Trust (avec persona thresholds si présents)
+        persona_thresholds = None
+        if persona_profile.trust_threshold_authoritative is not None or \
+           persona_profile.trust_threshold_reliable is not None or \
+           persona_profile.trust_threshold_partial is not None:
+            persona_thresholds = {
+                "authoritative": persona_profile.trust_threshold_authoritative,
+                "reliable": persona_profile.trust_threshold_reliable,
+                "partial": persona_profile.trust_threshold_partial,
+            }
         trust = self.trust_evaluator.evaluate(
             chunks=chunks,
             relations=relations,
             regime=plan.regime,
             mode=resolved.mode,
             as_of_date=resolved.temporal_anchor,
+            persona_thresholds=persona_thresholds,
         )
         logger.info(f"[Runtime] kg_trust: {trust.score} ({trust.level.value})")
 
-        # 5. Compose
+        # 5. R6 — Décide la fallback strategy selon persona policy
+        fallback_decision = decide_fallback(trust, persona_profile, len(chunks))
+        if fallback_decision.apply_fallback:
+            logger.info(f"[Runtime] Fallback: {fallback_decision.strategy}")
+
+        # 6. Compose
         composed = self.response_composer.compose(
             resolved=resolved,
             plan=plan,
@@ -265,16 +312,34 @@ class RuntimeOrchestrator:
             trust=trust,
         )
 
-        # 6. LLM synthesis pour short_answer (R2.B + R3+R4 calibration mode-aware)
-        if synthesize and chunks:
+        # Ajouter persona + fallback metadata dans debug_info
+        composed.debug_info["persona"] = persona_profile.persona.value
+        composed.debug_info["fallback_strategy"] = fallback_decision.strategy
+
+        # 7. LLM synthesis (skip si HARD_ABSTENTION ; sinon mode-aware + persona-aware)
+        skip_synthesis = (
+            fallback_decision.strategy == "HARD_ABSTENTION"
+            or not synthesize
+            or not chunks
+        )
+        if not skip_synthesis:
             try:
                 synthesized = self._synthesize_short_answer(
-                    question, chunks[:5], resolved=resolved
+                    question, chunks[:5], resolved=resolved, persona_profile=persona_profile
                 )
                 if synthesized:
                     composed.short_answer = synthesized
             except Exception as e:
                 logger.warning(f"[Runtime] LLM synthesis failed: {e}")
+
+        # 8. Apply fallback message/disclaimer to response
+        composed = apply_fallback_to_response(composed, fallback_decision)
+
+        # 9. Trim drill-down selon persona
+        if not persona_profile.enable_drill_down:
+            composed.drill_down = []
+        elif len(composed.drill_down) > persona_profile.max_drill_down_items:
+            composed.drill_down = composed.drill_down[: persona_profile.max_drill_down_items]
 
         return composed
 
@@ -556,6 +621,46 @@ class RuntimeOrchestrator:
             "supersedes_out": [{"claim_id": r["claim_id"], "n_out": r["n_out"]} for r in sup_out_rows],
         }
 
+    def _fuse_rag_kg_chunks(
+        self,
+        rag_chunks: list[dict],
+        kg_chunks: list[dict],
+        max_total: int = 50,
+    ) -> list[dict]:
+        """
+        R5 — Fusion HYBRID des chunks RAG et KG.
+
+        Stratégie :
+        - On garde l'ordre RAG (plus pertinent sémantiquement) en tête
+        - On ajoute les KG chunks qui ne sont pas déjà dans RAG (claim_id distinct)
+        - Tag 'source' = 'rag' / 'kg' / 'both' pour audit trail
+        - Tronque à max_total
+        """
+        seen = {}
+        for c in rag_chunks:
+            cid = c.get("claim_id")
+            if cid:
+                c2 = dict(c)
+                c2["source"] = "rag"
+                seen[cid] = c2
+
+        for c in kg_chunks:
+            cid = c.get("claim_id")
+            if not cid:
+                continue
+            if cid in seen:
+                seen[cid]["source"] = "both"
+            else:
+                c2 = dict(c)
+                c2["source"] = "kg"
+                seen[cid] = c2
+
+        fused = list(seen.values())
+        # Tri : 'both' > 'rag' > 'kg', puis score desc
+        priority = {"both": 0, "rag": 1, "kg": 2}
+        fused.sort(key=lambda x: (priority.get(x.get("source", "kg"), 3), -float(x.get("score", 0) or 0)))
+        return fused[:max_total]
+
     def _retrieve_chunks_from_relations(self, relations: list[dict]) -> list[dict]:
         """Convertit les relations KG en chunks pour la composition."""
         seen_ids = set()
@@ -587,8 +692,9 @@ class RuntimeOrchestrator:
         question: str,
         top_chunks: list[dict],
         resolved: Optional[ResolvedQuery] = None,
+        persona_profile: Optional[PersonaProfile] = None,
     ) -> Optional[str]:
-        """Appel vLLM pour synthèse 1-3 phrases (mode-aware)."""
+        """Appel vLLM pour synthèse 1-3 phrases (mode-aware + persona-aware)."""
         context_parts = []
         for i, c in enumerate(top_chunks, 1):
             doc = c.get("doc_id", "?")
@@ -620,12 +726,28 @@ class RuntimeOrchestrator:
             elif resolved.temporal_range:
                 mode_hint = f" (period: {resolved.temporal_range[0].isoformat()} → {resolved.temporal_range[1].isoformat()})"
 
+        # Persona-aware (R6 calibration)
+        style = "factual"
+        verbosity = "standard"
+        verbosity_hint = ""
+        if persona_profile:
+            style = persona_profile.synthesis_style
+            verbosity = persona_profile.verbosity
+            if persona_profile.show_uncertainty_explicitly:
+                verbosity_hint = " (mentionne explicitement les incertitudes / contradictions / lacunes)"
+
+        style_label = SYNTHESIS_STYLE_LABELS.get(style, style)
+        length_hint = SYNTHESIS_VERBOSITY_LENGTH.get(verbosity, "courte (1-3 phrases)")
+
         prompt = SYNTHESIS_PROMPT.format(
             question=question,
             context=context,
             mode=mode_str,
             mode_hint=mode_hint,
             mode_instruction=mode_instruction,
+            style=style_label,
+            verbosity_hint=verbosity_hint,
+            length_hint=length_hint,
         )
 
         try:

@@ -56,6 +56,18 @@ TEST_QUERIES = [
         "expected_mode": "EXPLORATION_RELATIONAL",
         "expected_regime": "KG_LED",
     },
+    {
+        "question": "Summarize the dual-use export controls regulation",
+        "expected_mode": "SYNTHESIS_SUMMARY",
+        "expected_regime": "HYBRID",
+    },
+    {
+        "question": "Quel est le code couleur du tapis rouge dans la salle de réunion ?",
+        "expected_mode": "LOOKUP_FACTUAL",
+        "expected_regime": "RAG_LED",
+        "persona": "compliance_officer",
+        "note": "Question hors corpus → trust FALLBACK → HARD_ABSTENTION attendue",
+    },
 ]
 
 
@@ -66,13 +78,16 @@ def run_test(orch: RuntimeOrchestrator, query: dict, idx: int) -> dict:
     logger.info("=" * 70)
     logger.info(f"  Expected mode: {query['expected_mode']} | regime: {query['expected_regime']}")
 
-    composed = orch.query(query["question"], synthesize=True)
+    persona_hints = {"persona": query["persona"]} if query.get("persona") else None
+    composed = orch.query(query["question"], persona_hints=persona_hints, synthesize=True)
 
     logger.info(f"\n  ✓ Mode detected     : {composed.mode.value if composed.mode else 'UNKNOWN'}")
     logger.info(f"  ✓ Regime           : {composed.regime}")
     logger.info(f"  ✓ Trust score      : {composed.confidence.score:.2f} ({composed.confidence.level.value})")
     logger.info(f"  ✓ N chunks evidenced: {len(composed.evidence)}")
     logger.info(f"  ✓ Escalation       : {composed.debug_info.get('escalation_triggered', False)}")
+    logger.info(f"  ✓ Persona          : {composed.debug_info.get('persona', 'n/a')}")
+    logger.info(f"  ✓ Fallback         : {composed.debug_info.get('fallback_strategy', 'NONE')}")
     logger.info(f"\n  Short answer:")
     for line in composed.short_answer.splitlines()[:5]:
         logger.info(f"    {line}")
