@@ -126,12 +126,34 @@ _SYNTHESIS_HINTS = re.compile(
 )
 
 # Marqueurs EXPLORATION_RELATIONAL (lister, énumérer)
+# Note : énumér[a-zéèà]+ pour matcher toutes les conjugaisons (énumérez, énumérer,
+# énumère, énumérons, énuméré, énumères, etc.) — la regex précédente ratait
+# énumérez/énumérer car elle attendait "énumère" + 1 char optionnel.
 _EXPLORATION_HINTS = re.compile(
     r"\b(list (all|the)?|liste[snrz]? (de|des|tous?|toutes?)|"
-    r"all the (rules|exceptions|definitions|terms|claims)|"
-    r"which (rules|exceptions|definitions)|"
-    r"quelles? (règles|exceptions|définitions)|"
-    r"enumerate|énumère[snrz]?)\b",
+    r"all the (rules|exceptions|definitions|terms|claims|relations)|"
+    r"toutes les (règles|exceptions|définitions|relations)|"
+    r"which (rules|exceptions|definitions|relations)|"
+    r"quelles? (règles|exceptions|définitions|relations)|"
+    r"enumerate|énumér[a-zéèà]+|énumère[snrz]?)\b",
+    re.IGNORECASE,
+)
+
+# Noms canoniques des 12 LogicalRelation types V3.3 — universels (font partie
+# du schéma KG, pas domain-specific). Si la question nomme explicitement un
+# de ces types, c'est un fort signal pour un mode KG_LED structurel.
+_LOGICAL_RELATION_TYPES = re.compile(
+    r"\b("
+    r"SUBSETS?|SUPERSETS?|"
+    r"EQUIVALENTE?S?|ÉQUIVALENTE?S?|"
+    r"OVERLAPS?|DISJOINTS?|"
+    r"CONFLICTS?|CONFLITS?|"
+    r"EXCEPTIONS?|"
+    r"DEFINITIONS?|DÉFINITIONS?|"
+    r"SUPERSEDES?|SUPERSEDED|"
+    r"EVOLVES?_FROM|EVOLVES?\s+FROM|"
+    r"REAFFIRMS?"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -206,8 +228,18 @@ class QueryResolver:
     def _heuristic_classify(self, query: str, dates: list[date]) -> tuple[ResponseMode, float]:
         """Classification heuristique. Returns (mode, confidence)."""
         # CONFLICT_RISK : marqueur explicite de contradiction
+        # On check AVANT _LOGICAL_RELATION_TYPES car CONFLICT est aussi un type V3.3,
+        # mais "contradictions" en langage naturel = mode CONFLICT_RISK direct.
         if _CONFLICT_HINTS.search(query):
             return ResponseMode.CONFLICT_RISK, 0.85
+
+        # EXPLORATION_RELATIONAL boosté : si la question nomme un type
+        # LogicalRelation (EQUIVALENT/SUBSET/EXCEPTION/...) ET un verbe d'énumération,
+        # c'est très probablement de l'exploration KG.
+        has_relation_type = bool(_LOGICAL_RELATION_TYPES.search(query))
+        has_enumeration = bool(_EXPLORATION_HINTS.search(query))
+        if has_relation_type and has_enumeration:
+            return ResponseMode.EXPLORATION_RELATIONAL, 0.9
 
         # DIFF_EVOLUTION : 2+ dates ou marqueur de changement
         if len(dates) >= 2 or _TEMPORAL_DIFF_HINTS.search(query):
@@ -226,8 +258,13 @@ class QueryResolver:
             return ResponseMode.SYNTHESIS_SUMMARY, 0.75
 
         # EXPLORATION_RELATIONAL : "list all", "which X"
-        if _EXPLORATION_HINTS.search(query):
+        if has_enumeration:
             return ResponseMode.EXPLORATION_RELATIONAL, 0.7
+
+        # EXPLORATION sans verbe d'énumération mais avec type explicite (ex: "Quelles
+        # SUBSET dans le corpus ?") — confidence moyenne, peut être overridée par LLM.
+        if has_relation_type:
+            return ResponseMode.EXPLORATION_RELATIONAL, 0.65
 
         # Default LOOKUP_FACTUAL (low confidence, le LLM peut overrider)
         return ResponseMode.LOOKUP_FACTUAL, 0.5
