@@ -127,11 +127,12 @@ Parameters:
     Description: Subnet ID (vide = subnet par défaut)
 
   # === AMI ===
-  # AMI Golden OSMOSE v8 - vLLM v0.6.6.post1 + TEI 1.5 (modèle téléchargé depuis HF au boot)
+  # AMI Golden OSMOSE v10 - Qwen2.5-14B-Instruct-AWQ + vLLM 0.9.2 + TEI 1.5
+  # (créée 2026-04-28, remplace v7/v8/v9 supprimées)
   AmiId:
     Type: String
-    Default: "ami-05ec81177dc825d56"
-    Description: AMI ID (Golden v8 - Docker + NVIDIA drivers, eu-central-1)
+    Default: "ami-007f2d30360871e8a"
+    Description: AMI ID (Golden v10 - Qwen2.5-14B-Instruct-AWQ on vLLM 0.9.2, eu-central-1)
 
   # === SSH ===
   KeyName:
