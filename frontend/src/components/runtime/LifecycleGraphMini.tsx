@@ -37,10 +37,19 @@ function shortLabel(docId: string): string {
   const m = docId.match(/^(.*?)_[0-9a-f]{6,}$/)
   const stem = m ? m[1] : docId
 
-  // Pattern EU reg/del : <prefix>_<kind>_<year>_<num>(_original)?
-  const eu = stem.match(/^[a-z]+_(\w+)_(\d{4})_(\d+)(?:_original)?$/)
+  // Pattern EU reg/del : <prefix>_<kind>_<a>_<b>(_original)?
+  // Convention EU post-Lisbon : année/numéro (ex 2021/821)
+  // Convention EC antérieure : numéro/année (ex 428/2009)
+  // → on détecte l'année par sa magnitude (4 chiffres, 1950-2050)
+  const eu = stem.match(/^[a-z]+_(\w+)_(\d+)_(\d+)(?:_original)?$/)
   if (eu) {
-    return `${eu[1]} ${eu[2]}/${eu[3]}`
+    const a = eu[2]
+    const b = eu[3]
+    const aIsYear = a.length === 4 && +a >= 1950 && +a <= 2050
+    const bIsYear = b.length === 4 && +b >= 1950 && +b <= 2050
+    if (aIsYear && !bIsYear) return `${eu[1]} ${a}/${b}`
+    if (bIsYear && !aIsYear) return `${eu[1]} ${b}/${a}`
+    return `${eu[1]} ${a}/${b}`
   }
   // Pattern CS-25 : cs25_(change_)?amdt_<num>
   const cs25 = stem.match(/^cs25_(?:change_)?amdt_(\d+)$/)
