@@ -97,7 +97,7 @@ const ADMIN_SECTIONS: SidebarSection[] = [
       { label: 'Contradictions', href: '/admin/contradictions', icon: FiAlertTriangle },
       { label: 'Relations V3.3', href: '/admin/relations', icon: FiActivity },
       { label: 'Golden Set (annotation)', href: '/admin/relations/golden-set', icon: FiCheckCircle },
-      { label: 'Runtime V1.1 (chat)', href: '/chat/runtime', icon: FiZap },
+      { label: 'Runtime V2 (chat)', href: '/chat/runtime-v2', icon: FiZap },
       { label: 'Runtime Calibration', href: '/admin/runtime-calibration', icon: FiTarget },
       { label: 'Audit Corpus', href: '/admin/corpus-audit', icon: FiActivity },
       { label: 'Benchmarks', href: '/admin/benchmarks', icon: FiBarChart2 },
