@@ -39,6 +39,7 @@ import {
   useDisclosure,
 } from '@chakra-ui/react'
 import { LifecycleGraphMini } from '@/components/runtime/LifecycleGraphMini'
+import { fetchWithAuth } from '@/lib/fetchWithAuth'
 
 type AnchorType = 'point' | 'range' | 'current_default'
 
@@ -157,7 +158,7 @@ export default function RuntimeV2Chat() {
     setDocDetail(null)
     onDocOpen()
     try {
-      const res = await fetch(`/api/runtime_v2/doc_detail/${encodeURIComponent(docId)}`)
+      const res = await fetchWithAuth(`/api/runtime_v2/doc_detail/${encodeURIComponent(docId)}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setDocDetail(await res.json())
     } catch (exc) {
@@ -177,7 +178,7 @@ export default function RuntimeV2Chat() {
     setClaimDetail(null)
     onClaimOpen()
     try {
-      const res = await fetch(`/api/runtime_v2/claim_detail/${encodeURIComponent(claimId)}`)
+      const res = await fetchWithAuth(`/api/runtime_v2/claim_detail/${encodeURIComponent(claimId)}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setClaimDetail(await res.json())
     } catch (exc) {
@@ -193,7 +194,7 @@ export default function RuntimeV2Chat() {
     setError(null)
     setResponse(null)
     try {
-      const res = await fetch('/api/runtime_v2/answer', {
+      const res = await fetchWithAuth('/api/runtime_v2/answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, audit_mode: auditMode, top_k_claims: 8 }),

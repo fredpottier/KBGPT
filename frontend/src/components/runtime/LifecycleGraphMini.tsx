@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from 'react'
 import { Box, Spinner, Text, Tooltip } from '@chakra-ui/react'
+import { fetchWithAuth } from '@/lib/fetchWithAuth'
 
 type GraphNode = { id: string; label: string; is_focus: boolean }
 type GraphEdge = { from: string; to: string; type: string; confidence: number }
@@ -36,7 +37,7 @@ export function LifecycleGraphMini({
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    fetch(`/api/runtime_v2/lifecycle_graph?focus_doc_id=${encodeURIComponent(focusDocId)}&depth=1`)
+    fetchWithAuth(`/api/runtime_v2/lifecycle_graph?focus_doc_id=${encodeURIComponent(focusDocId)}&depth=1`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((d) => {
         if (!cancelled) setData(d)
