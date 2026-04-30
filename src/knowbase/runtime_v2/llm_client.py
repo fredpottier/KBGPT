@@ -28,7 +28,11 @@ logger = logging.getLogger(__name__)
 
 
 DEEPINFRA_BASE_URL = "https://api.deepinfra.com/v1/openai"
-DEEPINFRA_DEFAULT_MODEL = "Qwen/Qwen3-235B-A22B-Instruct-2507"
+# Note : pour le runtime V2 (synthèses 2-4 phrases, anchor extraction, subject resolver),
+# on privilégie un modèle plus petit/rapide que Qwen3-235B (40-80s). Qwen2.5-14B-Instruct
+# est cohérent avec le vLLM EC2 production et ~5-10x plus rapide en synthèse.
+# Override possible via env DEEPINFRA_RUNTIME_MODEL.
+DEEPINFRA_DEFAULT_MODEL = "Qwen/Qwen2.5-72B-Instruct"
 VLLM_DEFAULT_MODEL = "Qwen/Qwen2.5-14B-Instruct-AWQ"
 
 
