@@ -138,3 +138,114 @@ def _fallback_response(claims: list[dict]) -> str:
     text = top.get("text", "")[:300]
     doc_id = top.get("doc_id", "unknown")
     return f"[Synthèse LLM indisponible — extrait brut depuis {doc_id}] {text}"
+
+
+EVOLUTION_SYNTHESIS_PROMPT = """You are a documentary synthesis assistant for an evolution timeline. Given a user question asking how something evolved, and a chronological list of evidence claims grouped by document version/date, produce a concise narrative of the evolution.
+
+## Critical rules
+
+1. **Answer in the SAME LANGUAGE as the question**.
+
+2. **Use ONLY the provided timeline points and their claims**. Do not invent facts.
+
+3. **Highlight what CHANGED between timeline points** (new rules, removed obligations, modified thresholds, replaced entities). If two points contain identical info, note it as "remained unchanged".
+
+4. **Cite the source documents** for each evolution step using [doc_id].
+
+5. **Length: 3-6 sentences**. Structure narrative chronologique : "Initially [doc_old]... Then [doc_mid] introduced... Most recently [doc_new] established...".
+
+6. **If the timeline points have very few claims or no clear changes**, say so honestly: "The timeline shows X versions but the available evidence does not detail specific changes between them."
+
+## Output format
+
+Just the prose narrative. No headers, no bullet points. No commentary about your process."""
+
+
+class EvolutionSynthesizer:
+    """LLM synthétiseur pour mode RANGE — narration chronologique multi-doc.
+
+    Diffère du ResponseSynthesizer en input (timeline points par doc avec claims)
+    et en sortie (narration des changements vs réponse factuelle ponctuelle).
+    """
+
+    def __init__(
+        self,
+        vllm_url: str,
+        model_id: str = "Qwen/Qwen2.5-14B-Instruct-AWQ",
+        timeout: float = 30.0,
+        temperature: float = 0.3,
+        max_tokens: int = 500,
+    ) -> None:
+        self.vllm_url = vllm_url.rstrip("/")
+        self.model_id = model_id
+        self.timeout = timeout
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+
+    def synthesize(
+        self,
+        question: str,
+        evolution_points: list[dict],
+        max_points: int = 8,
+    ) -> str:
+        """Génère une narration prose de l'évolution.
+
+        Args:
+            question: question utilisateur
+            evolution_points: liste de {doc_id, publication_date, claims: [{text}]}, triée chronologiquement
+            max_points: borne supérieure de points envoyés au LLM
+        """
+        if not evolution_points:
+            return "Aucune évolution détectable dans le corpus pour cette question."
+
+        used = evolution_points[:max_points]
+        timeline_block = "\n\n".join(
+            f"[Point {i + 1}] doc={p.get('doc_id', '?')} date={p.get('publication_date') or '?'}\n"
+            + "\n".join(
+                f"  - {(c.get('text') or '')[:300]}"
+                for c in (p.get("claims") or [])[:3]
+            )
+            for i, p in enumerate(used)
+        )
+
+        user_prompt = (
+            f"Question: {question}\n\n"
+            f"Timeline (chronological):\n{timeline_block}\n\n"
+            f"Now write a 3-6 sentence narrative of the evolution, citing each step by doc_id:"
+        )
+
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.post(
+                    f"{self.vllm_url}/v1/chat/completions",
+                    json={
+                        "model": self.model_id,
+                        "messages": [
+                            {"role": "system", "content": EVOLUTION_SYNTHESIS_PROMPT},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "temperature": self.temperature,
+                        "max_tokens": self.max_tokens,
+                    },
+                )
+                resp.raise_for_status()
+                content = resp.json()["choices"][0]["message"]["content"].strip()
+                if not content:
+                    return _evolution_fallback(used)
+                return content
+        except (httpx.HTTPError, KeyError, IndexError) as exc:
+            logger.error(f"EvolutionSynthesizer LLM call failed: {exc}")
+            return _evolution_fallback(used)
+
+
+def _evolution_fallback(evolution_points: list[dict]) -> str:
+    """Fallback chronologique brut si LLM down."""
+    if not evolution_points:
+        return "Aucune évolution disponible."
+    parts = []
+    for p in evolution_points[:5]:
+        date = p.get("publication_date") or "?"
+        doc = p.get("doc_id") or "unknown"
+        n_claims = len(p.get("claims") or [])
+        parts.append(f"{date} — {doc} ({n_claims} claims)")
+    return "[Synthèse LLM indisponible — timeline brute]\n" + "\n".join(parts)

@@ -26,7 +26,8 @@ from neo4j import Driver
 from knowbase.anchor import AnchorExtractor, AnchorFilter, AnchorType, ResolvedAnchor
 from knowbase.current import CurrentResolver, CurrentResolverDecision
 from knowbase.runtime_v2.conflict_detector import ConflictDetector
-from knowbase.runtime_v2.synthesis import ResponseSynthesizer
+from knowbase.runtime_v2.synthesis import ResponseSynthesizer, EvolutionSynthesizer
+from knowbase.runtime_v2.question_subject_resolver import QuestionSubjectResolver
 from knowbase.runtime_v2.models import (
     ConflictReport,
     EvidenceClaim,
@@ -74,6 +75,16 @@ class RuntimeV2Pipeline:
         )
         self.conflict_detector = ConflictDetector(driver=driver, tenant_id=tenant_id)
         self.synthesizer = ResponseSynthesizer(vllm_url=vllm_url, model_id=vllm_model)
+        # P5 polish — synthèse multi-mode (RANGE narration chronologique)
+        self.evolution_synthesizer = EvolutionSynthesizer(vllm_url=vllm_url, model_id=vllm_model)
+        # P5 polish — Subject Resolver V2 vrai (LLM + embedding cosine)
+        self.subject_resolver = QuestionSubjectResolver(
+            driver=driver,
+            embedder=embedder,
+            vllm_url=vllm_url,
+            tenant_id=tenant_id,
+            vllm_model=vllm_model,
+        )
 
     def _emit_structured_log(
         self,
@@ -158,26 +169,37 @@ class RuntimeV2Pipeline:
             "matched_doc_ids": filter_result.matched_doc_ids,
         }
 
-        # Subject Resolver léger (P2.2) — pré-retrieval Qdrant + analyse de cohérence
-        # Conformément à VISION §3 étape 1 : si les top docs partagent un cluster
-        # sémantique cohérent → on a identifié le sujet implicite. Si mixed → ambigu.
-        topic_info = self.retriever.topic_with_coherence(question, top_k_chunks=30, top_k_docs=6)
-        topic_doc_ids = topic_info["doc_ids"]
+        # P5 polish — Subject Resolver V2 vrai (LLM + embedding cosine vs primary_subject KG)
+        # Remplace topic_with_coherence léger. Cf VISION_RECENTREE §3 étape 1.
+        try:
+            sr_result = self.subject_resolver.resolve(question, cosine_threshold=0.55, top_k=5)
+            subject_extraction = sr_result.extraction
+            topic_doc_ids = sr_result.consolidated_doc_ids
+            sr_ambiguous = sr_result.is_ambiguous
+            sr_ambig_reason = sr_result.ambiguity_reason
+        except Exception as sr_exc:
+            logger.warning(f"QuestionSubjectResolver failed, falling back to retriever.topic_with_coherence: {sr_exc}")
+            fallback = self.retriever.topic_with_coherence(question, top_k_chunks=30, top_k_docs=6)
+            topic_doc_ids = fallback["doc_ids"]
+            sr_ambiguous = not fallback["topic_consistent"] and fallback["topic_signature"] == "mixed"
+            sr_ambig_reason = fallback["ambiguity_reason"]
+            subject_extraction = None
+
         diagnostic["subject_resolver"] = {
-            "n_topic_docs": len(topic_doc_ids),
-            "top_topic_docs": topic_doc_ids[:3],
-            "topic_consistent": topic_info["topic_consistent"],
-            "topic_signature": topic_info["topic_signature"],
-            "ambiguity_reason": topic_info["ambiguity_reason"],
+            "method": "QuestionSubjectResolver V2" if subject_extraction else "fallback_topic_coherence",
+            "subject_label": subject_extraction.subject_label if subject_extraction else None,
+            "subject_confidence": subject_extraction.confidence if subject_extraction else None,
+            "n_consolidated_docs": len(topic_doc_ids),
+            "top_docs": topic_doc_ids[:3],
+            "is_ambiguous": sr_ambiguous,
+            "ambiguity_reason": sr_ambig_reason,
         }
 
         # Si CURRENT_DEFAULT et sujet ambigu → escalade explicite
-        # (sauf si l'Anchor Filter a déjà restreint le scope, auquel cas on continue)
         if (
             anchor.anchor_type == AnchorType.CURRENT_DEFAULT
-            and not topic_info["topic_consistent"]
-            and topic_info["topic_signature"] == "mixed"
-            and len(topic_doc_ids) >= 3
+            and sr_ambiguous
+            and len(topic_doc_ids) >= 2
         ):
             return PipelineResponse(
                 decision=PipelineDecision.ESCALATE_AMBIGUOUS,
@@ -185,7 +207,7 @@ class RuntimeV2Pipeline:
                 anchor=anchor,
                 escalation_message=(
                     f"La question pourrait porter sur plusieurs sujets distincts. "
-                    f"{topic_info['ambiguity_reason']} Voulez-vous préciser ?"
+                    f"{sr_ambig_reason or ''} Voulez-vous préciser ?"
                 ),
                 alternatives=[{"doc_id": d, "confidence": 0.5} for d in topic_doc_ids[:5]],
                 diagnostic=diagnostic,
@@ -303,12 +325,27 @@ class RuntimeV2Pipeline:
                 question, authoritative_doc_ids, top_k_per_doc=3
             )
             evolution_points = self._build_evolution_timeline(chrono)
+
+            # P5 polish — synthèse RANGE multi-mode
+            evolution_synthesis = self.evolution_synthesizer.synthesize(
+                question=question,
+                evolution_points=[
+                    {
+                        "doc_id": ep.doc_id,
+                        "publication_date": ep.publication_date,
+                        "claims": [{"text": c.text} for c in ep.claims],
+                    }
+                    for ep in evolution_points
+                ],
+            )
+
             return PipelineResponse(
                 decision=decision,
                 question=question,
                 anchor=anchor,
                 authoritative_doc_ids=authoritative_doc_ids,
                 evolution_points=evolution_points,
+                synthesized_answer=evolution_synthesis,
                 trust_score=self._compute_trust_score(
                     anchor, filter_result.n_matched, len(evolution_points)
                 ),

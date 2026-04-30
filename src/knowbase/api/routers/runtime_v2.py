@@ -179,6 +179,186 @@ def health() -> dict:
         return {"status": "error", "detail": str(exc)}
 
 
+@router.get("/lifecycle_graph")
+def lifecycle_graph(focus_doc_id: Optional[str] = None, depth: int = 1) -> dict:
+    """Graph view lifecycle — retourne nodes (docs) + edges (LIFECYCLE_RELATION).
+
+    Si focus_doc_id fourni : graphe ego-centré (radius=depth).
+    Sinon : graphe global (toutes LIFECYCLE_RELATION du tenant).
+    """
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+    neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+    neo4j_password = os.getenv("NEO4J_PASSWORD", "graphiti_neo4j_pass")
+    tenant_id = os.getenv("TENANT_ID", "default")
+    driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+    try:
+        with driver.session() as session:
+            if focus_doc_id:
+                # Ego-graph : voisinage à distance <= depth
+                cypher = """
+                MATCH path = (focus:DocumentContext {doc_id: $focus, tenant_id: $tid})
+                              -[r:LIFECYCLE_RELATION*1..%d]-(other:DocumentContext)
+                WITH focus, relationships(path) AS rels, other
+                UNWIND rels AS r
+                WITH DISTINCT startNode(r) AS src, r, endNode(r) AS tgt
+                RETURN
+                  src.doc_id AS src_id,
+                  coalesce(src.primary_subject, '') AS src_subject,
+                  tgt.doc_id AS tgt_id,
+                  coalesce(tgt.primary_subject, '') AS tgt_subject,
+                  r.type AS rel_type,
+                  coalesce(r.confidence, 0.0) AS confidence
+                """ % max(1, min(depth, 3))
+                rows = session.run(cypher, focus=focus_doc_id, tid=tenant_id).data()
+            else:
+                rows = session.run(
+                    """
+                    MATCH (src:DocumentContext)-[r:LIFECYCLE_RELATION]->(tgt:DocumentContext)
+                    WHERE src.tenant_id = $tid AND tgt.tenant_id = $tid
+                    RETURN src.doc_id AS src_id, coalesce(src.primary_subject, '') AS src_subject,
+                           tgt.doc_id AS tgt_id, coalesce(tgt.primary_subject, '') AS tgt_subject,
+                           r.type AS rel_type, coalesce(r.confidence, 0.0) AS confidence
+                    LIMIT 100
+                    """,
+                    tid=tenant_id,
+                ).data()
+
+        # Construct nodes + edges
+        nodes_map = {}
+        edges = []
+        for row in rows:
+            for nid, sub in [(row["src_id"], row["src_subject"]), (row["tgt_id"], row["tgt_subject"])]:
+                if nid not in nodes_map:
+                    nodes_map[nid] = {
+                        "id": nid,
+                        "label": (sub or nid)[:60],
+                        "is_focus": nid == focus_doc_id,
+                    }
+            edges.append({
+                "from": row["src_id"],
+                "to": row["tgt_id"],
+                "type": row["rel_type"],
+                "confidence": row["confidence"],
+            })
+        return {
+            "focus_doc_id": focus_doc_id,
+            "nodes": list(nodes_map.values()),
+            "edges": edges,
+            "n_nodes": len(nodes_map),
+            "n_edges": len(edges),
+        }
+    finally:
+        driver.close()
+
+
+@router.get("/claim_detail/{claim_id}")
+def claim_detail(claim_id: str) -> dict:
+    """Drill-down P5 polish — détail d'un claim + ses LOGICAL_RELATION Claim→Claim.
+
+    Retourne :
+    - text + doc_id + passage_text + publication_date + applicability
+    - logical_outgoing : 9 types Logical (CONFLICT/SUBSET/EQUIVALENT/EXCEPTION/...) sortantes
+    - logical_incoming : entrantes (autres claims qui pointent vers celui-ci)
+    - facets_belongs_to : Facets liées via BELONGS_TO_FACET
+    """
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+    neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+    neo4j_password = os.getenv("NEO4J_PASSWORD", "graphiti_neo4j_pass")
+    tenant_id = os.getenv("TENANT_ID", "default")
+    driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+    try:
+        with driver.session() as session:
+            # Metadata claim
+            row = session.run(
+                """
+                MATCH (c:Claim {claim_id: $cid, tenant_id: $tid})
+                RETURN c.claim_id AS claim_id,
+                       c.doc_id AS doc_id,
+                       c.text AS text,
+                       coalesce(c.passage_text, '') AS passage_text,
+                       c.publication_date AS publication_date,
+                       coalesce(c.applicability_axis_release_id, '') AS release_id,
+                       coalesce(c.applicability_axis_temporal_value, '') AS temporal,
+                       c.lifecycle_status AS lifecycle_status,
+                       c.confidence AS confidence
+                """,
+                cid=claim_id,
+                tid=tenant_id,
+            ).single()
+            if row is None:
+                raise HTTPException(status_code=404, detail=f"Claim {claim_id} not found")
+
+            # Logical relations sortantes (9 types V2)
+            outgoing = session.run(
+                """
+                MATCH (c:Claim {claim_id: $cid, tenant_id: $tid})
+                      -[r:LOGICAL_RELATION]->(other:Claim)
+                WHERE coalesce(r.legacy, false) = false
+                RETURN other.claim_id AS target_claim_id,
+                       other.doc_id AS target_doc_id,
+                       (coalesce(other.text, ''))[..200] AS target_text_preview,
+                       r.type AS relation_type,
+                       coalesce(r.confidence, 0.0) AS confidence,
+                       r.reasoning AS reasoning
+                ORDER BY confidence DESC
+                LIMIT 20
+                """,
+                cid=claim_id,
+                tid=tenant_id,
+            ).data()
+
+            # Logical relations entrantes
+            incoming = session.run(
+                """
+                MATCH (other:Claim)
+                      -[r:LOGICAL_RELATION]->(c:Claim {claim_id: $cid, tenant_id: $tid})
+                WHERE coalesce(r.legacy, false) = false
+                RETURN other.claim_id AS source_claim_id,
+                       other.doc_id AS source_doc_id,
+                       (coalesce(other.text, ''))[..200] AS source_text_preview,
+                       r.type AS relation_type,
+                       coalesce(r.confidence, 0.0) AS confidence,
+                       r.reasoning AS reasoning
+                ORDER BY confidence DESC
+                LIMIT 20
+                """,
+                cid=claim_id,
+                tid=tenant_id,
+            ).data()
+
+            # Facets
+            facets = session.run(
+                """
+                MATCH (c:Claim {claim_id: $cid, tenant_id: $tid})
+                      -[bf:BELONGS_TO_FACET]->(f:Facet)
+                RETURN f.facet_name AS name,
+                       coalesce(bf.confidence, 0.0) AS confidence,
+                       coalesce(bf.promotion_level, '') AS level
+                ORDER BY confidence DESC
+                LIMIT 10
+                """,
+                cid=claim_id,
+                tid=tenant_id,
+            ).data()
+
+        return {
+            "claim_id": row["claim_id"],
+            "doc_id": row["doc_id"],
+            "text": row["text"],
+            "passage_text": row["passage_text"],
+            "publication_date": row["publication_date"],
+            "release_id": row.get("release_id"),
+            "temporal": row.get("temporal"),
+            "lifecycle_status": row.get("lifecycle_status"),
+            "confidence": row.get("confidence"),
+            "logical_outgoing": outgoing,
+            "logical_incoming": incoming,
+            "facets": facets,
+        }
+    finally:
+        driver.close()
+
+
 @router.get("/doc_detail/{doc_id}")
 def doc_detail(doc_id: str) -> dict:
     """Drill-down P2.4 — infos détaillées d'un doc + ses LIFECYCLE_RELATION.

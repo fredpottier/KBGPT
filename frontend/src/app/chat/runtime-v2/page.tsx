@@ -38,6 +38,7 @@ import {
   ModalCloseButton,
   useDisclosure,
 } from '@chakra-ui/react'
+import { LifecycleGraphMini } from '@/components/runtime/LifecycleGraphMini'
 
 type AnchorType = 'point' | 'range' | 'current_default'
 
@@ -126,6 +127,19 @@ type DocDetail = {
   n_conflicts: number
 }
 
+type ClaimDetail = {
+  claim_id: string
+  doc_id: string
+  text: string
+  passage_text?: string | null
+  publication_date?: string | null
+  lifecycle_status?: string | null
+  confidence?: number | null
+  logical_outgoing: { target_claim_id: string; target_doc_id: string; target_text_preview: string; relation_type: string; confidence: number; reasoning?: string | null }[]
+  logical_incoming: { source_claim_id: string; source_doc_id: string; source_text_preview: string; relation_type: string; confidence: number; reasoning?: string | null }[]
+  facets: { name: string; confidence: number; level: string }[]
+}
+
 export default function RuntimeV2Chat() {
   const [question, setQuestion] = useState('')
   const [auditMode, setAuditMode] = useState(false)
@@ -133,7 +147,7 @@ export default function RuntimeV2Chat() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // P2.4 — Drill-down modal
+  // P2.4 — Drill-down modal doc
   const { isOpen: isDocOpen, onOpen: onDocOpen, onClose: onDocClose } = useDisclosure()
   const [docDetail, setDocDetail] = useState<DocDetail | null>(null)
   const [docLoading, setDocLoading] = useState(false)
@@ -152,6 +166,26 @@ export default function RuntimeV2Chat() {
       setDocLoading(false)
     }
   }, [onDocOpen])
+
+  // P5 polish — Drill-down modal claim
+  const { isOpen: isClaimOpen, onOpen: onClaimOpen, onClose: onClaimClose } = useDisclosure()
+  const [claimDetail, setClaimDetail] = useState<ClaimDetail | null>(null)
+  const [claimLoading, setClaimLoading] = useState(false)
+
+  const openClaimDetail = useCallback(async (claimId: string) => {
+    setClaimLoading(true)
+    setClaimDetail(null)
+    onClaimOpen()
+    try {
+      const res = await fetch(`/api/runtime_v2/claim_detail/${encodeURIComponent(claimId)}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setClaimDetail(await res.json())
+    } catch (exc) {
+      console.error('Claim detail failed:', exc)
+    } finally {
+      setClaimLoading(false)
+    }
+  }, [onClaimOpen])
 
   const submit = useCallback(async () => {
     if (!question.trim()) return
@@ -330,11 +364,24 @@ export default function RuntimeV2Chat() {
                 <Heading size="sm" mb={3}>Claims pertinents ({response.claims.length})</Heading>
                 <VStack align="stretch" spacing={3}>
                   {response.claims.map((c) => (
-                    <Box key={c.claim_id} p={3} borderLeft="3px solid var(--accent-base)" bg="var(--bg-page)">
+                    <Box
+                      key={c.claim_id}
+                      p={3}
+                      borderLeft="3px solid var(--accent-base)"
+                      bg="var(--bg-page)"
+                      cursor="pointer"
+                      onClick={() => openClaimDetail(c.claim_id)}
+                      _hover={{ borderLeftWidth: '5px' }}
+                    >
                       <HStack justify="space-between" mb={1}>
-                        <Text fontSize="xs" fontFamily="mono" color="var(--fg-muted)">
-                          {c.doc_id} · {c.publication_date || '—'}
-                        </Text>
+                        <HStack>
+                          <Text fontSize="xs" fontFamily="mono" color="var(--fg-muted)">
+                            {c.doc_id} · {c.publication_date || '—'}
+                          </Text>
+                          <Tooltip label="Click pour drill-down claim">
+                            <Badge size="xs" variant="outline">→</Badge>
+                          </Tooltip>
+                        </HStack>
                         <Badge size="sm">{c.score.toFixed(2)}</Badge>
                       </HStack>
                       <Text fontSize="sm">{c.text}</Text>
@@ -503,6 +550,131 @@ export default function RuntimeV2Chat() {
                 {docDetail.lifecycle_outgoing.length === 0 && docDetail.lifecycle_incoming.length === 0 && (
                   <Text fontSize="sm" color="var(--fg-muted)">
                     Aucune relation lifecycle déclarée.
+                  </Text>
+                )}
+
+                {/* P5 polish — Mini graph view lifecycle */}
+                {(docDetail.lifecycle_outgoing.length > 0 || docDetail.lifecycle_incoming.length > 0) && (
+                  <Box mt={2}>
+                    <Heading size="xs" mb={2}>Graphe lifecycle (voisinage)</Heading>
+                    <LifecycleGraphMini focusDocId={docDetail.doc_id} onNodeClick={openDocDetail} />
+                  </Box>
+                )}
+              </VStack>
+            )}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+
+      {/* P5 polish — Drill-down modal claim */}
+      <Modal isOpen={isClaimOpen} onClose={onClaimClose} size="2xl" scrollBehavior="inside">
+        <ModalOverlay />
+        <ModalContent bg="var(--bg-surface)" color="var(--fg)">
+          <ModalHeader>
+            <Text fontSize="md" fontFamily="mono">{claimDetail?.claim_id || 'Claim detail'}</Text>
+            {claimDetail && (
+              <Text fontSize="xs" color="var(--fg-muted)">
+                {claimDetail.doc_id} · {claimDetail.publication_date || '—'}
+              </Text>
+            )}
+          </ModalHeader>
+          <ModalCloseButton />
+          <ModalBody pb={6}>
+            {claimLoading && <Spinner />}
+            {claimDetail && (
+              <VStack align="stretch" spacing={4}>
+                <Box p={3} bg="var(--bg-page)" rounded="md">
+                  <Text fontSize="sm" fontWeight="bold">Texte du claim</Text>
+                  <Text fontSize="sm" mt={1}>{claimDetail.text}</Text>
+                </Box>
+
+                {claimDetail.passage_text && claimDetail.passage_text !== claimDetail.text && (
+                  <Box p={3} bg="var(--bg-page)" rounded="md">
+                    <Text fontSize="xs" color="var(--fg-muted)">Passage source</Text>
+                    <Text fontSize="xs" mt={1}>{claimDetail.passage_text.slice(0, 500)}</Text>
+                  </Box>
+                )}
+
+                {claimDetail.facets.length > 0 && (
+                  <Box>
+                    <Heading size="xs" mb={2}>Facets</Heading>
+                    <HStack flexWrap="wrap" spacing={1}>
+                      {claimDetail.facets.map((f, i) => (
+                        <Tag key={i} size="sm" colorScheme={f.level === 'STRONG' ? 'green' : 'gray'}>
+                          {f.name} ({(f.confidence * 100).toFixed(0)}%)
+                        </Tag>
+                      ))}
+                    </HStack>
+                  </Box>
+                )}
+
+                {claimDetail.logical_outgoing.length > 0 && (
+                  <Box>
+                    <Heading size="xs" mb={2}>
+                      Relations sortantes ({claimDetail.logical_outgoing.length})
+                    </Heading>
+                    <VStack align="stretch" spacing={2}>
+                      {claimDetail.logical_outgoing.map((r, i) => (
+                        <Box
+                          key={i}
+                          p={2}
+                          bg="var(--bg-page)"
+                          rounded="sm"
+                          cursor="pointer"
+                          onClick={() => openClaimDetail(r.target_claim_id)}
+                          _hover={{ opacity: 0.8 }}
+                        >
+                          <HStack mb={1}>
+                            <Badge colorScheme={r.relation_type === 'CONFLICT' ? 'red' : r.relation_type === 'EQUIVALENT' ? 'green' : 'blue'}>
+                              {r.relation_type}
+                            </Badge>
+                            <Text fontSize="xs" fontFamily="mono" color="var(--fg-muted)">
+                              {r.target_doc_id}
+                            </Text>
+                            <Badge size="sm">{(r.confidence * 100).toFixed(0)}%</Badge>
+                          </HStack>
+                          <Text fontSize="xs">{r.target_text_preview}…</Text>
+                        </Box>
+                      ))}
+                    </VStack>
+                  </Box>
+                )}
+
+                {claimDetail.logical_incoming.length > 0 && (
+                  <Box>
+                    <Heading size="xs" mb={2}>
+                      Relations entrantes ({claimDetail.logical_incoming.length})
+                    </Heading>
+                    <VStack align="stretch" spacing={2}>
+                      {claimDetail.logical_incoming.map((r, i) => (
+                        <Box
+                          key={i}
+                          p={2}
+                          bg="var(--bg-page)"
+                          rounded="sm"
+                          cursor="pointer"
+                          onClick={() => openClaimDetail(r.source_claim_id)}
+                          _hover={{ opacity: 0.8 }}
+                        >
+                          <HStack mb={1}>
+                            <Text fontSize="xs" fontFamily="mono" color="var(--fg-muted)">
+                              {r.source_doc_id}
+                            </Text>
+                            <Badge colorScheme={r.relation_type === 'CONFLICT' ? 'red' : r.relation_type === 'EQUIVALENT' ? 'green' : 'blue'}>
+                              {r.relation_type}
+                            </Badge>
+                            <Badge size="sm">{(r.confidence * 100).toFixed(0)}%</Badge>
+                          </HStack>
+                          <Text fontSize="xs">{r.source_text_preview}…</Text>
+                        </Box>
+                      ))}
+                    </VStack>
+                  </Box>
+                )}
+
+                {claimDetail.logical_outgoing.length === 0 && claimDetail.logical_incoming.length === 0 && (
+                  <Text fontSize="sm" color="var(--fg-muted)">
+                    Aucune relation logique avec d'autres claims.
                   </Text>
                 )}
               </VStack>
