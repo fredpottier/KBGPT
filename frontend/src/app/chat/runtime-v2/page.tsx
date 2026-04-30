@@ -506,56 +506,67 @@ export default function RuntimeV2Chat() {
                   </Box>
                 </HStack>
 
-                {docDetail.lifecycle_outgoing.length > 0 && (
-                  <Box>
-                    <Heading size="xs" mb={2}>Ce doc <Tag size="sm" colorScheme="purple">{`→`}</Tag> (sortantes)</Heading>
-                    <VStack align="stretch" spacing={1}>
-                      {docDetail.lifecycle_outgoing.map((r, i) => (
-                        <HStack key={i} fontSize="sm">
-                          <Badge colorScheme={r.type === 'SUPERSEDES' ? 'red' : 'blue'}>{r.type}</Badge>
-                          <Tag
-                            size="sm"
-                            cursor="pointer"
-                            onClick={() => openDocDetail(r.target)}
-                            _hover={{ opacity: 0.8 }}
-                          >
-                            {r.target}
-                          </Tag>
-                          <Badge>{(r.confidence * 100).toFixed(0)}%</Badge>
-                          {r.evidence_quote && (
-                            <Tooltip label={r.evidence_quote}>
-                              <Text fontSize="xs" color="var(--fg-muted)" isTruncated maxW="300px">
-                                «{r.evidence_quote.slice(0, 60)}…»
-                              </Text>
-                            </Tooltip>
-                          )}
-                        </HStack>
-                      ))}
-                    </VStack>
-                  </Box>
-                )}
-
-                {docDetail.lifecycle_incoming.length > 0 && (
-                  <Box>
-                    <Heading size="xs" mb={2}>Ce doc <Tag size="sm" colorScheme="purple">{`←`}</Tag> (entrantes)</Heading>
-                    <VStack align="stretch" spacing={1}>
-                      {docDetail.lifecycle_incoming.map((r, i) => (
-                        <HStack key={i} fontSize="sm">
-                          <Tag
-                            size="sm"
-                            cursor="pointer"
-                            onClick={() => openDocDetail(r.source)}
-                            _hover={{ opacity: 0.8 }}
-                          >
-                            {r.source}
-                          </Tag>
-                          <Badge colorScheme={r.type === 'SUPERSEDES' ? 'red' : 'blue'}>{r.type}</Badge>
-                          <Badge>{(r.confidence * 100).toFixed(0)}%</Badge>
-                        </HStack>
-                      ))}
-                    </VStack>
-                  </Box>
-                )}
+                {(() => {
+                  // Regroupement sémantique : combine outgoing + incoming par "phrase humaine"
+                  const groups: Record<string, { items: { peer: string; confidence: number; evidence_quote?: string | null }[]; color: string }> = {
+                    'Ce document remplace': { items: [], color: 'red' },
+                    'Ce document est remplacé par': { items: [], color: 'red' },
+                    'Ce document évolue depuis': { items: [], color: 'blue' },
+                    'Documents qui évoluent depuis celui-ci': { items: [], color: 'blue' },
+                    'Ce document réaffirme': { items: [], color: 'green' },
+                    'Documents qui réaffirment celui-ci': { items: [], color: 'green' },
+                  }
+                  const NATURAL_OUT: Record<string, string> = {
+                    SUPERSEDES: 'Ce document remplace',
+                    EVOLVES_FROM: 'Ce document évolue depuis',
+                    REAFFIRMS: 'Ce document réaffirme',
+                  }
+                  const NATURAL_IN: Record<string, string> = {
+                    SUPERSEDES: 'Ce document est remplacé par',
+                    EVOLVES_FROM: 'Documents qui évoluent depuis celui-ci',
+                    REAFFIRMS: 'Documents qui réaffirment celui-ci',
+                  }
+                  docDetail.lifecycle_outgoing.forEach((r) => {
+                    const k = NATURAL_OUT[r.type]
+                    if (k) groups[k].items.push({ peer: r.target, confidence: r.confidence, evidence_quote: r.evidence_quote })
+                  })
+                  docDetail.lifecycle_incoming.forEach((r) => {
+                    const k = NATURAL_IN[r.type]
+                    if (k) groups[k].items.push({ peer: r.source, confidence: r.confidence })
+                  })
+                  return Object.entries(groups)
+                    .filter(([, g]) => g.items.length > 0)
+                    .map(([label, g]) => (
+                      <Box key={label}>
+                        <Heading size="xs" mb={2} color={`${g.color}.300`}>
+                          {label} ({g.items.length})
+                        </Heading>
+                        <VStack align="stretch" spacing={1}>
+                          {g.items.map((it, i) => (
+                            <HStack key={`${label}-${i}`} fontSize="sm">
+                              <Tag
+                                size="sm"
+                                cursor="pointer"
+                                onClick={() => openDocDetail(it.peer)}
+                                _hover={{ opacity: 0.8 }}
+                                fontFamily="mono"
+                              >
+                                {it.peer}
+                              </Tag>
+                              <Badge colorScheme={g.color}>conf {(it.confidence * 100).toFixed(0)}%</Badge>
+                              {it.evidence_quote && (
+                                <Tooltip label={it.evidence_quote}>
+                                  <Text fontSize="xs" color="var(--fg-muted)" isTruncated maxW="320px">
+                                    «{it.evidence_quote.slice(0, 60)}…»
+                                  </Text>
+                                </Tooltip>
+                              )}
+                            </HStack>
+                          ))}
+                        </VStack>
+                      </Box>
+                    ))
+                })()}
 
                 {docDetail.lifecycle_outgoing.length === 0 && docDetail.lifecycle_incoming.length === 0 && (
                   <Text fontSize="sm" color="var(--fg-muted)" fontStyle="italic">
