@@ -340,7 +340,7 @@ export default function RuntimeV2Chat() {
             {response.authoritative_doc_ids.length > 0 && (
               <Box borderWidth="1px" borderColor="var(--border)" rounded="md" p={4} bg="var(--bg-surface)">
                 <Text fontSize="sm" color="var(--fg-muted)" mb={2}>
-                  Sources autoritaires ({response.authoritative_doc_ids.length})
+                  Sources autoritaires ({response.authoritative_doc_ids.length}) — <em>cliquer pour détails + graphe lifecycle</em>
                 </Text>
                 <HStack flexWrap="wrap" spacing={2}>
                   {response.authoritative_doc_ids.slice(0, 10).map((d) => (
@@ -401,7 +401,16 @@ export default function RuntimeV2Chat() {
                     <Box key={ep.doc_id} p={3} bg="var(--bg-page)" borderLeft="3px solid var(--accent-base)">
                       <HStack mb={2}>
                         <Badge colorScheme="purple">{ep.publication_date || '—'}</Badge>
-                        <Text fontSize="xs" fontFamily="mono">{ep.doc_id}</Text>
+                        <Tag
+                          size="sm"
+                          colorScheme="cyan"
+                          cursor="pointer"
+                          onClick={() => openDocDetail(ep.doc_id)}
+                          _hover={{ opacity: 0.8 }}
+                          fontFamily="mono"
+                        >
+                          {ep.doc_id}
+                        </Tag>
                       </HStack>
                       <VStack align="stretch" spacing={1}>
                         {ep.claims.slice(0, 3).map((c) => (
@@ -549,18 +558,16 @@ export default function RuntimeV2Chat() {
                 )}
 
                 {docDetail.lifecycle_outgoing.length === 0 && docDetail.lifecycle_incoming.length === 0 && (
-                  <Text fontSize="sm" color="var(--fg-muted)">
-                    Aucune relation lifecycle déclarée.
+                  <Text fontSize="sm" color="var(--fg-muted)" fontStyle="italic">
+                    Aucune relation lifecycle déclarée pour ce document.
                   </Text>
                 )}
 
-                {/* P5 polish — Mini graph view lifecycle */}
-                {(docDetail.lifecycle_outgoing.length > 0 || docDetail.lifecycle_incoming.length > 0) && (
-                  <Box mt={2}>
-                    <Heading size="xs" mb={2}>Graphe lifecycle (voisinage)</Heading>
-                    <LifecycleGraphMini focusDocId={docDetail.doc_id} onNodeClick={openDocDetail} />
-                  </Box>
-                )}
+                {/* P5 polish — Mini graph view lifecycle (toujours affiché, montre voisinage ou doc isolé) */}
+                <Box mt={2}>
+                  <Heading size="xs" mb={2}>Graphe lifecycle (voisinage)</Heading>
+                  <LifecycleGraphMini focusDocId={docDetail.doc_id} onNodeClick={openDocDetail} />
+                </Box>
               </VStack>
             )}
           </ModalBody>
