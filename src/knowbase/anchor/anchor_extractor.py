@@ -99,7 +99,7 @@ class AnchorExtractor:
         self,
         vllm_url: str,
         model_id: str = "Qwen/Qwen2.5-14B-Instruct-AWQ",
-        timeout: float = 30.0,
+        timeout: float = 120.0,
         temperature: float = 0.1,
         max_tokens: int = 400,
     ) -> None:

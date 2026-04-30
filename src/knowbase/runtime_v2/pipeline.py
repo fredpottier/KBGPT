@@ -195,10 +195,14 @@ class RuntimeV2Pipeline:
             "ambiguity_reason": sr_ambig_reason,
         }
 
-        # Si CURRENT_DEFAULT et sujet ambigu → escalade explicite
+        # Si CURRENT_DEFAULT et sujet **vraiment** ambigu (LLM a flagué la question elle-même)
+        # → escalade explicite. La pluralité d'aliases dans le KG ne suffit pas (data quality).
+        question_truly_ambiguous = (
+            subject_extraction is not None and subject_extraction.is_ambiguous
+        )
         if (
             anchor.anchor_type == AnchorType.CURRENT_DEFAULT
-            and sr_ambiguous
+            and question_truly_ambiguous
             and len(topic_doc_ids) >= 2
         ):
             return PipelineResponse(
@@ -308,6 +312,17 @@ class RuntimeV2Pipeline:
 
         elif anchor.anchor_type == AnchorType.RANGE:
             authoritative_doc_ids = filter_result.matched_doc_ids or []
+            # Intersect avec topic_doc_ids si le sujet a été résolu :
+            # évite de mélanger CS-25 et EU dual-use juste parce qu'ils partagent
+            # une fenêtre temporelle. On ne réduit que si l'intersection est non vide.
+            if topic_doc_ids and authoritative_doc_ids:
+                topic_set = set(topic_doc_ids)
+                intersected = [d for d in authoritative_doc_ids if d in topic_set]
+                if intersected:
+                    diagnostic["filter"]["intersected_with_subject"] = True
+                    diagnostic["filter"]["before_intersect"] = len(authoritative_doc_ids)
+                    diagnostic["filter"]["after_intersect"] = len(intersected)
+                    authoritative_doc_ids = intersected
             decision = PipelineDecision.ANSWERED_EVOLUTION
 
         else:

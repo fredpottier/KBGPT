@@ -94,7 +94,7 @@ class AtlasGenerator:
         vllm_url: str,
         tenant_id: str = "default",
         vllm_model: str = "Qwen/Qwen2.5-14B-Instruct-AWQ",
-        timeout: float = 30.0,
+        timeout: float = 120.0,
     ) -> None:
         self.driver = driver
         self.vllm_url = vllm_url.rstrip("/")

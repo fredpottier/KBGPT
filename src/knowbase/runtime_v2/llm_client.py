@@ -46,7 +46,7 @@ class RuntimeLLMClient:
 
     def __init__(
         self,
-        timeout: float = 30.0,
+        timeout: float = 120.0,
         health_check_timeout: float = 2.5,
         endpoint_cache_seconds: int = 60,
     ) -> None:
