@@ -3,10 +3,9 @@
 /**
  * LifecycleGraphMini — SVG mini graph pour LIFECYCLE_RELATION.
  *
- * Layout radial : focus au centre, voisins en cercle. Avec arrowheads,
- * légende des types, et labels courts dérivés du doc_id pour éviter
- * les ambiguïtés visuelles (plusieurs docs partagent souvent le même
- * primary_subject).
+ * Layout radial : focus au centre (cercle bleu "ICI"), voisins en cercle.
+ * Labels positionnés radialement avec textAnchor adapté à l'angle pour
+ * éviter le chevauchement. Edge labels offset perpendiculaire.
  */
 
 import { useEffect, useState } from 'react'
@@ -29,17 +28,30 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 const W = 640
-const H = 380
+const H = 420
 const NODE_R = 14
-const FOCUS_R = 18
+const FOCUS_R = 22
 
-/** Génère un label compact à partir du doc_id en strippant le hash final. */
+/** Génère un label court à partir du doc_id en strippant le hash final. */
 function shortLabel(docId: string): string {
   const m = docId.match(/^(.*?)_[0-9a-f]{6,}$/)
-  return (m ? m[1] : docId).replace(/_/g, ' ')
+  const stem = m ? m[1] : docId
+
+  // Pattern EU reg/del : <prefix>_<kind>_<year>_<num>(_original)?
+  const eu = stem.match(/^[a-z]+_(\w+)_(\d{4})_(\d+)(?:_original)?$/)
+  if (eu) {
+    return `${eu[1]} ${eu[2]}/${eu[3]}`
+  }
+  // Pattern CS-25 : cs25_(change_)?amdt_<num>
+  const cs25 = stem.match(/^cs25_(?:change_)?amdt_(\d+)$/)
+  if (cs25) {
+    return `CS-25 amdt ${cs25[1]}`
+  }
+  // Fallback : underscores → espaces, max 26 chars
+  const simple = stem.replace(/_/g, ' ')
+  return simple.length > 26 ? simple.slice(0, 26) + '…' : simple
 }
 
-/** Raccourcit une ligne en p1->p2 pour s'arrêter avant l'extrémité (laisse de la place à l'arrowhead). */
 function shortenLine(p1: { x: number; y: number }, p2: { x: number; y: number }, offset: number) {
   const dx = p2.x - p1.x
   const dy = p2.y - p1.y
@@ -96,21 +108,22 @@ export function LifecycleGraphMini({
     )
   }
 
-  // Layout radial
   const focus = data.nodes.find((n) => n.is_focus) || data.nodes[0]
   const others = data.nodes.filter((n) => n.id !== focus.id)
   const cx = W / 2
-  const cy = H / 2 - 10
-  const radius = Math.min(W, H) / 2 - 90
+  const cy = H / 2
+  const radius = Math.min(W, H) / 2 - 110
 
-  const positions: Record<string, { x: number; y: number }> = {
-    [focus.id]: { x: cx, y: cy },
+  // Stocker l'angle pour chaque voisin (sert au placement de label)
+  const positions: Record<string, { x: number; y: number; angle: number }> = {
+    [focus.id]: { x: cx, y: cy, angle: 0 },
   }
   others.forEach((n, i) => {
     const angle = (i / Math.max(1, others.length)) * 2 * Math.PI - Math.PI / 2
     positions[n.id] = {
       x: cx + Math.cos(angle) * radius,
       y: cy + Math.sin(angle) * radius,
+      angle,
     }
   })
 
@@ -125,45 +138,66 @@ export function LifecycleGraphMini({
               viewBox="0 0 10 10"
               refX="9"
               refY="5"
-              markerWidth="7"
-              markerHeight="7"
+              markerWidth="8"
+              markerHeight="8"
               orient="auto"
             >
               <path d="M 0 0 L 10 5 L 0 10 z" fill={c} />
             </marker>
           ))}
+          {/* Halo blanc pour les labels d'arête (lisibilité sur fond) */}
+          <filter id="label-bg" x="-10%" y="-10%" width="120%" height="120%">
+            <feFlood floodColor="var(--bg-page)" floodOpacity="0.85" />
+            <feComposite in="SourceGraphic" operator="over" />
+          </filter>
         </defs>
 
-        {/* Edges */}
+        {/* Edges (avec label perpendiculaire) */}
         {data.edges.map((e, i) => {
-          const p1 = positions[e.from]
+          const p1raw = positions[e.from]
           const p2raw = positions[e.to]
-          if (!p1 || !p2raw) return null
+          if (!p1raw || !p2raw) return null
           const targetIsFocus = e.to === focus.id
           const sourceIsFocus = e.from === focus.id
-          // Raccourcir aux extrémités pour ne pas plonger sous les nodes
           const targetR = targetIsFocus ? FOCUS_R : NODE_R
           const sourceR = sourceIsFocus ? FOCUS_R : NODE_R
-          const p2 = shortenLine(p1, p2raw, targetR + 3)
-          const p1adj = shortenLine(p2raw, p1, sourceR + 3)
+          const p2 = shortenLine(p1raw, p2raw, targetR + 4)
+          const p1 = shortenLine(p2raw, p1raw, sourceR + 4)
           const color = TYPE_COLORS[e.type] || '#888'
-          const mid = { x: (p1adj.x + p2.x) / 2, y: (p1adj.y + p2.y) / 2 }
+          // Milieu et normale perpendiculaire pour décaler le label hors de l'arête
+          const dx = p2.x - p1.x
+          const dy = p2.y - p1.y
+          const len = Math.sqrt(dx * dx + dy * dy) || 1
+          const nx = -dy / len
+          const ny = dx / len
+          const offset = 12
+          const labelX = (p1.x + p2.x) / 2 + nx * offset
+          const labelY = (p1.y + p2.y) / 2 + ny * offset
           return (
             <g key={i}>
               <line
-                x1={p1adj.x}
-                y1={p1adj.y}
+                x1={p1.x}
+                y1={p1.y}
                 x2={p2.x}
                 y2={p2.y}
                 stroke={color}
                 strokeWidth={2}
-                opacity={0.85}
+                opacity={0.9}
                 markerEnd={`url(#arrow-${e.type})`}
               />
-              {/* Étiquette type sur le milieu de l'arête */}
+              {/* Halo de fond pour lisibilité */}
+              <rect
+                x={labelX - 36}
+                y={labelY - 8}
+                width={72}
+                height={14}
+                fill="var(--bg-page)"
+                opacity={0.85}
+                rx={3}
+              />
               <text
-                x={mid.x}
-                y={mid.y - 4}
+                x={labelX}
+                y={labelY + 3}
                 textAnchor="middle"
                 fontSize={10}
                 fill={color}
@@ -182,8 +216,19 @@ export function LifecycleGraphMini({
           if (!p) return null
           const isFocus = n.is_focus
           const r = isFocus ? FOCUS_R : NODE_R
-          // Position label : focus en bas, autres rayonnent
-          const labelDy = isFocus ? r + 16 : r + 14
+          // Label des voisins : décalé radialement vers l'extérieur
+          let labelX = 0
+          let labelY = 0
+          let textAnchor: 'start' | 'middle' | 'end' = 'middle'
+          if (!isFocus) {
+            const dist = r + 8
+            labelX = Math.cos(p.angle) * dist
+            labelY = Math.sin(p.angle) * dist + 4
+            // Anchor selon quadrant
+            if (Math.cos(p.angle) > 0.3) textAnchor = 'start'
+            else if (Math.cos(p.angle) < -0.3) textAnchor = 'end'
+            else textAnchor = 'middle'
+          }
           return (
             <g
               key={n.id}
@@ -192,9 +237,7 @@ export function LifecycleGraphMini({
               onClick={() => onNodeClick?.(n.id)}
             >
               <title>
-                {n.id}
-                {'\n'}
-                {n.label}
+                {n.id} — {n.label}
               </title>
               <circle
                 r={r}
@@ -203,20 +246,29 @@ export function LifecycleGraphMini({
                 strokeWidth={isFocus ? 3 : 1.5}
               />
               {isFocus && (
-                <text textAnchor="middle" dy={4} fontSize={11} fontWeight="bold" fill="white" style={{ pointerEvents: 'none' }}>
+                <text
+                  textAnchor="middle"
+                  dy={4}
+                  fontSize={12}
+                  fontWeight="bold"
+                  fill="white"
+                  style={{ pointerEvents: 'none' }}
+                >
                   ICI
                 </text>
               )}
-              <text
-                y={labelDy}
-                textAnchor="middle"
-                fontSize={11}
-                fontWeight={isFocus ? 'bold' : 'normal'}
-                fill="var(--fg)"
-                style={{ pointerEvents: 'none' }}
-              >
-                {shortLabel(n.id)}
-              </text>
+              {!isFocus && (
+                <text
+                  x={labelX}
+                  y={labelY}
+                  textAnchor={textAnchor}
+                  fontSize={11}
+                  fill="var(--fg)"
+                  style={{ pointerEvents: 'none' }}
+                >
+                  {shortLabel(n.id)}
+                </text>
+              )}
             </g>
           )
         })}
@@ -225,9 +277,9 @@ export function LifecycleGraphMini({
       <HStack mt={2} spacing={4} fontSize="xs" color="var(--fg-muted)" flexWrap="wrap">
         {Object.entries(TYPE_COLORS).map(([t, c]) => (
           <HStack key={t} spacing={1}>
-            <Box as="span" w="12px" h="2px" bg={c} />
+            <Box as="span" w="14px" h="2px" bg={c} />
             <Text>
-              {t} <em>({TYPE_LABELS[t]})</em>
+              <em>{TYPE_LABELS[t]}</em>
             </Text>
           </HStack>
         ))}
