@@ -109,23 +109,20 @@ class ResponseSynthesizer:
         )
 
         try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.post(
-                    f"{self.vllm_url}/v1/chat/completions",
-                    json={
-                        "model": self.model_id,
-                        "messages": [
-                            {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "temperature": self.temperature,
-                        "max_tokens": self.max_tokens,
-                    },
-                )
-                resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"].strip()
-                return content or _fallback_response(claims)
-        except (httpx.HTTPError, KeyError, IndexError) as exc:
+            from knowbase.runtime_v2.llm_client import get_runtime_llm_client
+            client = get_runtime_llm_client()
+            content = client.chat_completion(
+                messages=[
+                    {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                json_mode=False,
+                timeout=self.timeout,
+            ).strip()
+            return content or _fallback_response(claims)
+        except Exception as exc:
             logger.error("Synthesis LLM call failed: %s", exc)
             return _fallback_response(claims)
 
@@ -215,25 +212,22 @@ class EvolutionSynthesizer:
         )
 
         try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.post(
-                    f"{self.vllm_url}/v1/chat/completions",
-                    json={
-                        "model": self.model_id,
-                        "messages": [
-                            {"role": "system", "content": EVOLUTION_SYNTHESIS_PROMPT},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "temperature": self.temperature,
-                        "max_tokens": self.max_tokens,
-                    },
-                )
-                resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"].strip()
-                if not content:
-                    return _evolution_fallback(used)
-                return content
-        except (httpx.HTTPError, KeyError, IndexError) as exc:
+            from knowbase.runtime_v2.llm_client import get_runtime_llm_client
+            client = get_runtime_llm_client()
+            content = client.chat_completion(
+                messages=[
+                    {"role": "system", "content": EVOLUTION_SYNTHESIS_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                json_mode=False,
+                timeout=self.timeout,
+            ).strip()
+            if not content:
+                return _evolution_fallback(used)
+            return content
+        except Exception as exc:
             logger.error(f"EvolutionSynthesizer LLM call failed: {exc}")
             return _evolution_fallback(used)
 

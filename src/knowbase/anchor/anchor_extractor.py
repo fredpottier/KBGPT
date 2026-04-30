@@ -125,27 +125,25 @@ class AnchorExtractor:
         return validated
 
     def _call_llm(self, question: str) -> str:
-        endpoint = f"{self.vllm_url}/v1/chat/completions"
+        """Appel via RuntimeLLMClient (vLLM si actif, sinon DeepInfra)."""
         user_prompt = (
             "Extract the anchor from this question. Output JSON only, no commentary.\n\n"
             f"Question: {question}"
         )
-        payload = {
-            "model": self.model_id,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "response_format": {"type": "json_object"},
-        }
         try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.post(endpoint, json=payload)
-                resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"]
-        except (httpx.HTTPError, KeyError, IndexError) as exc:
+            from knowbase.runtime_v2.llm_client import get_runtime_llm_client
+            client = get_runtime_llm_client()
+            return client.chat_completion(
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                json_mode=True,
+                timeout=self.timeout,
+            )
+        except Exception as exc:
             logger.error("AnchorExtractor LLM call failed: %s", exc)
             return '{"anchor_type": "current_default", "scope": {}, "confidence": 0.0, "reasoning": "LLM call failed, fallback safety"}'
 

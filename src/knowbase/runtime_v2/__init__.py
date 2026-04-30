@@ -25,6 +25,11 @@ from knowbase.runtime_v2.models import (
     EvolutionPoint,
 )
 from knowbase.runtime_v2.pipeline import RuntimeV2Pipeline
+from knowbase.runtime_v2.llm_client import (
+    RuntimeLLMClient,
+    get_runtime_llm_client,
+    LLMBackendUnavailable,
+)
 
 __all__ = [
     "PipelineDecision",
@@ -33,4 +38,7 @@ __all__ = [
     "ConflictReport",
     "EvolutionPoint",
     "RuntimeV2Pipeline",
+    "RuntimeLLMClient",
+    "get_runtime_llm_client",
+    "LLMBackendUnavailable",
 ]

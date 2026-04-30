@@ -207,25 +207,22 @@ class AtlasGenerator:
             f"Now write the narrative topic JSON:"
         )
         try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.post(
-                    f"{self.vllm_url}/v1/chat/completions",
-                    json={
-                        "model": self.vllm_model,
-                        "messages": [
-                            {"role": "system", "content": TOPIC_PROMPT},
-                            {"role": "user", "content": user_input},
-                        ],
-                        "temperature": 0.4,
-                        "max_tokens": 600,
-                        "response_format": {"type": "json_object"},
-                    },
-                )
-                resp.raise_for_status()
-                data = json.loads(resp.json()["choices"][0]["message"]["content"])
-                if not data.get("title") or not data.get("executive_summary"):
-                    return None
-                return data
+            from knowbase.runtime_v2.llm_client import get_runtime_llm_client
+            client = get_runtime_llm_client()
+            content = client.chat_completion(
+                messages=[
+                    {"role": "system", "content": TOPIC_PROMPT},
+                    {"role": "user", "content": user_input},
+                ],
+                temperature=0.4,
+                max_tokens=600,
+                json_mode=True,
+                timeout=self.timeout,
+            )
+            data = json.loads(content)
+            if not data.get("title") or not data.get("executive_summary"):
+                return None
+            return data
         except Exception as exc:
             logger.warning(f"Topic LLM call failed: {exc}")
             return None
@@ -241,23 +238,20 @@ class AtlasGenerator:
             + "\n\nWrite the homepage introduction JSON:"
         )
         try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.post(
-                    f"{self.vllm_url}/v1/chat/completions",
-                    json={
-                        "model": self.vllm_model,
-                        "messages": [
-                            {"role": "system", "content": HOMEPAGE_PROMPT},
-                            {"role": "user", "content": user_input},
-                        ],
-                        "temperature": 0.4,
-                        "max_tokens": 400,
-                        "response_format": {"type": "json_object"},
-                    },
-                )
-                resp.raise_for_status()
-                data = json.loads(resp.json()["choices"][0]["message"]["content"])
-                return data.get("introduction", "")
+            from knowbase.runtime_v2.llm_client import get_runtime_llm_client
+            client = get_runtime_llm_client()
+            content = client.chat_completion(
+                messages=[
+                    {"role": "system", "content": HOMEPAGE_PROMPT},
+                    {"role": "user", "content": user_input},
+                ],
+                temperature=0.4,
+                max_tokens=400,
+                json_mode=True,
+                timeout=self.timeout,
+            )
+            data = json.loads(content)
+            return data.get("introduction", "")
         except Exception as exc:
             logger.warning(f"Homepage intro LLM call failed: {exc}")
             return "Cet atlas regroupe les perspectives narratives extraites du corpus documentaire."

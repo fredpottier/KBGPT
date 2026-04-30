@@ -180,30 +180,26 @@ class QuestionSubjectResolver:
     def _extract_subject_llm(self, question: str) -> SubjectExtraction:
         """Single LLM call pour extraire le subject_label de la question."""
         try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.post(
-                    f"{self.vllm_url}/v1/chat/completions",
-                    json={
-                        "model": self.vllm_model,
-                        "messages": [
-                            {"role": "system", "content": SUBJECT_EXTRACTION_PROMPT},
-                            {"role": "user", "content": f"Question: {question}\n\nExtract subject as JSON:"},
-                        ],
-                        "temperature": 0.1,
-                        "max_tokens": 300,
-                        "response_format": {"type": "json_object"},
-                    },
-                )
-                resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"]
-                data = json.loads(content)
-                return SubjectExtraction(
-                    subject_label=data.get("subject_label", ""),
-                    confidence=float(data.get("confidence", 0.0)),
-                    is_ambiguous=bool(data.get("is_ambiguous", False)),
-                    alternative_subjects=data.get("alternative_subjects", []) or [],
-                    reasoning=data.get("reasoning"),
-                )
+            from knowbase.runtime_v2.llm_client import get_runtime_llm_client
+            client = get_runtime_llm_client()
+            content = client.chat_completion(
+                messages=[
+                    {"role": "system", "content": SUBJECT_EXTRACTION_PROMPT},
+                    {"role": "user", "content": f"Question: {question}\n\nExtract subject as JSON:"},
+                ],
+                temperature=0.1,
+                max_tokens=300,
+                json_mode=True,
+                timeout=self.timeout,
+            )
+            data = json.loads(content)
+            return SubjectExtraction(
+                subject_label=data.get("subject_label", ""),
+                confidence=float(data.get("confidence", 0.0)),
+                is_ambiguous=bool(data.get("is_ambiguous", False)),
+                alternative_subjects=data.get("alternative_subjects", []) or [],
+                reasoning=data.get("reasoning"),
+            )
         except Exception as exc:
             logger.warning(f"QuestionSubjectResolver LLM call failed: {exc}")
             return SubjectExtraction(
