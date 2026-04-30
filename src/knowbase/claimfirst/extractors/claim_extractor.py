@@ -25,7 +25,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Callable, Dict, List, Optional, Tuple, Any
 
 from knowbase.claimfirst.models.claim import Claim, ClaimType, ClaimScope
 from knowbase.claimfirst.models.entity import is_valid_entity_name
@@ -347,6 +347,7 @@ class ClaimExtractor:
         doc_type: str = "technical",
         doc_subject: str = "",
         domain_context: str = "",
+        on_block_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Tuple[List[Claim], Dict[str, UnitIndexResult]]:
         """
         Extrait les Claims des passages.
@@ -359,6 +360,10 @@ class ClaimExtractor:
             doc_type: Type de document (contexte)
             doc_subject: Sujet principal du document (contexte V2)
             domain_context: Bloc de contexte métier injecté dans le prompt (V2)
+            on_block_complete: P4.3 — callback optionnel invoqué après chaque batch LLM
+                avec dict {block_index, total_blocks, claims_in_block, total_claims_so_far}.
+                Permet à l'orchestrator de checkpointer le JobManager (P4.1) en
+                Redis pour la reprise au crash.
 
         Returns:
             Tuple (claims, unit_index) où unit_index permet de retrouver le verbatim
@@ -417,10 +422,16 @@ class ClaimExtractor:
         )
 
         # Phase 3: Exécuter tous les batches en parallèle
-        if batch_tasks:
-            claims = asyncio.run(self._extract_all_batches_async(batch_tasks))
-        else:
-            claims = []
+        # P4.3 — propager le callback via attribut self (cross thread/loop safe)
+        self._on_block_complete = on_block_complete
+        try:
+            if batch_tasks:
+                claims = asyncio.run(self._extract_all_batches_async(batch_tasks))
+            else:
+                claims = []
+        finally:
+            # Reset l'attribut pour ne pas polluer un autre call
+            self._on_block_complete = None
 
         logger.info(
             f"[OSMOSE:ClaimExtractor] Extracted {len(claims)} claims "
@@ -446,12 +457,34 @@ class ClaimExtractor:
         all_claims: List[Claim] = []
         lock = asyncio.Lock()
 
+        # P4.3 — callback invoqué à chaque batch terminé pour permettre checkpoint Redis
+        on_block_complete: Optional[Callable[[Dict[str, Any]], None]] = getattr(
+            self, "_on_block_complete", None
+        )
+        n_total_batches = len(batch_tasks)
+        completed_counter = {"n": 0}
+
         async def process_batch(task: BatchTask) -> None:
             async with semaphore:
                 try:
                     claims = await self._extract_claims_from_units_async(task)
                     async with lock:
                         all_claims.extend(claims)
+                        completed_counter["n"] += 1
+                        # Callback P4.3 — sous lock pour cohérence
+                        if on_block_complete is not None:
+                            try:
+                                on_block_complete({
+                                    "block_index": completed_counter["n"],
+                                    "total_blocks": n_total_batches,
+                                    "claims_in_block": len(claims),
+                                    "total_claims_so_far": len(all_claims),
+                                    "batch_id": task.batch_id,
+                                })
+                            except Exception as cb_exc:
+                                logger.warning(
+                                    f"[OSMOSE:ClaimExtractor] on_block_complete callback failed: {cb_exc}"
+                                )
                 except Exception as e:
                     logger.error(f"[OSMOSE:ClaimExtractor] Batch {task.batch_id} failed: {e}")
 
@@ -825,6 +858,30 @@ Reply ONLY with a JSON array, one entry per claim:
             self.stats["json_parse_errors"] += 1
             logger.warning(f"[OSMOSE:ClaimExtractor] JSON parse error: {e}")
             logger.debug(f"[OSMOSE:ClaimExtractor] Raw response (first 500): {response[:500]}")
+            # P3.3 — Forensics : si > 5 errors consécutives, dump le prompt+response problématique
+            # pour investigation Qwen dégénérescence (cas WEF Presidio).
+            n_errors = self.stats.get("json_parse_errors", 0)
+            if n_errors in (5, 10, 25, 50, 100) or (n_errors >= 100 and n_errors % 50 == 0):
+                try:
+                    from datetime import datetime
+                    from pathlib import Path
+                    forensics_dir = Path("/data/forensics/claimfirst_qwen_degeneration")
+                    forensics_dir.mkdir(parents=True, exist_ok=True)
+                    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                    fpath = forensics_dir / f"json_parse_error_n{n_errors}_{ts}.txt"
+                    fpath.write_text(
+                        f"=== JSON Parse Error #{n_errors} ===\n"
+                        f"Timestamp: {ts}\n"
+                        f"Error: {e}\n\n"
+                        f"=== Raw response ===\n{response[:4000]}\n",
+                        encoding="utf-8",
+                    )
+                    logger.error(
+                        f"[OSMOSE:ClaimExtractor] Recurring JSON errors detected "
+                        f"(n={n_errors}). Forensics saved : {fpath}"
+                    )
+                except Exception as fexc:
+                    logger.warning(f"[OSMOSE:ClaimExtractor] Forensics dump failed: {fexc}")
             return []
 
     def _try_repair_json(self, response: str) -> Optional[List[dict]]:

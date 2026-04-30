@@ -1,0 +1,42 @@
+[
+  {
+    "id": "v2_aero_01",
+    "task": "T1_provenance",
+    "question": "What is the EU regime for the control of exports of dual-use items?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Regulation (EU) 2021/821 establishes a Union regime for the control of exports, brokering, technical assistance, transit and transfer of dual-use items.",
+    "category": "current_default_eu_dualuse"
+  },
+  {
+    "id": "v2_aero_02",
+    "task": "T2_lifecycle",
+    "question": "What did Regulation (EU) 2021/821 repeal?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Regulation (EC) No 428/2009 is repealed by Regulation (EU) 2021/821.",
+    "category": "lifecycle_supersedes"
+  },
+  {
+    "id": "v2_aero_03",
+    "task": "T1_provenance",
+    "question": "What is required by CS-25 Amendment 27?",
+    "ground_truth_doc_id": "cs25_amdt_27_992260a7",
+    "ground_truth_answer": "CS-25 Amendment 27 introduces certification requirements for large aeroplanes (S25.60 Security and other amendments).",
+    "category": "anchor_point_cs25"
+  },
+  {
+    "id": "v2_aero_04",
+    "task": "T3_evolution",
+    "question": "How has dual-use export control evolved between 2009 and 2024?",
+    "ground_truth_doc_id": null,
+    "ground_truth_answer": "Started with Regulation (EC) 428/2009, recast as Regulation (EU) 2021/821, then amended by delegated acts 2023/66, 2023/996, and 2024/2547 updating Annex I.",
+    "category": "evolution_range"
+  },
+  {
+    "id": "v2_aero_05",
+    "task": "T1_provenance",
+    "question": "What is the certification basis for Large Aeroplanes issued by EASA?",
+    "ground_truth_doc_id": "cs25_amdt_28_32f1a9ac",
+    "ground_truth_answer": "CS-25 Amendment 28 (ED Decision 2023/021/R) is the current EASA certification specification for Large Aeroplanes.",
+    "category": "current_default_cs25"
+  }
+]

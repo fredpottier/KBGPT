@@ -762,6 +762,7 @@ class ClaimFirstOrchestrator:
         doc_id: str,
         cache_result: CacheLoadResult,
         tenant_id: Optional[str] = None,
+        job_manager: Optional[Any] = None,
     ) -> ClaimFirstResult:
         """
         Traite et persiste un document.
@@ -770,17 +771,55 @@ class ClaimFirstOrchestrator:
             doc_id: Document ID
             cache_result: Résultat du cache Pass0
             tenant_id: Tenant ID (override)
+            job_manager: P4.4 — JobManager optionnel pour checkpoints Redis.
+                Si fourni, écrit 3 checkpoints :
+                - post_extract (après process())
+                - post_claim_persist (après persister.persist())
+                - done (final)
 
         Returns:
             ClaimFirstResult avec tous les artefacts
         """
+        # P4.4 — checkpoint init si JobManager fourni
+        if job_manager is not None:
+            try:
+                from knowbase.ingestion.resilience import JobCheckpoint, JobStateEnum
+                existing = job_manager.get_state(doc_id)
+                if existing is None:
+                    job_manager.create_job(doc_id=doc_id, file_path=cache_result.cache_path or "unknown")
+                job_manager.update_state(doc_id, JobStateEnum.PROCESSING, checkpoint=JobCheckpoint(phase="extract", progress=0.0))
+            except Exception as exc:
+                logger.warning(f"[OSMOSE:ClaimFirst] JobManager init failed: {exc}")
+
         result = self.process(doc_id, cache_result, tenant_id)
+
+        # P4.4 — checkpoint post_extract
+        if job_manager is not None:
+            try:
+                from knowbase.ingestion.resilience import JobCheckpoint, JobStateEnum
+                job_manager.update_state(
+                    doc_id, JobStateEnum.PROCESSING,
+                    checkpoint=JobCheckpoint(phase="post_extract", progress=0.6, metadata={"n_claims": len(result.claims) if result.claims else 0}),
+                )
+            except Exception as exc:
+                logger.warning(f"[OSMOSE:ClaimFirst] JobManager checkpoint failed: {exc}")
 
         # Phase 7: Persist Neo4j
         if self.persist_enabled and self.persister:
             logger.info("[OSMOSE:ClaimFirst] Phase 7: Persisting to Neo4j...")
             persist_stats = self.persister.persist(result)
             logger.info(f"  → {persist_stats}")
+
+            # P4.4 — checkpoint post_claim_persist
+            if job_manager is not None:
+                try:
+                    from knowbase.ingestion.resilience import JobCheckpoint, JobStateEnum
+                    job_manager.update_state(
+                        doc_id, JobStateEnum.POST_IMPORT,
+                        checkpoint=JobCheckpoint(phase="post_claim_persist", progress=0.85, metadata={"persist_stats": persist_stats}),
+                    )
+                except Exception as exc:
+                    logger.warning(f"[OSMOSE:ClaimFirst] JobManager checkpoint failed: {exc}")
 
         # Phase 7.5: Classification des tensions (tension_level + tension_nature)
         # Appelle ContradictionClassifier sur les CONTRADICTS fraichement persistees
@@ -897,6 +936,17 @@ class ClaimFirstOrchestrator:
                     logger.warning(
                         f"[OSMOSE:ClaimFirst] Could not persist FAILED status: {status_err}"
                     )
+
+        # P4.4 — checkpoint final DONE
+        if job_manager is not None:
+            try:
+                from knowbase.ingestion.resilience import JobCheckpoint, JobStateEnum
+                job_manager.update_state(
+                    doc_id, JobStateEnum.DONE,
+                    checkpoint=JobCheckpoint(phase="done", progress=1.0),
+                )
+            except Exception as exc:
+                logger.warning(f"[OSMOSE:ClaimFirst] JobManager final checkpoint failed: {exc}")
 
         return result
 

@@ -88,6 +88,69 @@ def _get_tenant():
     return "default"
 
 
+# ── P5.2 — POC Atlas narratif from Perspectives ──────────────────────────────
+
+
+class PerspectiveTopic(BaseModel):
+    """POC P5.2 : représente une Perspective V2 comme topic narratif Atlas."""
+
+    perspective_id: str
+    label: str
+    description: str = ""
+    subjects: List[str] = []
+    facets: List[str] = []
+    keywords: List[str] = []
+    claim_count: int = 0
+    doc_count: int = 0
+    importance_score: float = 0.0
+
+
+@router.get("/perspective_topics", response_model=List[PerspectiveTopic])
+async def list_perspective_topics(limit: int = 100):
+    """POC P5.2 — Atlas narratif basé sur les Perspectives V2 existantes.
+
+    Au lieu de générer des nodes AtlasHomepage/AtlasRoot/NarrativeTopic via un
+    pipeline complet (1-2 sem), on expose les Perspectives V2 (60 nodes Neo4j)
+    comme "topics narratifs" du POC Atlas. Tri par importance_score décroissant.
+
+    Limite : pas de structure hiérarchique (roots/themes), pas de contenu prose
+    rédigé. À enrichir avec un pipeline génération en sessions dédiées.
+    """
+    driver = _get_driver()
+    tenant = _get_tenant()
+    cypher = """
+    MATCH (p:Perspective)
+    WHERE p.tenant_id = $tenant
+    RETURN p.perspective_id AS perspective_id,
+           coalesce(p.label, '') AS label,
+           coalesce(p.description, '') AS description,
+           coalesce(p.linked_subject_names, []) AS subjects,
+           coalesce(p.dominant_facet_names, []) AS facets,
+           coalesce(p.keywords, []) AS keywords,
+           coalesce(p.claim_count, 0) AS claim_count,
+           coalesce(p.doc_count, 0) AS doc_count,
+           coalesce(p.importance_score, 0.0) AS importance_score
+    ORDER BY p.importance_score DESC
+    LIMIT $limit
+    """
+    with driver.session() as session:
+        rows = session.run(cypher, tenant=tenant, limit=limit).data()
+    return [
+        PerspectiveTopic(
+            perspective_id=row["perspective_id"],
+            label=row["label"],
+            description=row["description"],
+            subjects=(row["subjects"] or [])[:10],
+            facets=(row["facets"] or [])[:5],
+            keywords=(row["keywords"] or [])[:10],
+            claim_count=int(row["claim_count"]),
+            doc_count=int(row["doc_count"]),
+            importance_score=float(row["importance_score"]),
+        )
+        for row in rows
+    ]
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/homepage", response_model=AtlasHomepage)

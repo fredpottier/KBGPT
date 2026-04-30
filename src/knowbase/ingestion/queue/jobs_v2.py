@@ -187,6 +187,24 @@ async def _run_extraction_v2(
         PipelineConfig,
     )
 
+    # P3.1 — Détour pour fichiers markdown : Docling renvoie full_text vide.
+    # MarkdownExtractor lit le source brut + parse sections.
+    if file_path.suffix.lower() in (".md", ".markdown"):
+        from knowbase.extraction_v2.extractors.markdown_extractor import MarkdownExtractor
+        from hashlib import sha256
+        logger.info(f"[ExtractionV2-MD] Routing {file_path.name} to MarkdownExtractor (P3.1 bypass)")
+        document_id = f"{file_path.stem}_{sha256(file_path.name.encode()).hexdigest()[:8]}"
+        md_result = MarkdownExtractor.extract(file_path, document_id)
+        return {
+            "document_id": md_result["document_id"],
+            "full_text": md_result["full_text"],
+            "structure": {"pages": md_result["pages"], "tables": [], "images": []},
+            "page_index": md_result["pages"],
+            "file_type": "md",
+            "metrics": md_result["metrics"],
+            "doc_context": None,
+        }
+
     # Charger config depuis feature flags
     flags = get_feature_flags()
     v2_config = flags.get("extraction_v2", {})
@@ -359,19 +377,36 @@ def ingest_document_v2_job(
             f"doc_context={doc_context is not None}"
         )
 
-        # Etape 2: Traitement OSMOSE
-        update_job_progress("OSMOSE", 2, 5, "Traitement semantique OSMOSE")
+        # Etape 2: Traitement OSMOSE Stratified V2 (legacy)
+        # P3.2 — Configurable via INGESTION_SKIP_STRATIFIED_V2 (default false pour compat).
+        # Mémoire dispatcher_docs_in_stale (17/04/2026) : Stratified V2 retourne souvent
+        # concepts=0 et est obsolète vs ClaimFirst. Skipper accélère l'ingestion.
+        skip_stratified_v2 = os.getenv("INGESTION_SKIP_STRATIFIED_V2", "false").lower() in ("true", "1", "yes")
+        if skip_stratified_v2:
+            logger.info("[V2] OsmoseAgentique Stratified V2 SKIPPED (INGESTION_SKIP_STRATIFIED_V2=true)")
+            osmose_result = {
+                "osmose_success": True,
+                "concepts_extracted": 0,
+                "canonical_concepts": 0,
+                "relations_stored": 0,
+                "phase2_relations": 0,
+                "embeddings_stored": 0,
+                "duration_seconds": 0.0,
+                "skipped": True,
+            }
+        else:
+            update_job_progress("OSMOSE", 2, 5, "Traitement semantique OSMOSE")
 
-        osmose_result = asyncio.run(
-            _run_osmose_processing(
-                document_id=document_id,
-                document_title=path.stem,
-                document_path=path,
-                full_text=full_text,
-                tenant_id=tenant_id,
-                doc_context=doc_context,  # PR4: Passer DocContextFrame
+            osmose_result = asyncio.run(
+                _run_osmose_processing(
+                    document_id=document_id,
+                    document_title=path.stem,
+                    document_path=path,
+                    full_text=full_text,
+                    tenant_id=tenant_id,
+                    doc_context=doc_context,  # PR4: Passer DocContextFrame
+                )
             )
-        )
 
         logger.info(
             f"[V2] OSMOSE complete: {document_id}, "

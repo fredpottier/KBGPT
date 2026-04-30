@@ -26,6 +26,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import httpx
+
 sys.path.insert(0, "/app/src")
 
 from neo4j import GraphDatabase
@@ -115,27 +117,124 @@ def find_pointer_claims(driver, doc_new: str, identifier_old: str, limit: int = 
     return rows
 
 
-def find_anchor_claim(driver, doc_id: str, identifier: str) -> dict | None:
-    """Anchor d'un doc : claim contenant son propre identifiant canonique
-    avec le texte le plus court (probablement preamble/scope)."""
-    with driver.session() as s:
-        rows = s.run(
-            """
-            MATCH (c:Claim)
-            WHERE c.tenant_id = 'default' AND c.doc_id = $doc
-              AND c.text CONTAINS $ident
-            RETURN c.claim_id AS claim_id, c.text AS text, c.publication_date AS pub
-            ORDER BY size(c.text) ASC
-            LIMIT 1
-            """,
-            doc=doc_id, ident=identifier,
-        ).data()
-    return rows[0] if rows else None
+HYDE_ANCHOR_PROMPT = """You will receive a document identifier from a regulatory or normative corpus. Imagine the single most representative sentence of that document — the kind of sentence one would find in its Article 1 / Subject matter / Scope clause, that states what the document is fundamentally about and what regime/framework/standard it establishes.
+
+Write only that sentence (1-2 sentences max), in English, in the natural style of an Article 1 or Subject Matter clause. Do not add commentary, quotation marks, or preamble.
+
+Document identifier: __DOC_ID__
+
+Most representative scope sentence:"""
+
+
+def _generate_anchor_query(doc_id: str, vllm_url: str, vllm_model: str) -> str | None:
+    """Génère la requête d'anchor sémantique pour un doc via LLM (HyDE-inversé).
+
+    Le LLM imagine la phrase 'Article 1 / Scope' du doc à partir de son
+    identifiant. C'est cette phrase hypothétique qu'on cherche dans Qdrant.
+    """
+    prompt = HYDE_ANCHOR_PROMPT.replace("__DOC_ID__", doc_id)
+    try:
+        r = httpx.post(
+            f"{vllm_url}/v1/chat/completions",
+            json={
+                "model": vllm_model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.2,
+                "max_tokens": 150,
+            },
+            timeout=30.0,
+        )
+        r.raise_for_status()
+        data = r.json()
+        text = data["choices"][0]["message"]["content"].strip()
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1].strip()
+        return text or None
+    except Exception as e:
+        logger.warning(f"  HyDE anchor query generation failed for {doc_id}: {e}")
+        return None
+
+
+def find_anchor_claim_semantic(driver, qdrant, embedder, settings, doc_id: str,
+                                vllm_url: str, vllm_model: str) -> dict | None:
+    """Anchor d'un doc via HyDE-inversé + Qdrant similarity (V3.3-conforming).
+
+    Stratégie :
+    1. LLM génère la phrase d'Article 1 hypothétique pour ce doc.
+    2. On embed cette phrase et on cherche dans Qdrant le claim de doc_id
+       le plus proche → c'est l'anchor central du doc.
+
+    Aucune regex ni keyword. Le LLM est l'unique moteur sémantique.
+    """
+    anchor_query = _generate_anchor_query(doc_id, vllm_url, vllm_model)
+    if not anchor_query:
+        return None
+
+    # Embed (e5 conventions : préfixer "passage:" pour les passages)
+    is_e5 = "e5" in (settings.embeddings_model or "").lower()
+    query_text = f"passage: {anchor_query}" if is_e5 else anchor_query
+    try:
+        vec = embedder.encode(query_text).tolist()
+    except Exception as e:
+        logger.warning(f"  Embedding anchor query failed for {doc_id}: {e}")
+        return None
+
+    # Qdrant filtré par doc_id, top 1
+    from qdrant_client.models import FieldCondition, Filter, MatchValue
+    collection = getattr(settings, "qdrant_collection", None) or "knowbase_chunks_v2"
+    try:
+        results = qdrant.search(
+            collection_name=collection,
+            query_vector=vec,
+            limit=5,
+            query_filter=Filter(
+                must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
+            ),
+            with_payload=True,
+        )
+    except Exception as e:
+        logger.warning(f"  Qdrant search anchor failed for {doc_id}: {e}")
+        return None
+
+    if not results:
+        return None
+
+    # Pour chaque top chunk, retrouver le claim via Claim.chunk_ids array.
+    # Le payload Qdrant contient `chunk_id` (pas `claim_id`) ; on fait le pont
+    # via Neo4j en cherchant le claim qui a ce chunk_id dans son array chunk_ids.
+    for top in results:
+        payload = dict(top.payload or {})
+        chunk_id = payload.get("chunk_id") or payload.get("parent_chunk_id")
+        if not chunk_id:
+            continue
+        with driver.session() as s:
+            row = s.run(
+                """
+                MATCH (c:Claim)
+                WHERE c.tenant_id = 'default' AND c.doc_id = $doc
+                  AND $chunk_id IN c.chunk_ids
+                RETURN c.claim_id AS claim_id, c.text AS text, c.publication_date AS pub
+                ORDER BY size(c.text) DESC
+                LIMIT 1
+                """,
+                doc=doc_id, chunk_id=chunk_id,
+            ).single()
+        if row:
+            return {
+                "claim_id": row["claim_id"],
+                "text": row["text"],
+                "pub": row["pub"],
+                "anchor_source": "semantic_hyde",
+                "anchor_query": anchor_query,
+                "qdrant_score": float(top.score),
+                "chunk_id": chunk_id,
+            }
+    return None
 
 
 def find_anchor_via_neo4j_first_claim(driver, doc_id: str) -> dict | None:
-    """Fallback : si aucun anchor trouvé via identifier, prendre simplement
-    le premier claim alphabétique du doc (souvent le préambule)."""
+    """Fallback : si l'anchor sémantique échoue, prendre le premier claim
+    alphabétique du doc."""
     with driver.session() as s:
         rows = s.run(
             """
@@ -220,6 +319,17 @@ def main() -> int:
     classifier = LogicalRelationClassifier(vllm_url=VLLM_URL, model=VLLM_MODEL, timeout_s=60.0)
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
+    # Init Qdrant + embedder pour l'anchor sémantique
+    from knowbase.common.clients.shared_clients import get_qdrant_client, get_sentence_transformer
+    from knowbase.config.settings import get_settings
+    settings = get_settings()
+    qdrant = get_qdrant_client()
+    cache_folder = str(settings.hf_home) if getattr(settings, "hf_home", None) else None
+    embedder = get_sentence_transformer(
+        settings.embeddings_model or "intfloat/multilingual-e5-large",
+        cache_folder=cache_folder,
+    )
+
     audit = {
         "timestamp_start": datetime.utcnow().isoformat() + "Z",
         "succession_pairs_processed": [],
@@ -239,8 +349,10 @@ def main() -> int:
                 "relations_by_type": {},
             }
 
-            # 1. Anchor du doc_old (claim "central" qui définit son scope)
-            anchor_old = find_anchor_claim(driver, doc_old, ident_old)
+            # 1. Anchor du doc_old via HyDE-inversé + Qdrant similarity (V3.3-conforming)
+            anchor_old = find_anchor_claim_semantic(
+                driver, qdrant, embedder, settings, doc_old, VLLM_URL, VLLM_MODEL
+            )
             if not anchor_old:
                 anchor_old = find_anchor_via_neo4j_first_claim(driver, doc_old)
             if not anchor_old:
@@ -250,7 +362,11 @@ def main() -> int:
             # 2. Pointer claims dans doc_new (mentionnent ident_old)
             pointers = find_pointer_claims(driver, doc_new, ident_old, limit=10)
             pair_audit["n_pointers"] = len(pointers)
-            logger.info(f"  Anchor old: [{anchor_old['claim_id'][:25]}] {anchor_old['text'][:80]}...")
+            anchor_meta = ""
+            if anchor_old.get("anchor_source") == "semantic_hyde":
+                anchor_meta = f" (HyDE q: '{anchor_old.get('anchor_query', '')[:60]}...', qd_score={anchor_old.get('qdrant_score', 0):.2f})"
+            logger.info(f"  Anchor old: [{anchor_old['claim_id'][:25]}]{anchor_meta}")
+            logger.info(f"             {anchor_old['text'][:120]}")
             logger.info(f"  {len(pointers)} pointer claims trouvés dans {doc_new[:30]}")
 
             if not pointers:
