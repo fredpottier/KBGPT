@@ -17,6 +17,8 @@ import ReactFlow, {
   MiniMap,
   Handle,
   Position,
+  ReactFlowProvider,
+  useReactFlow,
   type Node,
   type Edge,
   type NodeProps,
@@ -124,6 +126,47 @@ function DocCard({ data }: NodeProps<DocCardData>) {
 }
 
 const NODE_TYPES = { docCard: DocCard }
+
+/** Sous-composant interne qui consomme le contexte ReactFlowProvider. */
+function FlowInner({ nodes, edges, showMiniMap }: { nodes: Node[]; edges: Edge[]; showMiniMap: boolean }) {
+  const { fitView } = useReactFlow()
+
+  // Force fitView après mount + à chaque changement de nodes (le container Chakra
+  // peut avoir une taille 0 au premier render, fitView initial échoue silencieusement).
+  useEffect(() => {
+    if (nodes.length === 0) return
+    const timeouts = [50, 200, 500].map((delay) =>
+      setTimeout(() => fitView({ padding: 0.2, duration: delay === 50 ? 0 : 250 }), delay),
+    )
+    return () => timeouts.forEach(clearTimeout)
+  }, [nodes, fitView])
+
+  return (
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      nodeTypes={NODE_TYPES}
+      fitView
+      fitViewOptions={{ padding: 0.2 }}
+      minZoom={0.3}
+      maxZoom={1.5}
+      proOptions={{ hideAttribution: true }}
+    >
+      <Background gap={16} size={1} color="rgba(128,128,128,0.15)" />
+      <Controls showInteractive={false} position="bottom-left" />
+      {showMiniMap && (
+        <MiniMap
+          position="bottom-right"
+          nodeColor={(n) => ((n.data as DocCardData)?.isFocus ? '#3182ce' : '#cbd5e0')}
+          maskColor="rgba(0,0,0,0.1)"
+          pannable
+          zoomable
+          style={{ width: 160, height: 100 }}
+        />
+      )}
+    </ReactFlow>
+  )
+}
 
 /** Layout dagre LR avec dimensions fixes. */
 function layoutDagre(nodes: Node[], edges: Edge[]): { nodes: Node[]; edges: Edge[] } {
@@ -241,35 +284,23 @@ export function LifecycleGraphMini({
     )
   }
 
+  // Affichage MiniMap uniquement quand le voisinage est dense (> 10 nœuds)
+  const showMiniMap = rfNodes.length > 10
+
   return (
     <Box>
       <Box
-        h="500px"
+        h="520px"
         borderWidth="1px"
         borderColor="var(--border)"
         borderRadius="md"
         overflow="hidden"
         bg="var(--bg-page)"
+        position="relative"
       >
-        <ReactFlow
-          nodes={rfNodes}
-          edges={rfEdges}
-          nodeTypes={NODE_TYPES}
-          fitView
-          fitViewOptions={{ padding: 0.2 }}
-          minZoom={0.3}
-          maxZoom={1.5}
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background gap={16} size={1} color="rgba(128,128,128,0.15)" />
-          <Controls showInteractive={false} />
-          <MiniMap
-            nodeColor={(n) => ((n.data as DocCardData)?.isFocus ? '#3182ce' : '#cbd5e0')}
-            maskColor="rgba(0,0,0,0.1)"
-            pannable
-            zoomable
-          />
-        </ReactFlow>
+        <ReactFlowProvider>
+          <FlowInner nodes={rfNodes} edges={rfEdges} showMiniMap={showMiniMap} />
+        </ReactFlowProvider>
       </Box>
       {/* Légende */}
       <HStack mt={2} spacing={4} fontSize="xs" color="var(--fg-muted)" flexWrap="wrap">
