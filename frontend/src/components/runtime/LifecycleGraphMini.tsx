@@ -9,8 +9,10 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Box, Spinner, Text, HStack } from '@chakra-ui/react'
+import { Box, Spinner, Text, HStack, Button, ButtonGroup } from '@chakra-ui/react'
 import { fetchWithAuth } from '@/lib/fetchWithAuth'
+
+type LayoutMode = 'timeline' | 'radial'
 
 type GraphNode = { id: string; label: string; is_focus: boolean }
 type GraphEdge = { from: string; to: string; type: string; confidence: number }
@@ -81,6 +83,7 @@ export function LifecycleGraphMini({
 }) {
   const [data, setData] = useState<GraphData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('timeline')
 
   useEffect(() => {
     let cancelled = false
@@ -121,23 +124,75 @@ export function LifecycleGraphMini({
   const others = data.nodes.filter((n) => n.id !== focus.id)
   const cx = W / 2
   const cy = H / 2
-  const radius = Math.min(W, H) / 2 - 110
 
-  // Stocker l'angle pour chaque voisin (sert au placement de label)
-  const positions: Record<string, { x: number; y: number; angle: number }> = {
-    [focus.id]: { x: cx, y: cy, angle: 0 },
+  // Calcul positions selon mode
+  const positions: Record<string, { x: number; y: number; angle: number; side?: 'left' | 'right' | 'center' }> = {
+    [focus.id]: { x: cx, y: cy, angle: 0, side: 'center' },
   }
-  others.forEach((n, i) => {
-    const angle = (i / Math.max(1, others.length)) * 2 * Math.PI - Math.PI / 2
-    positions[n.id] = {
-      x: cx + Math.cos(angle) * radius,
-      y: cy + Math.sin(angle) * radius,
-      angle,
+
+  if (layoutMode === 'radial') {
+    const radius = Math.min(W, H) / 2 - 110
+    others.forEach((n, i) => {
+      const angle = (i / Math.max(1, others.length)) * 2 * Math.PI - Math.PI / 2
+      positions[n.id] = {
+        x: cx + Math.cos(angle) * radius,
+        y: cy + Math.sin(angle) * radius,
+        angle,
+      }
+    })
+  } else {
+    // TIMELINE : ancien à gauche, récent à droite
+    // Règle : target d'edge sortante du focus = ancien (LEFT)
+    //        source d'edge entrante au focus = récent (RIGHT)
+    const olderIds = new Set<string>()
+    const newerIds = new Set<string>()
+    data.edges.forEach((e) => {
+      if (e.from === focus.id && e.to !== focus.id) olderIds.add(e.to)
+      if (e.to === focus.id && e.from !== focus.id) newerIds.add(e.from)
+    })
+    const olderNodes = others.filter((n) => olderIds.has(n.id))
+    const newerNodes = others.filter((n) => newerIds.has(n.id))
+    const orphans = others.filter((n) => !olderIds.has(n.id) && !newerIds.has(n.id))
+    // Orphelins répartis selon partition la moins peuplée
+    orphans.forEach((n) => {
+      if (olderNodes.length <= newerNodes.length) olderNodes.push(n)
+      else newerNodes.push(n)
+    })
+    const xLeft = 110
+    const xRight = W - 110
+    const stack = (nodes: typeof others, x: number, side: 'left' | 'right') => {
+      const n = nodes.length
+      if (n === 0) return
+      const totalH = (n - 1) * 70
+      const yStart = cy - totalH / 2
+      nodes.forEach((node, i) => {
+        positions[node.id] = { x, y: yStart + i * 70, angle: side === 'left' ? Math.PI : 0, side }
+      })
     }
-  })
+    stack(olderNodes, xLeft, 'left')
+    stack(newerNodes, xRight, 'right')
+  }
 
   return (
     <Box>
+      <HStack mb={2} justify="flex-end">
+        <ButtonGroup size="xs" isAttached variant="outline">
+          <Button
+            onClick={() => setLayoutMode('timeline')}
+            colorScheme={layoutMode === 'timeline' ? 'blue' : 'gray'}
+            variant={layoutMode === 'timeline' ? 'solid' : 'outline'}
+          >
+            Timeline
+          </Button>
+          <Button
+            onClick={() => setLayoutMode('radial')}
+            colorScheme={layoutMode === 'radial' ? 'blue' : 'gray'}
+            variant={layoutMode === 'radial' ? 'solid' : 'outline'}
+          >
+            Radial
+          </Button>
+        </ButtonGroup>
+      </HStack>
       <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} style={{ background: 'var(--bg-page)', borderRadius: 8 }}>
         <defs>
           {Object.entries(TYPE_COLORS).map(([t, c]) => (
@@ -160,6 +215,29 @@ export function LifecycleGraphMini({
             <feComposite in="SourceGraphic" operator="over" />
           </filter>
         </defs>
+
+        {/* Headers timeline : ANCIEN / RÉCENT */}
+        {layoutMode === 'timeline' && (
+          <>
+            <text x={110} y={26} textAnchor="middle" fontSize={11} fontWeight="bold" fill="var(--fg-muted)">
+              ⟵ ANTÉRIEURS
+            </text>
+            <text x={W / 2} y={26} textAnchor="middle" fontSize={11} fontWeight="bold" fill="var(--fg-muted)">
+              CE DOCUMENT
+            </text>
+            <text x={W - 110} y={26} textAnchor="middle" fontSize={11} fontWeight="bold" fill="var(--fg-muted)">
+              POSTÉRIEURS ⟶
+            </text>
+            {/* Axe temporel discret */}
+            <line x1={60} y1={H - 30} x2={W - 60} y2={H - 30} stroke="var(--fg-muted)" strokeWidth={0.5} strokeDasharray="2,3" opacity={0.4} />
+            <text x={60} y={H - 16} textAnchor="start" fontSize={9} fill="var(--fg-muted)">
+              ancien
+            </text>
+            <text x={W - 60} y={H - 16} textAnchor="end" fontSize={9} fill="var(--fg-muted)">
+              récent
+            </text>
+          </>
+        )}
 
         {/* Edges (avec label perpendiculaire) */}
         {data.edges.map((e, i) => {
@@ -230,13 +308,19 @@ export function LifecycleGraphMini({
           let labelY = 0
           let textAnchor: 'start' | 'middle' | 'end' = 'middle'
           if (!isFocus) {
-            const dist = r + 8
-            labelX = Math.cos(p.angle) * dist
-            labelY = Math.sin(p.angle) * dist + 4
-            // Anchor selon quadrant
-            if (Math.cos(p.angle) > 0.3) textAnchor = 'start'
-            else if (Math.cos(p.angle) < -0.3) textAnchor = 'end'
-            else textAnchor = 'middle'
+            if (layoutMode === 'timeline' && p.side) {
+              // Timeline : label sous le cercle, centré
+              labelX = 0
+              labelY = r + 14
+              textAnchor = 'middle'
+            } else {
+              const dist = r + 8
+              labelX = Math.cos(p.angle) * dist
+              labelY = Math.sin(p.angle) * dist + 4
+              if (Math.cos(p.angle) > 0.3) textAnchor = 'start'
+              else if (Math.cos(p.angle) < -0.3) textAnchor = 'end'
+              else textAnchor = 'middle'
+            }
           }
           return (
             <g
