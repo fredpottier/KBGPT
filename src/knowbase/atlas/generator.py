@@ -161,8 +161,10 @@ class AtlasGenerator:
             stats.errors.append(f"homepage: {exc}")
 
         stats.duration_seconds = round(_time.time() - t_start, 1)
-        # Estimation coût : ~1500 tokens/topic × $0.000171/k = ~$0.000257/topic + 1 homepage call
-        stats.estimated_cost_usd = round(stats.n_topics_generated * 0.000257 + 0.0005, 4)
+        # Estimation DeepInfra Qwen3.5-397B-A17B ($0.54 in / $3.40 out per 1M).
+        # Par topic : ~500 tokens in + ~1500 tokens out = $0.00027 + $0.0051 ≈ $0.0054
+        # Homepage : ~600 in + 800 out ≈ $0.003
+        stats.estimated_cost_usd = round(stats.n_topics_generated * 0.0054 + 0.003, 4)
         return stats
 
     # ------------------------------------------------------------------
@@ -215,7 +217,7 @@ class AtlasGenerator:
                     {"role": "user", "content": user_input},
                 ],
                 temperature=0.4,
-                max_tokens=600,
+                max_tokens=1500,
                 json_mode=True,
                 timeout=self.timeout,
             )
@@ -246,7 +248,7 @@ class AtlasGenerator:
                     {"role": "user", "content": user_input},
                 ],
                 temperature=0.4,
-                max_tokens=400,
+                max_tokens=800,
                 json_mode=True,
                 timeout=self.timeout,
             )

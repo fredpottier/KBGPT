@@ -46,10 +46,22 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     logger = logging.getLogger("generate_atlas")
 
-    vllm_url = args.vllm_url or _resolve_vllm_url()
-    if not vllm_url:
-        logger.error("No vLLM URL configured (Redis burst state empty + VLLM_URL not set + --vllm-url not provided)")
-        return 1
+    # vllm_url est optionnel : RuntimeLLMClient gère lui-même le fallback DeepInfra
+    # quand vLLM EC2 est down ou non configuré. On valide ici par un health-check
+    # réel pour éviter les zombies Redis (instance évincée mais clé burst non purgée).
+    vllm_url = args.vllm_url or _resolve_vllm_url() or ""
+    runtime_model = os.getenv("DEEPINFRA_RUNTIME_MODEL", "Qwen/Qwen2.5-72B-Instruct (default)")
+    vllm_alive = False
+    if vllm_url:
+        try:
+            import httpx as _httpx
+            with _httpx.Client(timeout=2.5) as _c:
+                vllm_alive = _c.get(f"{vllm_url.rstrip('/')}/health").status_code == 200
+        except Exception:
+            vllm_alive = False
+        if not vllm_alive:
+            logger.warning(f"vLLM URL {vllm_url} found in Redis but unhealthy → ignoring (zombie state?). Falling back to DeepInfra.")
+    backend_hint = f"vllm={vllm_url}" if vllm_alive else f"DeepInfra (model={runtime_model})"
 
     neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
     driver = GraphDatabase.driver(neo4j_uri, auth=("neo4j", os.getenv("NEO4J_PASSWORD", "graphiti_neo4j_pass")))
@@ -61,7 +73,7 @@ def main() -> int:
         vllm_model=os.getenv("VLLM_MODEL", "Qwen/Qwen2.5-14B-Instruct-AWQ"),
     )
 
-    logger.info(f"Starting Atlas generation: vllm={vllm_url}, max={args.max}, wipe={args.wipe}")
+    logger.info(f"Starting Atlas generation: backend={backend_hint}, max={args.max}, wipe={args.wipe}")
     stats = gen.generate_all(max_perspectives=args.max, wipe_existing=args.wipe)
 
     print("\n=== Atlas Generation Stats ===")

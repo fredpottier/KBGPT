@@ -600,5 +600,6 @@ export const api = {
     homepage: () => apiClient.get('/atlas/homepage'),
     topics: () => apiClient.get('/atlas/topics'),
     topic: (topicId: string) => apiClient.get(`/atlas/topic/${topicId}`),
+    theme: (themeId: string) => apiClient.get(`/atlas/theme/${themeId}`),
   },
 }
