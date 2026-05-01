@@ -34,7 +34,8 @@ services:
       HF_HOME: /data/models
       ONNXTR_CACHE_DIR: /data/models/onnxtr  # Persister cache OnnxTR (sinon re-download à chaque restart)
       KNOWBASE_DATA_DIR: /data
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
       BURST_MAX_CONCURRENT_DOCS: "2"  # 2 docs en parallèle (augmenté sur demande)
       SERVICE_NAME: app  # Pour logs persistants /app/logs/app/app.log
       LOGS_DIR: /app/logs
@@ -84,7 +85,8 @@ services:
       HF_HOME: /data/models
       ONNXTR_CACHE_DIR: /data/models/onnxtr  # Persister cache OnnxTR
       KNOWBASE_DATA_DIR: /data
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
       OSMOSIS_API_URL: http://app:8000
       # Judges centralises — switch d'Ollama vers llama.cpp self-hosted
       # (container prometheus-judge, GPU, stable vs Ollama timeout 14B)
@@ -157,7 +159,8 @@ services:
       HF_HOME: /data/models
       ONNXTR_CACHE_DIR: /data/models/onnxtr
       KNOWBASE_DATA_DIR: /data
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
       OSMOSIS_API_URL: http://app:8000
       T2T5_JUDGE_PROVIDER: llamacpp
       T2T5_JUDGE_MODEL_NAME: m-prometheus-14b
@@ -200,7 +203,8 @@ services:
       TZ: Europe/Paris
       PYTHONPATH: /app:/app/src
       KNOWBASE_DATA_DIR: /data
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
     volumes:
       - ./app:/app
       - ./data:/data

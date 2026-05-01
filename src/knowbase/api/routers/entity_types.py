@@ -1060,7 +1060,7 @@ async def generate_ontology(
     # Enqueue job RQ dans queue "ingestion" (même queue que worker)
     redis_conn = Redis(
         host=os.getenv("REDIS_HOST", "redis"),
-        port=int(os.getenv("REDIS_PORT", "6379")),
+        port=int(os.getenv("REDIS_PORT", "6379")), password=os.getenv("REDIS_PASSWORD") or None,
         db=0  # Même DB que worker ingestion
     )
     queue = Queue("ingestion", connection=redis_conn)
@@ -1150,7 +1150,7 @@ async def get_ontology_proposal(
 
     redis_conn = Redis(
         host=os.getenv("REDIS_HOST", "redis"),
-        port=int(os.getenv("REDIS_PORT", "6379")),
+        port=int(os.getenv("REDIS_PORT", "6379")), password=os.getenv("REDIS_PASSWORD") or None,
         db=1
     )
 
@@ -1221,7 +1221,7 @@ async def cancel_normalization(
     # Supprimer cache Redis
     redis_conn = Redis(
         host=os.getenv("REDIS_HOST", "redis"),
-        port=int(os.getenv("REDIS_PORT", "6379")),
+        port=int(os.getenv("REDIS_PORT", "6379")), password=os.getenv("REDIS_PASSWORD") or None,
         db=1
     )
 
@@ -1434,7 +1434,7 @@ async def normalize_entities(
     # Enqueue job RQ
     redis_conn = Redis(
         host=os.getenv("REDIS_HOST", "redis"),
-        port=int(os.getenv("REDIS_PORT", "6379")),
+        port=int(os.getenv("REDIS_PORT", "6379")), password=os.getenv("REDIS_PASSWORD") or None,
         db=0  # Même DB que worker ingestion
     )
     queue = Queue("ingestion", connection=redis_conn)
@@ -1466,7 +1466,7 @@ async def normalize_entities(
     # Supprimer cache Redis aussi
     redis_conn_cache = Redis(
         host=os.getenv("REDIS_HOST", "redis"),
-        port=int(os.getenv("REDIS_PORT", "6379")),
+        port=int(os.getenv("REDIS_PORT", "6379")), password=os.getenv("REDIS_PASSWORD") or None,
         db=1
     )
     redis_key = f"ontology_proposal:{type_name}:{tenant_id}"
@@ -1588,7 +1588,7 @@ async def undo_normalization(
     # Enqueue job RQ undo
     redis_conn = Redis(
         host=os.getenv("REDIS_HOST", "redis"),
-        port=int(os.getenv("REDIS_PORT", "6379")),
+        port=int(os.getenv("REDIS_PORT", "6379")), password=os.getenv("REDIS_PASSWORD") or None,
         db=0  # Même DB que worker ingestion
     )
     queue = Queue("ingestion", connection=redis_conn)

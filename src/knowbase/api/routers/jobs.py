@@ -97,7 +97,7 @@ async def get_job_status(
 
     redis_conn = Redis(
         host=os.getenv("REDIS_HOST", "redis"),
-        port=int(os.getenv("REDIS_PORT", "6379")),
+        port=int(os.getenv("REDIS_PORT", "6379")), password=os.getenv("REDIS_PASSWORD") or None,
         db=0  # Même DB que worker ingestion
     )
 

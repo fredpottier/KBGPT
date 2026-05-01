@@ -397,11 +397,14 @@ def get_redis_client(
     La configuration est lue depuis la variable d'environnement REDIS_URL si disponible,
     sinon utilise les paramètres fournis ou localhost:6379.
 
+    Le password est lu depuis REDIS_PASSWORD env var si non fourni explicitement
+    (sécurisation post-incident 2026-04-27).
+
     Args:
         host: Redis host (override REDIS_URL si fourni)
         port: Redis port (override REDIS_URL si fourni)
         db: Redis database (override REDIS_URL si fourni)
-        password: Redis password
+        password: Redis password (sinon lu depuis REDIS_PASSWORD env var)
 
     Returns:
         RedisClient instance
@@ -424,6 +427,10 @@ def get_redis_client(
             host = host or "localhost"
             port = port or 6379
             db = db if db is not None else 0
+
+        # Si password non fourni explicitement, lire depuis l'env (sécurisation 2026-04-27)
+        if password is None:
+            password = os.environ.get("REDIS_PASSWORD") or None
 
         _redis_client = RedisClient(
             host=host,

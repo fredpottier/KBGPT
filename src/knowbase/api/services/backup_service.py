@@ -314,7 +314,7 @@ def _backup_redis(backup_dir: Path, log_lines: list) -> dict:
 
         client = redis_lib.Redis(
             host=settings.redis_host,
-            port=settings.redis_port,
+            port=settings.redis_port, password=getattr(settings, "redis_password", None) or os.getenv("REDIS_PASSWORD") or None,
             db=0,
         )
 
@@ -747,7 +747,7 @@ def _restore_redis(backup_dir: Path, log_lines: list) -> dict:
 
         client = redis_lib.Redis(
             host=settings.redis_host,
-            port=settings.redis_port,
+            port=settings.redis_port, password=getattr(settings, "redis_password", None) or os.getenv("REDIS_PASSWORD") or None,
             db=0,
         )
 
@@ -1078,7 +1078,7 @@ class BackupService:
             import redis
             redis_client = redis.Redis(
                 host=settings.redis_host,
-                port=settings.redis_port,
+                port=settings.redis_port, password=getattr(settings, "redis_password", None) or os.getenv("REDIS_PASSWORD") or None,
                 db=0,
             )
             stats.redis_keys = redis_client.dbsize()

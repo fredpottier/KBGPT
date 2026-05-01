@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Optional
 
@@ -46,7 +47,7 @@ class JobManager:
         host: str = "redis",
         port: int = 6379,
     ) -> None:
-        self.redis = redis_client or _redis.Redis(host=host, port=port, decode_responses=True)
+        self.redis = redis_client or _redis.Redis(host=host, port=port, password=os.getenv("REDIS_PASSWORD") or None, decode_responses=True)
         self.ttl_seconds = ttl_seconds
 
     def _key(self, doc_id: str) -> str:

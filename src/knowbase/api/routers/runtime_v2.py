@@ -50,7 +50,7 @@ def _resolve_vllm_url() -> tuple[str, str]:
     # 1. Redis burst state (le plus à jour)
     try:
         import redis as _redis
-        r = _redis.Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, decode_responses=True)
+        r = _redis.Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, password=os.getenv("REDIS_PASSWORD") or None, decode_responses=True)
         raw = r.get("osmose:burst:state")
         if raw:
             import json as _json

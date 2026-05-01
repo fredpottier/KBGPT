@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import hashlib
+import os
 from datetime import datetime
 from typing import Optional, Dict, Any, Set, List
 
@@ -52,7 +53,7 @@ class RejectStore:
             settings = get_settings()
             redis_client = redis.Redis(
                 host=settings.redis_host,
-                port=settings.redis_port,
+                port=settings.redis_port, password=getattr(settings, "redis_password", None) or os.getenv("REDIS_PASSWORD") or None,
                 db=0,
                 decode_responses=True
             )

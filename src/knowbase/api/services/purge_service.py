@@ -391,7 +391,7 @@ class PurgeService:
             # DB 0 - Jobs RQ
             redis_db0 = redis.Redis(
                 host=settings.redis_host,
-                port=settings.redis_port,
+                port=settings.redis_port, password=getattr(settings, "redis_password", None) or os.getenv("REDIS_PASSWORD") or None,
                 db=0,
                 decode_responses=True
             )
@@ -406,7 +406,7 @@ class PurgeService:
             # DB 1 - Historique imports
             redis_db1 = redis.Redis(
                 host=settings.redis_host,
-                port=settings.redis_port,
+                port=settings.redis_port, password=getattr(settings, "redis_password", None) or os.getenv("REDIS_PASSWORD") or None,
                 db=1,
                 decode_responses=True
             )
