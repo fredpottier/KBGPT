@@ -93,7 +93,61 @@ class BurstOrchestrator:
         # Callback pour traitement document
         self._document_processor: Optional[Callable] = None
 
+        # Re-hydratation : si Redis/fichier contient un burst state actif et que
+        # l'instance est saine, reconstituer self.state pour que l'UI cockpit
+        # affiche "instance attachée" sans avoir besoin d'un nouveau /attach-instance.
+        self._try_rehydrate_from_persistent_state()
+
         logger.info("[BURST:ORCHESTRATOR] Initialized")
+
+    def _try_rehydrate_from_persistent_state(self) -> None:
+        """Reconstitue self.state depuis Redis/fichier si une instance attachée est saine.
+
+        Évite la perte de l'état d'attachement au restart de l'app : la clé
+        Redis `osmose:burst:state` (et son backup fichier) survivent au restart,
+        mais l'orchestrateur perdait son `self.state` en mémoire et l'UI affichait
+        à tort "pas de batch attaché".
+        """
+        try:
+            from .provider_switch import get_burst_state_from_redis
+            persistent = get_burst_state_from_redis()
+            if not persistent or not persistent.get("active"):
+                return
+
+            vllm_url = persistent.get("vllm_url")
+            embeddings_url = persistent.get("embeddings_url")
+            if not vllm_url:
+                return
+
+            # Extraire l'IP de l'URL (format http://X.Y.Z.W:port)
+            instance_ip = ""
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(vllm_url)
+                instance_ip = parsed.hostname or ""
+            except Exception:
+                pass
+
+            standalone_id = f"rehydrated-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+            self.state = BurstState(
+                batch_id=standalone_id,
+                status=BurstStatus.READY,
+                documents=[],
+                total_documents=0,
+                instance_id="",  # Inconnu après rehydratation, l'UI s'en passera
+                instance_ip=instance_ip,
+                instance_type="",
+                vllm_url=vllm_url,
+                embeddings_url=embeddings_url or "",
+                created_at=datetime.now(timezone.utc).isoformat(),
+                config=self.config.to_dict(),
+            )
+            logger.info(
+                f"[BURST:ORCHESTRATOR] Rehydrated state from persistent: "
+                f"vLLM={vllm_url}, embeddings={embeddings_url} (batch={standalone_id})"
+            )
+        except Exception as e:
+            logger.debug(f"[BURST:ORCHESTRATOR] No state to rehydrate: {e}")
 
     @property
     def cf_client(self):

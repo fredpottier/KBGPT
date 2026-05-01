@@ -821,6 +821,16 @@ Reply ONLY with a JSON array, one entry per claim:
         # Nettoyer la réponse
         response = response.strip()
 
+        # Détecteur de dégénérescence (P3.3 — bug Qwen2.5-14B WEF Presidio).
+        # Court-circuite les réponses dégénératives avant tentative parse JSON.
+        if self._is_degenerative_response(response):
+            self.stats["degenerative_responses"] = self.stats.get("degenerative_responses", 0) + 1
+            logger.warning(
+                f"[OSMOSE:ClaimExtractor] Degenerative response detected (skipped): "
+                f"{repr(response[:120])}..."
+            )
+            return []
+
         # Extraire le JSON si encapsulé dans markdown fences
         if "```json" in response:
             start = response.find("```json") + 7
@@ -937,6 +947,52 @@ Reply ONLY with a JSON array, one entry per claim:
             return None
         except json.JSONDecodeError:
             return None
+
+    def _is_degenerative_response(self, response: str) -> bool:
+        """Détecte les réponses LLM dégénératives (boucles de tokens répétés).
+
+        Cas observés (bug WEF Presidio Qwen2.5-14B 14/04/2026) :
+        - Token court répété >40 fois consécutivement (ex: `U1 U1 U1...`, `N N N...`)
+        - Pattern court (10-25 chars) répété >20 fois (ex: `, "region": null, "region": null...`)
+        - Diversité des caractères très faible sur la queue (stuck sur une boucle)
+
+        Ces patterns gaspillent des tokens GPU sans produire de claims valides.
+        Court-circuit AVANT json.loads pour éviter le forensics dump à répétition.
+        """
+        if len(response) < 200:
+            return False
+
+        import re
+
+        # 1. Token court répété >40 fois (séparé par espaces ou virgules)
+        # Capture: début, token (1-12 chars sans espace), répété
+        token_repeat = re.search(
+            r'(?:^|[\s,])([^\s,"{}\[\]]{1,12})(?:[\s,]+\1){40,}',
+            response,
+        )
+        if token_repeat:
+            return True
+
+        # 2. Pattern de 10-30 chars répété >20 fois consécutivement
+        # Heuristique : chercher dans les 2000 derniers chars pour éviter O(N²)
+        tail = response[-2000:]
+        for size in (10, 15, 20, 25):
+            for start in range(0, min(500, len(tail) - size * 21), 5):
+                pattern = tail[start:start + size]
+                # Ignore patterns trop simples (1-2 chars uniques)
+                if len(set(pattern)) < 3:
+                    continue
+                count = tail.count(pattern, start)
+                if count > 20:
+                    return True
+
+        # 3. Diversité chars trop faible sur la queue (>500 chars avec <8 chars uniques)
+        if len(response) >= 500:
+            tail500 = response[-500:]
+            if len(set(tail500)) < 8:
+                return True
+
+        return False
 
     def _build_claim_with_predicate_check(
         self,

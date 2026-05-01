@@ -377,11 +377,13 @@ def ingest_document_v2_job(
             f"doc_context={doc_context is not None}"
         )
 
-        # Etape 2: Traitement OSMOSE Stratified V2 (legacy)
-        # P3.2 — Configurable via INGESTION_SKIP_STRATIFIED_V2 (default false pour compat).
-        # Mémoire dispatcher_docs_in_stale (17/04/2026) : Stratified V2 retourne souvent
-        # concepts=0 et est obsolète vs ClaimFirst. Skipper accélère l'ingestion.
-        skip_stratified_v2 = os.getenv("INGESTION_SKIP_STRATIFIED_V2", "false").lower() in ("true", "1", "yes")
+        # Etape 2: Traitement OSMOSE Stratified V2 (legacy, obsolète)
+        # P3.2 — Configurable via INGESTION_SKIP_STRATIFIED_V2.
+        # Default = TRUE depuis 2026-05-01 : Stratified V2 produit systématiquement
+        # concepts=0 / osmose_s=0 (cf project_dispatcher_docs_in_stale.md). Le pipeline
+        # productif est ClaimFirst (étape 5). Pour réactiver Stratified V2 (debug uniquement) :
+        # `INGESTION_SKIP_STRATIFIED_V2=false`.
+        skip_stratified_v2 = os.getenv("INGESTION_SKIP_STRATIFIED_V2", "true").lower() in ("true", "1", "yes")
         if skip_stratified_v2:
             logger.info("[V2] OsmoseAgentique Stratified V2 SKIPPED (INGESTION_SKIP_STRATIFIED_V2=true)")
             osmose_result = {

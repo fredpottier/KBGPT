@@ -128,7 +128,7 @@ const TABS: { key: TabKey; label: string; Icon: React.ElementType; accent: strin
 ]
 
 const PROFILES = [
-  { key: 'default', label: 'Defaut (100q)' },
+  { key: 'standard', label: 'Standard (100q)' },
   { key: 'quick', label: 'Quick (25q)' },
   { key: 'full', label: 'Full (275q)' },
 ]
@@ -497,7 +497,7 @@ function RagasTab({
   isRunning: boolean
   runProgress: RunProgress | null
 }) {
-  const [profile, setProfile] = useState('default')
+  const [profile, setProfile] = useState('standard')
   const [tag, setTag] = useState('')
   const [desc, setDesc] = useState('')
   const [expandedQ, setExpandedQ] = useState<number | null>(null)
@@ -812,7 +812,7 @@ function ContradictionsTab({
   isRunning: boolean
   runProgress: RunProgress | null
 }) {
-  const [profile, setProfile] = useState('default')
+  const [profile, setProfile] = useState('standard')
   const [tag, setTag] = useState('')
   const [desc, setDesc] = useState('')
 
