@@ -62,6 +62,15 @@ class AtlasRoot(BaseModel):
     claim_count: int = 0
 
 
+class AtlasDomain(BaseModel):
+    """Niveau hiérarchique au-dessus des AtlasRoots (Domain → Root → Topic)."""
+    domain_id: str
+    name: str
+    description: str = ""
+    claim_count: int = 0
+    roots: List[AtlasRoot] = []
+
+
 class AtlasTheme(BaseModel):
     theme_id: str = ""
     label: str
@@ -74,7 +83,8 @@ class AtlasTheme(BaseModel):
 
 class AtlasHomepage(BaseModel):
     introduction: str = ""
-    roots: List[AtlasRoot] = []
+    domains: List[AtlasDomain] = []
+    roots: List[AtlasRoot] = []  # Conservé pour rétrocompat (vue plate)
     themes: List[AtlasTheme] = []
     total_docs: int = 0
     total_claims: int = 0
@@ -226,6 +236,30 @@ async def get_homepage():
                 root_id=rec["rid"], name=rec["name"],
                 description=rec.get("description") or "",
                 topics=root_topics, claim_count=rec["claims"] or 0,
+            ))
+
+        # Domains — niveau hiérarchique au-dessus des Roots (Domain → Root → Topic).
+        # Si aucun AtlasDomain n'est persisté, homepage.domains reste vide et le
+        # frontend retombe sur la vue plate homepage.roots.
+        roots_by_id = {r.root_id: r for r in homepage.roots}
+        domain_rows = session.run("""
+            MATCH (d:AtlasDomain {tenant_id: $tenant})
+            OPTIONAL MATCH (d)-[:CONTAINS_ROOT]->(ar:AtlasRoot)
+            WITH d, collect(ar.root_id) AS root_ids
+            RETURN d.domain_id AS did, d.name AS name,
+                   coalesce(d.description, '') AS description,
+                   coalesce(d.claim_count, 0) AS claims,
+                   root_ids
+            ORDER BY d.claim_count DESC
+        """, tenant=tenant)
+        for rec in domain_rows:
+            dom_roots = [roots_by_id[rid] for rid in (rec["root_ids"] or []) if rid in roots_by_id]
+            homepage.domains.append(AtlasDomain(
+                domain_id=rec["did"] or "",
+                name=rec["name"] or "",
+                description=rec["description"] or "",
+                claim_count=rec["claims"] or 0,
+                roots=dom_roots,
             ))
 
         # Stats

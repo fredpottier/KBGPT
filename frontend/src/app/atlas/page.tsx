@@ -29,6 +29,14 @@ interface AtlasRoot {
   claim_count: number
 }
 
+interface AtlasDomain {
+  domain_id: string
+  name: string
+  description: string
+  claim_count: number
+  roots: AtlasRoot[]
+}
+
 interface AtlasTheme {
   theme_id: string
   label: string
@@ -41,6 +49,7 @@ interface AtlasTheme {
 
 interface AtlasHomepage {
   introduction: string
+  domains: AtlasDomain[]
   roots: AtlasRoot[]
   themes: AtlasTheme[]
   total_docs: number
@@ -181,42 +190,98 @@ export default function AtlasPage() {
           </TabList>
 
           <TabPanels>
-            {/* Tab 1: Par Dossier */}
+            {/* Tab 1: Par Dossier (avec hiérarchie Domain > Dossier > Chapitre si domains présents) */}
             <TabPanel px={0}>
-              <VStack spacing={10} align="stretch">
-                {data.roots.map(root => (
-                  <Box key={root.root_id}>
-                    <HStack mb={2} spacing={3} flexWrap="wrap">
-                      <Heading size="md" color="var(--fg-primary)">
-                        {root.name}
-                      </Heading>
-                      <Badge colorScheme="purple" variant="subtle" fontSize="xs">
-                        {root.claim_count.toLocaleString()} faits
-                      </Badge>
-                      <Badge variant="outline" fontSize="xs" color="var(--fg-muted)">
-                        {root.topics.length} chapitre{root.topics.length > 1 ? 's' : ''}
-                      </Badge>
-                    </HStack>
-                    {root.description && (
-                      <Text
-                        color="var(--fg-secondary)" fontSize="sm" lineHeight="1.65"
-                        mb={4} maxW="900px"
-                      >
-                        {root.description}
-                      </Text>
-                    )}
-                    <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                      {root.topics.map((topic, i) => (
-                        <TopicCard
-                          key={topic.topic_id}
-                          topic={topic}
-                          chapterNumber={i + 1}
-                          totalChapters={root.topics.length}
-                        />
-                      ))}
-                    </SimpleGrid>
-                  </Box>
-                ))}
+              <VStack spacing={12} align="stretch">
+                {data.domains && data.domains.length > 0 ? (
+                  // Vue hiérarchique : Domain > Dossier > Chapitre
+                  data.domains.map(domain => (
+                    <Box key={domain.domain_id}>
+                      <Box mb={6} pb={4} borderBottomWidth="2px" borderBottomColor="var(--accent)">
+                        <HStack mb={2} spacing={3} flexWrap="wrap">
+                          <Heading size="lg" color="var(--accent)">
+                            {domain.name}
+                          </Heading>
+                          <Badge colorScheme="blue" variant="solid" fontSize="xs">
+                            {domain.claim_count.toLocaleString()} faits
+                          </Badge>
+                          <Badge variant="outline" fontSize="xs" color="var(--fg-muted)">
+                            {domain.roots.length} dossier{domain.roots.length > 1 ? 's' : ''}
+                          </Badge>
+                        </HStack>
+                        {domain.description && (
+                          <Text color="var(--fg-secondary)" fontSize="sm" lineHeight="1.65" maxW="900px">
+                            {domain.description}
+                          </Text>
+                        )}
+                      </Box>
+                      <VStack spacing={10} align="stretch" pl={{ base: 0, md: 4 }}>
+                        {domain.roots.map(root => (
+                          <Box key={root.root_id}>
+                            <HStack mb={2} spacing={3} flexWrap="wrap">
+                              <Heading size="md" color="var(--fg-primary)">
+                                {root.name}
+                              </Heading>
+                              <Badge colorScheme="purple" variant="subtle" fontSize="xs">
+                                {root.claim_count.toLocaleString()} faits
+                              </Badge>
+                              <Badge variant="outline" fontSize="xs" color="var(--fg-muted)">
+                                {root.topics.length} chapitre{root.topics.length > 1 ? 's' : ''}
+                              </Badge>
+                            </HStack>
+                            {root.description && (
+                              <Text color="var(--fg-secondary)" fontSize="sm" lineHeight="1.65" mb={4} maxW="900px">
+                                {root.description}
+                              </Text>
+                            )}
+                            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+                              {root.topics.map((topic, i) => (
+                                <TopicCard
+                                  key={topic.topic_id}
+                                  topic={topic}
+                                  chapterNumber={i + 1}
+                                  totalChapters={root.topics.length}
+                                />
+                              ))}
+                            </SimpleGrid>
+                          </Box>
+                        ))}
+                      </VStack>
+                    </Box>
+                  ))
+                ) : (
+                  // Fallback : vue plate par dossier (rétrocompat si aucun AtlasDomain persisté)
+                  data.roots.map(root => (
+                    <Box key={root.root_id}>
+                      <HStack mb={2} spacing={3} flexWrap="wrap">
+                        <Heading size="md" color="var(--fg-primary)">
+                          {root.name}
+                        </Heading>
+                        <Badge colorScheme="purple" variant="subtle" fontSize="xs">
+                          {root.claim_count.toLocaleString()} faits
+                        </Badge>
+                        <Badge variant="outline" fontSize="xs" color="var(--fg-muted)">
+                          {root.topics.length} chapitre{root.topics.length > 1 ? 's' : ''}
+                        </Badge>
+                      </HStack>
+                      {root.description && (
+                        <Text color="var(--fg-secondary)" fontSize="sm" lineHeight="1.65" mb={4} maxW="900px">
+                          {root.description}
+                        </Text>
+                      )}
+                      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+                        {root.topics.map((topic, i) => (
+                          <TopicCard
+                            key={topic.topic_id}
+                            topic={topic}
+                            chapterNumber={i + 1}
+                            totalChapters={root.topics.length}
+                          />
+                        ))}
+                      </SimpleGrid>
+                    </Box>
+                  ))
+                )}
               </VStack>
             </TabPanel>
 

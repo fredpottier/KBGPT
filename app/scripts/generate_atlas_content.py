@@ -523,6 +523,128 @@ def enrich_atlas_themes(driver, client, tenant_id: str, n_themes="auto", dry_run
                      topic_count=ax.topic_coverage)
 
 
+def generate_atlas_domains_via_llm(client, roots_data: list[dict]) -> list[dict]:
+    """Demande au LLM de regrouper les AtlasRoots en domaines macro.
+
+    Input  : liste de roots avec {root_id, name, description, claim_count}
+    Output : liste de {name, description, root_ids: [...]} (1-4 domaines typiquement)
+    """
+    if not roots_data:
+        return []
+
+    roots_block = "\n\n".join(
+        f"Root {r['root_id']} : {r['name']}\n"
+        f"  Description : {(r.get('description') or '')[:300]}\n"
+        f"  Claims : {r.get('claim_count', 0)}"
+        for r in roots_data
+    )
+
+    prompt = f"""Voici les dossiers (AtlasRoots) d'un atlas documentaire, chacun regroupant plusieurs chapitres narratifs :
+
+{roots_block}
+
+Regroupe ces {len(roots_data)} dossiers en 1-4 DOMAINES de niveau supérieur, où chaque domaine couvre un univers fonctionnel cohérent.
+
+Pour chaque domaine, génère :
+- name : 2-5 mots descriptifs (FR), nommant le DOMAINE thématique global (ex: "Aviation Safety", "Export Controls", "Transport de matières dangereuses")
+- description : 80-130 mots (FR) qui explique ce que ce domaine couvre, son périmètre réel, et à qui il sert
+- root_ids : liste des root_id qui appartiennent à ce domaine
+
+Contraintes :
+- Le nom doit être un DOMAINE (univers fonctionnel), pas un titre de document.
+- Si tous les dossiers parlent du même univers, retourne 1 seul domaine.
+- Si les dossiers couvrent plusieurs univers distincts, sépare-les.
+- Ton sobre, factuel, accessible.
+
+Format de réponse JSON strict :
+{{"domains": [
+  {{"name": "...", "description": "...", "root_ids": ["..."]}}
+]}}
+
+Retourne UNIQUEMENT le JSON, sans markdown ni préambule."""
+
+    try:
+        from knowbase.common.llm_router import TaskType
+        raw = client.complete(
+            task_type=TaskType.LONG_TEXT_SUMMARY,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2, max_tokens=1500,
+        ).strip()
+        if raw.startswith("```"):
+            raw = raw.split("```", 2)[1].lstrip("json").strip()
+        data = json.loads(raw)
+        return data.get("domains", []) or []
+    except Exception as e:
+        logger.warning(f"  Atlas domains generation failed: {e}")
+        return []
+
+
+def enrich_atlas_domains(driver, client, tenant_id: str, dry_run: bool = False) -> None:
+    """Génère + persiste les AtlasDomain (niveau hiérarchique au-dessus des AtlasRoot).
+
+    Schéma Neo4j créé :
+        (:AtlasDomain {domain_id, name, description, claim_count, root_count, generated_at})
+        -[:CONTAINS_ROOT]->(:AtlasRoot)
+    """
+    # Charger les AtlasRoots avec leurs descriptions
+    with driver.session() as session:
+        roots_data = session.run("""
+            MATCH (ar:AtlasRoot {tenant_id: $tenant})
+            RETURN ar.root_id AS root_id,
+                   coalesce(ar.canonical_name, '') AS name,
+                   coalesce(ar.description, '') AS description,
+                   coalesce(ar.claim_count, 0) AS claim_count
+            ORDER BY ar.claim_count DESC
+        """, tenant=tenant_id).data()
+
+    if not roots_data:
+        logger.warning("No AtlasRoots — skipping domain generation")
+        return
+
+    logger.info(f"\nGenerating Atlas domains from {len(roots_data)} roots...")
+    domains = generate_atlas_domains_via_llm(client, roots_data)
+    if not domains:
+        logger.warning("LLM returned no domains — skipping")
+        return
+
+    # Wipe existing domains (idempotent)
+    if not dry_run:
+        with driver.session() as session:
+            session.run("MATCH (d:AtlasDomain {tenant_id: $tenant}) DETACH DELETE d", tenant=tenant_id)
+
+    # Persist
+    for i, dom in enumerate(domains):
+        name = (dom.get("name") or "").strip()
+        description = (dom.get("description") or "").strip()
+        root_ids = dom.get("root_ids") or []
+        if not name or not root_ids:
+            continue
+        domain_id = f"domain_{i:03d}"
+
+        # claim_count = somme des roots
+        claim_count = sum(
+            r.get("claim_count", 0) for r in roots_data if r["root_id"] in root_ids
+        )
+        logger.info(f"  {domain_id}: {name} ({len(root_ids)} roots, {claim_count} faits)")
+        logger.info(f"    {description[:150]}...")
+
+        if not dry_run:
+            with driver.session() as session:
+                session.run("""
+                    MERGE (d:AtlasDomain {domain_id: $did, tenant_id: $tenant})
+                    SET d.name = $name,
+                        d.description = $desc,
+                        d.claim_count = $claims,
+                        d.root_count = $rc,
+                        d.generated_at = datetime()
+                    WITH d
+                    UNWIND $root_ids AS rid
+                    MATCH (ar:AtlasRoot {root_id: rid, tenant_id: $tenant})
+                    MERGE (d)-[:CONTAINS_ROOT]->(ar)
+                """, did=domain_id, tenant=tenant_id, name=name, desc=description,
+                     claims=claim_count, rc=len(root_ids), root_ids=root_ids)
+
+
 def enrich_atlas_metadata(driver, client, tenant_id: str, dry_run: bool = False) -> None:
     """Enrichit AtlasRoots avec descriptions + complete les NarrativeTopic.narrative_label manquants."""
     # 1. Combler les narrative_label manquants
@@ -577,6 +699,9 @@ def enrich_atlas_metadata(driver, client, tenant_id: str, dry_run: bool = False)
 
     # 3. Generer + persister les AtlasTheme (label LLM + description)
     enrich_atlas_themes(driver, client, tenant_id, dry_run=dry_run)
+
+    # 4. Generer + persister les AtlasDomain (niveau Domain > Root > Topic)
+    enrich_atlas_domains(driver, client, tenant_id, dry_run=dry_run)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
