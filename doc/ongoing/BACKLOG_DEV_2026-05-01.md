@@ -47,15 +47,15 @@
 
 ## 🐛 Bugs identifiés à corriger
 
-- [ ] **Bug Qwen2.5-14B dégénérescence ClaimFirst** — WEF Presidio : 148 batches, 433 erreurs, 0 claims. Hallucinations cross-corpus + JSON dégénéré. Source : `project_bug_qwen_degeneration_claimfirst.md`. **Investigation faite, fix non démarré (besoin du PDF source)**.
-- [ ] **Bug cache markdown full_text vide** — Créer `MarkdownExtractor` + branchement pipeline. Source : `project_bug_md_cache_fulltext.md`. **Non démarré** (~1j).
-- [ ] **Bug dispatcher /docs_in route Stratified V2 obsolète** — Concepts=0, osmose_s=0. Plan : Option C (ClaimFirst sur cache existants). Source : `project_dispatcher_docs_in_stale.md`. **Non démarré**.
-- [ ] **Facet linkage 27% sur biomédical** — 3 tentatives ont empiré. Piste : embedding similarity sur `facet.canonical_question`. Source : `project_facet_linkage_chantier.md`. **Non démarré** (~1j, gain +15-25 pts).
-- [ ] **frontend/package.json gitignored** — Rule `*.json` masque `reactflow@11.11.4` + `dagre@0.8.5`. Source : `project_v2_finalisation_phasing.md`. **Non démarré**.
-- [ ] **Bug 029/030 crash post-Docling silencieux** — Caches non générés. Source : `project_session_20260330.md`. **Non démarré**.
-- [ ] **Frontend bouton "Lancer" RAGAS cassé** — API OK CLI, bouton frontend cassé. Source : `project_session_20260330.md`. **Non démarré**.
-- [ ] **`ragas` perdu à chaque restart worker** — Pip install à chaque restart. Ajouter au Dockerfile. **Non démarré**.
-- [ ] **Burst state perdu au restart app** — Attach-instance à refaire. Source : `MEMORY.md`. **Non démarré**.
+- [x] **Bug Qwen2.5-14B dégénérescence ClaimFirst** — WEF Presidio : 148 batches, 433 erreurs, 0 claims. ✅ **Fix défensif appliqué 2026-05-01** (commit 8e67caf) : `_is_degenerative_response()` détecte 3 patterns avant `json.loads`. Reste dormant tant que rien ne dégénère. La cause racine prompt domain-agnostic n'a pas été touchée (besoin du PDF pour repro).
+- [x] **Bug cache markdown full_text vide** — ✅ **Déjà corrigé** (vérifié 2026-05-01) : `MarkdownExtractor` existe (`extraction_v2/extractors/markdown_extractor.py`) et est branché dans `jobs_v2.py:191`.
+- [x] **Bug dispatcher /docs_in route Stratified V2 obsolète** — ✅ **Fix appliqué 2026-05-01** (commit 8e67caf) : `INGESTION_SKIP_STRATIFIED_V2=true` par défaut, ClaimFirst (étape 5) reste l'extracteur productif.
+- [ ] **Facet linkage 27% sur biomédical** — 3 tentatives ont empiré. Piste : embedding similarity sur `facet.canonical_question`. Source : `project_facet_linkage_chantier.md`. **⏸️ Pending** (~1j dev + corpus biomédical pour valider, pas un quick fix).
+- [x] **frontend/package.json gitignored** — ✅ **Fix appliqué 2026-05-01** (commit b50d3e6) : exception `!frontend/package.json`/`!frontend/package-lock.json`/`!frontend/tsconfig*.json` dans .gitignore + 3 fichiers maintenant trackés.
+- [ ] **Bug 029/030 crash post-Docling silencieux** — Caches non générés. Source : `project_session_20260330.md`. **⏸️ Pending** (pas reproductible sans logs perdu, à reprendre si récidive).
+- [x] **Frontend bouton "Lancer" RAGAS cassé** — ✅ **Fix appliqué 2026-05-01** (commit 8e67caf) : mismatch profile `default` → `standard` dans PROFILES + 2× `useState`. Backend valide `['quick','standard','full']`.
+- [x] **`ragas` perdu à chaque restart worker** — ✅ **Déjà corrigé** (vérifié 2026-05-01) : `ragas>=0.4.0` est dans `app/requirements.txt`, version 0.4.3 installée dans app + worker containers.
+- [x] **Burst state perdu au restart app** — ✅ **Fix appliqué 2026-05-01** (commit 8e67caf) : `_try_rehydrate_from_persistent_state()` au boot du `BurstOrchestrator` lit Redis+fichier (avec health check) et reconstitue `self.state` si l'instance est saine.
 
 ---
 
@@ -106,3 +106,4 @@
 | Date | Auteur | Modification |
 |---|---|---|
 | 2026-05-01 | Audit initial | Création du backlog suite à audit complet |
+| 2026-05-01 | Bug fixing session | 7/9 bugs traités (6 fixes + 3 vérifications "déjà corrigé"), 2 pending documentés (facet linkage biomédical = ~1j dev dédié, crash 029/030 = repro perdue) |
