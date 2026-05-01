@@ -447,8 +447,11 @@ Retourne UNIQUEMENT le JSON, sans markdown ni preambule."""
         return ("", "")
 
 
-def enrich_atlas_themes(driver, client, tenant_id: str, n_themes: int = 8, dry_run: bool = False) -> None:
-    """Calcule via clustering + persiste les AtlasTheme avec label LLM et description."""
+def enrich_atlas_themes(driver, client, tenant_id: str, n_themes="auto", dry_run: bool = False) -> None:
+    """Calcule via clustering + persiste les AtlasTheme avec label LLM et description.
+
+    n_themes: int (K fixe) OR "auto" (silhouette scan).
+    """
     try:
         from detect_thematic_axes import load_perspective_embeddings, cluster_themes
     except ImportError:
@@ -460,7 +463,8 @@ def enrich_atlas_themes(driver, client, tenant_id: str, n_themes: int = 8, dry_r
         logger.warning("No perspectives with embeddings — skipping themes")
         return
 
-    axes = cluster_themes(perspectives, min(n_themes, max(2, len(perspectives) // 3)))
+    # n_themes="auto" → silhouette scan determine le K optimal pour le corpus
+    axes = cluster_themes(perspectives, n_themes)
 
     # Compute topic_coverage (nb of NarrativeTopics that touch each axis)
     with driver.session() as session:
