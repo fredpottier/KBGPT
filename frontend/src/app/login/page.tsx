@@ -269,7 +269,7 @@ export default function LoginPage() {
           mt={10}
         >
           <Box
-            bg="rgba(26, 26, 46, 0.8)"
+            bg="bg.surface"
             backdropFilter="blur(20px)"
             border="1px solid"
             borderColor="border.default"
