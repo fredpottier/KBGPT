@@ -8,7 +8,7 @@
 
 ## 🔥 Priorité haute
 
-- **Sécurisation Redis post-incident** — `127.0.0.1:6379:6379`, `requirepass`, `protected-mode yes`, `rename-command` sur FLUSHALL/CONFIG/DEBUG, audit ports `0.0.0.0` Neo4j/Qdrant/Postgres. Source : `project_incident_redis_20260427.md`. **Non démarré**.
+- ✅ **Sécurisation Redis post-incident** — Livré 2026-05-01 (commit 863c988) : binding 127.0.0.1 partout, requirepass + 8 rename-command, REDIS_PASSWORD propagé aux 12 fichiers Python, validé end-to-end (NOAUTH sans password, FLUSHALL renamed, app HTTP 200).
 - **Recovery script worker** — Au boot : `mgr.list_active_jobs()` → relance depuis dernier checkpoint. Source : `project_v2_finalisation_phasing.md`. **Non démarré**.
 
 ---
@@ -19,7 +19,7 @@
 - **LIFECYCLE_RELATION strict (V2-S1)** — Persistence sur déclaration textuelle explicite uniquement, validator evidence-locked, backfill 17 docs aerospace. Source : `VISION_RECENTREE_OSMOSIS_2026-04-30.md` §9. **Amorcé**.
 - **Refactor profond post-V2** — Mentionné mais sans spec. Source : `project_v2_finalisation_phasing.md`. **Non démarré, scope non documenté**.
 - **Calibration auto-adaptative response modes** — Étendre au-delà de SAP : 20-30q calibration au post-import. Mode AUGMENTED désactivé en attente. Source : `project_v3_response_modes.md`. **Non démarré**.
-- **Mode AUGMENTED reactivation** — Trop permissif sur corpus dense. Réactiver avec gate plus discriminant. Source : `project_v3_response_modes.md`. **Non démarré**.
+- ✅ **Mode AUGMENTED reactivation** — Livré 2026-05-01 (commit 8632371) : 14 exemples LLM ajoutés au yaml, trigger candidate Etage A (question_mode==AUGMENTED + ≥3 nouveaux docs), gate Etage B renforcé (new_docs ≥ 3 + kg_trust ≥ 0.5). Rollback rapide via env MODE_AUGMENTED_ENABLED=false.
 - **Refonte chat (Phase 1 + 2)** — Phase 1 nettoyer (score, bloc verite, sources lisibles) ; Phase 2 Split Truth View + Insight Cards + switch automatique. Source : `CHANTIER_REFONTE_CHAT.md`. **Non démarré** (runtime-v2 a peut-être résolu une partie).
 - **Verify V1 — refacto via pipeline search** — `evidence_matcher` cassé. Refactorer `verification_service` pour utiliser le pipeline search. Source : `CHANTIER_VERIFY_V1_ETAT.md`. **Non démarré**.
 - **Verify V2 — Document Review Word** — Upload .docx → analyse → .docx annoté avec commentaires natifs. 3 niveaux. Source : `SPEC_VERIFY_V2_DOCUMENT_REVIEW.md`. **Non démarré**.
@@ -30,7 +30,7 @@
 ## 📋 Chantiers définis mais non commencés
 
 - **Cockpit widget burst local vLLM** — Throughput tok/s temps réel, KV cache, prefix cache. Source : `project_cockpit_widget_local_burst.md`. **Non démarré**.
-- **Atlas — restructuration Domain → Document → Topic** — Niveau hiérarchique au-dessus des roots actuels. Source : `project_atlas_pipeline_production.md`. **Non démarré** (~1j).
+- ✅ **Atlas — restructuration Domain → Document → Topic** — Livré 2026-05-01 (commit 927bc53) : nouvelle fonction `enrich_atlas_domains()` qui clusterise les AtlasRoots via DeepSeek-V4-Pro. Schéma `(:AtlasDomain)-[:CONTAINS_ROOT]->(:AtlasRoot)`. API expose hiérarchie Domain → Root → Topic. Frontend rendu hiérarchique conditionnel + fallback vue plate. Sur aerospace : 2 domains générés (navigabilité 6765 faits / dual-use 5407 faits).
 - **Atlas — global_reading_order cross-dossiers** — Tour guidé corpus complet. Source : `project_atlas_pipeline_production.md`. **Non démarré**.
 - **Frontend admin ClaimFirst Settings** — Page sliders pour les paramètres ClaimFirst + table `tenant_settings` Postgres. Source : `TODO_ADMIN_UI_CLAIMFIRST_PARAMS.md`. **Non démarré**.
 - **Plugin Word Office Add-in** — React+Office.js, panneau latéral. Source : `SPEC_VERIFY_V2_DOCUMENT_REVIEW.md`. **Non démarré** (~2-3j MVP).
@@ -85,8 +85,8 @@
 
 ## ⚙️ Dette technique / refactor
 
-- **Suppression physique runtime V1.1** — Modules + routes `/api/runtime/*` + frontend `/chat/runtime`. Source : `PHASING_OSMOSIS_V2_FINALISATION.md`. **Amorcé, à vérifier exhaustivité**.
-- **Stratified V2 deprecate complet** — Flag dispo, suppression code à faire. **Non démarré**.
+- ✅ **Suppression physique runtime V1.1** — Vérifié 2026-05-01 : `src/knowbase/runtime/` n'existe plus, aucune référence orpheline, frontend `/chat/runtime` retiré. Cleanup déjà complet.
+- ✅ **Stratified V2 router déprecate** — Livré 2026-05-01 (commit 8632371) : `/api/v2/*` retiré du main.py (HTTP 404). Code `knowbase/stratified/` conservé car pass0/pass1/claimkey activement utilisés par ClaimFirst.
 - **TODOs critiques code** :
   - `auth_service.py:23` — JWT secret depuis env vars
   - `llm_router.py:1345/1353` — async pour Anthropic + SageMaker
@@ -107,3 +107,4 @@
 |---|---|---|
 | 2026-05-01 | Audit initial | Création du backlog suite à audit complet |
 | 2026-05-01 | Bug fixing session | 7/9 bugs traités (6 fixes + 3 vérifications "déjà corrigé"), 2 pending documentés (facet linkage biomédical = ~1j dev dédié, crash 029/030 = repro perdue) |
+| 2026-05-01 | Sprint A→E | 5 chantiers livrés : Sécurisation Redis (commit 863c988), runtime V1.1 cleanup vérifié, Stratified V2 router déprecate (8632371), Mode AUGMENTED réactivation (8632371), Atlas Domain→Root→Topic (927bc53) |
