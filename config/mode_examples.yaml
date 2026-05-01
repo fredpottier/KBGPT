@@ -96,10 +96,25 @@ modes:
       - "What are the installation prerequisites?"
       - "What is the role of this component?"
 
-  # AUGMENTED est desactive pour l'instant (trop permissif sur corpus dense)
-  # A activer avec calibration auto-adaptative
-  # AUGMENTED:
-  #   description: "Questions necessitant des informations de plusieurs documents"
-  #   examples:
-  #     - "Donnez-moi une vue complete de ce sujet"
-  #     - "Give me a comprehensive overview"
+  # AUGMENTED reactive 2026-05-01 avec gate discriminant (signal_policy:391+).
+  # Trigger : question classifier dit AUGMENTED (>=0.70 cosine) ET coverage gap KG
+  # rapporte >=3 nouveaux docs ET kg_trust >=0.5 ET diversite claims sufisante.
+  AUGMENTED:
+    description: "Questions demandant une vue d'ensemble large, synthese ou panorama necessitant plusieurs sources"
+    examples:
+      # Francais
+      - "Donnez-moi une vue d'ensemble complete de ce sujet"
+      - "Pouvez-vous me faire une synthese exhaustive sur ce theme ?"
+      - "Quel est le panorama complet des aspects a considerer ?"
+      - "Donnez-moi tous les details sur ce processus de bout en bout"
+      - "Faites-moi un tour complet de cette fonctionnalite"
+      - "Quelles sont toutes les exigences applicables a cela ?"
+      - "Decrivez-moi l'integralite du dispositif"
+      # Anglais
+      - "Give me a comprehensive overview of this topic"
+      - "Can you provide a thorough synthesis on this theme?"
+      - "What is the complete picture of all aspects to consider?"
+      - "Walk me through the entire end-to-end process"
+      - "Provide a full tour of this feature"
+      - "What are all the requirements applicable to this?"
+      - "Describe the complete framework"

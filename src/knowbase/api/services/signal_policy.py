@@ -363,7 +363,16 @@ def build_policy(
     # qui est async et necessite d'avoir charge/score les Perspectives en amont.
     # Voir search.py branchement V3 Response Mode.
 
-    # Mode AUGMENTED : reserve pour override admin ou calibration auto future
+    # Mode AUGMENTED : la question demande une vue large + le KG dispose de docs hors RAG.
+    # Reactive 2026-05-01 avec gate discriminant (anti-permissif).
+    if candidate == ResponseMode.DIRECT and augmented_enabled and question_mode == "AUGMENTED":
+        kg_doc_ids = set(c.get("doc_id") or c.get("source_file", "") for c in _kg_claims)
+        new_docs = kg_doc_ids - _retrieval_docs
+        AUGMENTED_MIN_NEW_DOCS = 3  # KG doit apporter au moins 3 docs hors RAG
+        if len(new_docs) >= AUGMENTED_MIN_NEW_DOCS:
+            candidate = ResponseMode.AUGMENTED
+            confidence = question_mode_confidence
+            reason = f"augmented: classifier={question_mode_confidence:.2f} + {len(new_docs)} new docs hors RAG"
 
     policy.candidate_mode = candidate
 
@@ -389,12 +398,18 @@ def build_policy(
             reason += f" -> FALLBACK (comparable={comparable}, trust={kg_trust:.2f})"
 
     elif candidate == ResponseMode.AUGMENTED:
+        # Gate discriminant 2026-05-01 : seuils relevés pour éviter activation
+        # systématique sur corpus dense (anti-permissif).
+        # - AUGMENTED_MIN_NEW_DOCS = 3 (cohérent avec trigger Etage A)
+        # - kg_trust >= 0.5 (pas 0.3 — éviter docs faiblement liés)
         kg_doc_ids = set(c.get("doc_id") or c.get("source_file", "") for c in _kg_claims)
         new_docs = kg_doc_ids - _retrieval_docs
-        if len(new_docs) == 0 or kg_trust < 0.3:
+        AUGMENTED_GATE_MIN_NEW_DOCS = 3
+        AUGMENTED_GATE_MIN_TRUST = 0.5
+        if len(new_docs) < AUGMENTED_GATE_MIN_NEW_DOCS or kg_trust < AUGMENTED_GATE_MIN_TRUST:
             candidate = ResponseMode.DIRECT
             fallback = True
-            reason += f" -> FALLBACK (new_docs={len(new_docs)}, trust={kg_trust:.2f})"
+            reason += f" -> FALLBACK (new_docs={len(new_docs)}<{AUGMENTED_GATE_MIN_NEW_DOCS}, trust={kg_trust:.2f}<{AUGMENTED_GATE_MIN_TRUST})"
 
     # ── Etage B' : KG Override — DIRECT invalidable ────────────
     # Le KG ne doit pas enrichir une reponse simple.
