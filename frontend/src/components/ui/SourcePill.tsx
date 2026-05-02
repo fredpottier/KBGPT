@@ -114,20 +114,20 @@ import type { SourceRef } from '@/lib/sourceRefs'
 
 interface RefPillProps {
   index: number // 1-based
-  ref: SourceRef
+  sourceRef: SourceRef // renommé `sourceRef` car `ref` est une prop réservée React
 }
 
 /**
  * Pill compacte `[N]` cliquable qui ouvre le fichier source du SourceRef.
  * Format Wikipedia footnotes — l'info détaillée est en bas via SourcesFootnotes.
  */
-function RefPill({ index, ref }: RefPillProps) {
+function RefPill({ index, sourceRef }: RefPillProps) {
   const toast = useToast()
-  const displayName = formatDocumentName(ref.docId) || ref.docId
-  const tooltip = `[${index}] ${displayName}${ref.page ? ' ' + ref.page : ''}`
+  const displayName = formatDocumentName(sourceRef.docId) || sourceRef.docId
+  const tooltip = `[${index}] ${displayName}${sourceRef.page ? ' ' + sourceRef.page : ''}`
 
   const handleClick = async () => {
-    const err = await openSourceFile(ref.docId)
+    const err = await openSourceFile(sourceRef.docId)
     if (err) {
       toast({
         title: 'Source indisponible',
@@ -198,7 +198,9 @@ export function renderWithRefs(
     const idx = parseInt(match[1], 10)
     const ref = refs[idx - 1]
     if (ref) {
-      parts.push(<RefPill key={`ref-${key++}`} index={idx} ref={ref} />)
+      parts.push(
+        <RefPill key={`ref-${key++}`} index={idx} sourceRef={ref} />,
+      )
     } else {
       // Fallback : index hors range, on affiche le marqueur brut
       parts.push(`[${idx}]`)
