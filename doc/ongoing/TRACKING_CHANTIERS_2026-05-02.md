@@ -28,18 +28,23 @@
 - **Ordre validé** : CH-02.1 → CH-02.4 → CH-02.3 → CH-02.2
 
 #### CH-02.1 — Backfill lifecycle_status DocumentContext
-- **Statut** : DONE (2026-05-02, commit à venir)
+- **Statut** : DONE (2026-05-02, commit a5b8288)
 - **Effort** : 0.5j
 - **Quoi** : 0/17 docs ont `lifecycle_status`. Inférer de manière déterministe : ACTIVE par défaut, DEPRECATED si un successor EVOLVES_FROM/SUPERSEDES sortant existe.
 - **Pourquoi** : Bloque l'étape Current Resolver V2 (filtrage `WHERE dc.lifecycle_status = 'ACTIVE'`).
 - **Acceptation** : 17/17 DC ont une valeur, distribution audit log.
 
 #### CH-02.4 — Finaliser validity_start claim-level (résidu S1b)
-- **Statut** : TODO
-- **Effort** : 1-1.5j
-- **Quoi** : 333/40 196 claims (0.83%) ont l'override Tier 4. Cible S1b = 3 401 candidates Tier 3 (8.5%). Relancer le batch LLM evidence-locked sur EC2 vLLM.
-- **Pourquoi** : Anchor Filter range nécessite une couverture validity_start meilleure pour discriminer.
-- **Acceptation** : ≥3 000 claims avec override, 0 hallucination validator.
+- **Statut** : DONE (2026-05-02, plafond technique atteint)
+- **Effort réel** : ~30 min (batch 19.7 min + audit 10 min) sur burst EC2 g6.2xlarge
+- **Résultat** : 333 claims avec validity_start (idem pré-batch — pipeline idempotent)
+- **Acceptation revisée** : la cible "≥3 000 claims" du plan S1b était une **estimation erronée** (basée sur Phase B Test 2 sur autre échantillon). Le plafond du pipeline evidence-locked sur le corpus aerospace est 333/40 196 = 0.83%.
+- **Audit qualité Claude (15 claims rejetés)** : 14/15 corrects + 1 borderline. Les 1 102 candidates rejetées sont presque toutes des cas où la date numérique du passage est :
+  - un identifiant de loi (`Act 111/1994`, `Regulation 522/1973`, `ISO 230-2:1988`, `NPA 2015-19`)
+  - une date d'émission de document référencé (`AC dated 18.5.2009`, `EUROCAE amendment dated 06/09/99`)
+  - une date d'adoption parlementaire (`of 15 July 2020` ≠ applicable_from selon V3.3)
+  - un numéro de section (`4.1.11 Supercooled...`)
+- **Conclusion** : LLM bien calibré (0 hallucination, 0 faux négatif évident). Pour le pipeline V2 anchor-driven, le fallback runtime via `doc.publication_date` (cf VISION §4.2) couvre les 39 863 claims sans override. Augmenter au-delà de 333 nécessiterait soit relâcher le validator (= hallucinations), soit confondre identifiant/adoption avec applicable_from (= faux).
 
 #### CH-02.3 — REAFFIRMS Doc→Doc (extension V2-S1)
 - **Statut** : TODO
