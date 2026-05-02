@@ -14,6 +14,7 @@ import {
 } from '@chakra-ui/react'
 import { SynthesisResult } from '@/types/api'
 import { FiFileText } from 'react-icons/fi'
+import { formatDocumentName, getFileExtension } from '@/lib/formatDocumentName'
 
 interface SourcesSectionProps {
   synthesis: SynthesisResult
@@ -31,26 +32,6 @@ const FILE_TYPE_CONFIG: Record<string, { color: string; bg: string }> = {
 }
 
 export default function SourcesSection({ synthesis }: SourcesSectionProps) {
-  const getDocumentName = (sourceFile: string) => {
-    let name = sourceFile.split('/').pop() || sourceFile
-    // Retirer le hash final (ex: _c160af0e, _44f7ec32)
-    name = name.replace(/_[a-f0-9]{6,}$/i, '')
-    // Retirer le prefixe numerique (ex: 027_, 023_1212_)
-    name = name.replace(/^\d{3}_(\d+_)?/, '')
-    // Retirer l'extension
-    name = name.replace(/\.\w+$/, '')
-    // Remplacer underscores et tirets par espaces
-    name = name.replace(/[_-]+/g, ' ').trim()
-    // Tronquer si trop long
-    if (name.length > 55) name = name.substring(0, 52) + '...'
-    return name || sourceFile
-  }
-
-  const getFileExtension = (filename: string) => {
-    const ext = filename.split('.').pop()?.toUpperCase()
-    return ext || 'FILE'
-  }
-
   const getFileTypeConfig = (extension: string) => {
     return FILE_TYPE_CONFIG[extension] || FILE_TYPE_CONFIG.DEFAULT
   }
@@ -83,8 +64,8 @@ export default function SourcesSection({ synthesis }: SourcesSectionProps) {
         {/* Sources list */}
         <HStack spacing={2} flexWrap="wrap">
           {synthesis.sources_used.map((source, index) => {
-            const filename = getDocumentName(source)
-            const extension = getFileExtension(filename)
+            const filename = formatDocumentName(source)
+            const extension = getFileExtension(source)
             const config = getFileTypeConfig(extension)
 
             return (

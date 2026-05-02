@@ -137,9 +137,15 @@
 - **Total cleanup** : ~2 650 lignes mortes
 - **Validation** : `tsc --noEmit` aucune nouvelle erreur (les erreurs préexistantes hors scope CH-05.1 conservées)
 
-#### CH-05.2 — Helper formatDocumentName centralisé (À faire)
-- **Effort** : 0.3j
-- **Quoi** : Mapping `027_SAP_S4HANA_2023_Security_Guide_c160af0e.pdf` → `SAP S/4HANA 2023 Security Guide`. Dédupliquer 3 implémentations actuelles (`SearchResultDisplay`, `SourcesSection`, `ThumbnailCarousel`).
+#### CH-05.2 — Helper formatDocumentName centralisé
+- **Statut** : DONE (2026-05-02, commit à venir)
+- **Effort** : 0.3j (réel ~20 min)
+- **Livré** :
+  - **Nouveau** : `frontend/src/lib/formatDocumentName.ts` — 2 helpers exportés (`formatDocumentName`, `getFileExtension`)
+  - Logique : retire path → hash final (`_[a-f0-9]{6,}`) → préfixe numérique (`^\d{3}(_\d+)?_`) → extension → underscores/tirets en espaces → title case basique avec préservation des acronymes/numéros → tronque à 55 chars
+  - **Refactoré** : `SearchResultDisplay.tsx`, `SourcesSection.tsx`, `ThumbnailCarousel.tsx` — utilisent maintenant le helper unifié
+  - **Bug fix** dans `SourcesSection.tsx` : `getFileExtension` recevait `filename` (déjà nettoyé sans extension) au lieu de `source` brute → tous les badges file type tombaient sur `DEFAULT`. Maintenant l'extension est extraite avant cleanup.
+- **Validation** : `tsc --noEmit` aucune erreur sur fichiers refactorés.
 
 #### CH-05.3 — Sources cliquables (À faire)
 - **Effort** : 0.5j

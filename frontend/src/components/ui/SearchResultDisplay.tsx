@@ -38,6 +38,7 @@ import { useState } from 'react'
 import ThumbnailCarousel from './ThumbnailCarousel'
 import SynthesizedAnswer from './SynthesizedAnswer'
 import TensionIndicator from '../chat/TensionIndicator'
+import { formatDocumentName } from '@/lib/formatDocumentName'
 import type { GraphData, ProofGraph } from '@/types/graph'
 import NextLink from 'next/link'
 import {
@@ -72,10 +73,6 @@ export default function SearchResultDisplay({
   const handleSlideClick = (chunk: SearchChunk) => {
     setSelectedImage(chunk)
     onOpen()
-  }
-
-  const getDocumentName = (sourceFile: string) => {
-    return sourceFile.split('/').pop() || sourceFile
   }
 
   if (searchResult.status === 'no_results') {
@@ -166,7 +163,7 @@ export default function SearchResultDisplay({
                   }
                 </Text>
                 <Text fontSize="xs" color="text.muted">
-                  {result.source_file.split('/').pop()}
+                  {formatDocumentName(result.source_file)}
                   {result.slide_index && ` • slide ${result.slide_index}`}
                 </Text>
               </Box>
@@ -210,7 +207,7 @@ export default function SearchResultDisplay({
                     Slide {selectedImage.slide_index}
                   </Text>
                   <Text fontSize="sm" color="text.secondary" textAlign="center">
-                    {getDocumentName(selectedImage.source_file)}
+                    {formatDocumentName(selectedImage.source_file)}
                   </Text>
                 </VStack>
               </VStack>
