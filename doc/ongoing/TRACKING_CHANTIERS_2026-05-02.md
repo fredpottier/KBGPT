@@ -94,12 +94,33 @@
 - **Acceptation** : backfill 17 docs aerospace → ≥1 LIFECYCLE_RELATION détectée par doc avec evidence_quote présente verbatim.
 
 ### CH-04 — Calibration auto-adaptative response modes
-- **Statut** : TODO
-- **Effort** : 1-2j
-- **Fichiers** : `signal_policy.py`, nouveau service `corpus_calibration_runner.py`
-- **Quoi** : Étendre la calibration question-driven (DIRECT/AUGMENTED/CROSS_DOC) au-delà du corpus SAP : 20-30 questions étalon générées au post-import, signature du corpus injectée.
-- **Pourquoi** : Mode AUGMENTED réactivé hier (commit 8632371) mais avec un gate statique (≥3 nouveaux docs, kg_trust ≥ 0.5). Sur un corpus médical ou juridique, ces seuils sont arbitraires.
-- **Acceptation** : ingestion d'un corpus régulatoire → seuils calibrés différents du corpus aerospace, validés par 5 questions de référence.
+- **Statut** : IN_PROGRESS — CH-04.1 livré 2026-05-02, CH-04.2/3/4 différés
+- **Effort total** : ~2-3j (CH-04.1 = 0.5j fait, CH-04.2 = 1.5j déféré, CH-04.3 = 0.3j déféré, CH-04.4 = 0.5j-1j déféré)
+
+#### CH-04.1 — Externalisation seuils dans YAML
+- **Statut** : DONE (2026-05-02, commit à venir)
+- **Effort** : 0.5j (réel ~30 min)
+- **Livré** :
+  - `config/response_modes_thresholds.yaml` — 12 seuils + generic_entities + tenant_overrides
+  - `src/knowbase/config/response_modes_thresholds.py` — loader Pydantic-style avec singleton + reload
+  - `signal_policy.py` refactoré : `MAX_KG_INJECTION_TOKENS`, `TENSION_MIN_STRENGTH`, `TENSION_MIN_TEXTS`, `EXACTNESS_MIN_STRENGTH`, `AUGMENTED_MIN_NEW_DOCS`, `AUGMENTED_GATE_MIN_NEW_DOCS`, `AUGMENTED_GATE_MIN_TRUST`, fallback TENSION (2/0.4), fallback STRUCTURED_FACT (2/0.5), `KG_OVERRIDE_MIN_CONFIDENCE`, `GENERIC_ENTITIES` — tous lus depuis YAML.
+- **Acceptation** : smoke test passé — toutes les valeurs match les hardcodes pré-refacto, comportement identique.
+
+#### CH-04.2 — Calibration auto via questions étalon (DIFFÉRÉ)
+- **Statut** : DEFERRED — à activer just-in-time quand on ingère un nouveau corpus (test Armand)
+- **Effort estimé** : 1.5j
+- **Quoi** : Service `corpus_calibration_runner.py` qui génère 20-30 questions étalon (LLM sur claims), run le pipeline, mesure les distributions (n_tensions, distinct_docs, kg_trust), calcule des seuils calibrés (ex: 25e percentile pour MIN_NEW_DOCS, 50e pour MIN_TRUST), persiste dans `tenant_settings` Postgres.
+
+#### CH-04.3 — Hook post-import (DIFFÉRÉ avec CH-04.2)
+- **Statut** : DEFERRED
+- **Effort estimé** : 0.3j
+- **Quoi** : Trigger CH-04.2 automatiquement après import batch.
+
+#### CH-04.4 — Dashboard observabilité response modes (NOUVEAU, DIFFÉRÉ)
+- **Statut** : DEFERRED
+- **Effort estimé** : 0.5-1j
+- **Quoi** : Dashboard frontend qui montre la distribution des modes décidés (DIRECT vs AUGMENTED vs TENSION...), le taux de fallback Étage B (cands AUGMENTED → DIRECT), les corrélations RAGAS×mode. Permet de DÉTECTER si les seuils sont mal adaptés (ex: 100% DIRECT = AUGMENTED jamais déclenché, ou 80% fallback = mismatch A/B).
+- **Pourquoi** : Sans cet outil d'observabilité, on ne sait pas SI les seuils nécessitent recalibration. C'est la condition préalable pour CH-04.2 (calibration auto).
 
 ### CH-05 — Refonte chat Phase 1 (nettoyer)
 - **Statut** : TODO

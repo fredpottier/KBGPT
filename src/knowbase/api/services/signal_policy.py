@@ -15,12 +15,15 @@ import os
 from dataclasses import dataclass, field
 from enum import Enum
 
+from knowbase.config.response_modes_thresholds import get_thresholds
+
 from .kg_signal_detector import SignalReport
 
 logger = logging.getLogger(__name__)
 
-# Limite de tokens KG injectes dans le prompt (lecon Sprint 0 test v2)
-MAX_KG_INJECTION_TOKENS = 150
+# Compat — exposé pour les imports externes (signal_policy.MAX_KG_INJECTION_TOKENS).
+# Lit la valeur courante depuis le YAML chargé au boot.
+MAX_KG_INJECTION_TOKENS = get_thresholds().max_kg_injection_tokens
 
 
 class ResponseMode(str, Enum):
@@ -120,19 +123,15 @@ def _compute_kg_trust_score(
 def _check_paired_tension_evidence(kg_claims: list[dict]) -> bool:
     """Verifie qu'au moins 2 claims partagent une entite SPECIFIQUE ET viennent de docs distincts.
 
-    Exclut les entites trop generiques (SAP, S/4HANA, etc.) qui matchent tout.
+    Exclut les entites trop generiques (corpus-specific, configurées dans
+    config/response_modes_thresholds.yaml > generic_entities).
     """
-    GENERIC_ENTITIES = {
-        "sap", "sap s/4hana", "s/4hana", "sap s/4hana cloud",
-        "sap s/4hana cloud private edition", "sap cloud erp",
-        "abap", "abap platform", "fiori", "sap fiori",
-        "hana", "sap hana",
-    }
+    generic_entities = get_thresholds().generic_entities
     entity_docs: dict[str, set[str]] = {}
     for claim in kg_claims:
         doc_id = claim.get("doc_id") or claim.get("source_file", "")
         for entity in claim.get("entity_names", []):
-            if entity and entity.lower().strip() not in GENERIC_ENTITIES:
+            if entity and entity.lower().strip() not in generic_entities:
                 entity_docs.setdefault(entity, set()).add(doc_id)
     return any(len(docs) >= 2 for docs in entity_docs.values())
 
@@ -325,10 +324,11 @@ def build_policy(
     confidence = 0.0
     reason = "default_direct"
 
-    # Seuils de declenchement
-    TENSION_MIN_STRENGTH = 0.6
-    TENSION_MIN_TEXTS = 3
-    EXACTNESS_MIN_STRENGTH = 0.5
+    # Seuils de declenchement (chargés depuis config/response_modes_thresholds.yaml)
+    thresholds = get_thresholds()
+    TENSION_MIN_STRENGTH = thresholds.stage_a.tension.min_strength
+    TENSION_MIN_TEXTS = thresholds.stage_a.tension.min_texts
+    EXACTNESS_MIN_STRENGTH = thresholds.stage_a.structured_fact.min_strength
 
     # Classification de la question par embedding similarity (multilingue)
     question_mode = "DIRECT"
@@ -368,7 +368,7 @@ def build_policy(
     if candidate == ResponseMode.DIRECT and augmented_enabled and question_mode == "AUGMENTED":
         kg_doc_ids = set(c.get("doc_id") or c.get("source_file", "") for c in _kg_claims)
         new_docs = kg_doc_ids - _retrieval_docs
-        AUGMENTED_MIN_NEW_DOCS = 3  # KG doit apporter au moins 3 docs hors RAG
+        AUGMENTED_MIN_NEW_DOCS = thresholds.stage_a.augmented.min_new_docs
         if len(new_docs) >= AUGMENTED_MIN_NEW_DOCS:
             candidate = ResponseMode.AUGMENTED
             confidence = question_mode_confidence
@@ -385,27 +385,29 @@ def build_policy(
         tension_doc_ids_from_claims = kg_doc_ids  # docs dans les claims KG
         distinct_tension_docs = len(tension_doc_ids_from_claims)
         paired = _check_paired_tension_evidence(_kg_claims)
-        if distinct_tension_docs < 2 or not paired or kg_trust < 0.4:
+        if (distinct_tension_docs < thresholds.stage_b.tension.min_distinct_docs
+                or not paired
+                or kg_trust < thresholds.stage_b.tension.min_kg_trust):
             candidate = ResponseMode.DIRECT
             fallback = True
             reason += f" -> FALLBACK (docs={distinct_tension_docs}, paired={paired}, trust={kg_trust:.2f})"
 
     elif candidate == ResponseMode.STRUCTURED_FACT:
         comparable = _check_comparable_facts(qs_crossdoc_data)
-        if comparable < 2 or kg_trust < 0.5:
+        if (comparable < thresholds.stage_b.structured_fact.min_comparable_facts
+                or kg_trust < thresholds.stage_b.structured_fact.min_kg_trust):
             candidate = ResponseMode.DIRECT
             fallback = True
             reason += f" -> FALLBACK (comparable={comparable}, trust={kg_trust:.2f})"
 
     elif candidate == ResponseMode.AUGMENTED:
         # Gate discriminant 2026-05-01 : seuils relevés pour éviter activation
-        # systématique sur corpus dense (anti-permissif).
-        # - AUGMENTED_MIN_NEW_DOCS = 3 (cohérent avec trigger Etage A)
-        # - kg_trust >= 0.5 (pas 0.3 — éviter docs faiblement liés)
+        # systématique sur corpus dense (anti-permissif). Externalisés en CH-04.1
+        # — voir config/response_modes_thresholds.yaml.
         kg_doc_ids = set(c.get("doc_id") or c.get("source_file", "") for c in _kg_claims)
         new_docs = kg_doc_ids - _retrieval_docs
-        AUGMENTED_GATE_MIN_NEW_DOCS = 3
-        AUGMENTED_GATE_MIN_TRUST = 0.5
+        AUGMENTED_GATE_MIN_NEW_DOCS = thresholds.stage_b.augmented.min_new_docs
+        AUGMENTED_GATE_MIN_TRUST = thresholds.stage_b.augmented.min_kg_trust
         if len(new_docs) < AUGMENTED_GATE_MIN_NEW_DOCS or kg_trust < AUGMENTED_GATE_MIN_TRUST:
             candidate = ResponseMode.DIRECT
             fallback = True
@@ -416,11 +418,11 @@ def build_policy(
     # Il doit empecher qu'une reponse simple soit FAUSSE.
     #
     # Override DIRECT → TENSION uniquement si :
-    # 1. Contradiction forte (confidence >= 0.85)
+    # 1. Contradiction forte (confidence >= seuil configuré)
     # 2. Le RAG ne retourne qu'un cote (doc contradictoire absent)
     # 3. Paired evidence (meme entite, docs distincts)
     # 4. TENSION est resolvable (les deux cotes existent dans le KG)
-    KG_OVERRIDE_MIN_CONFIDENCE = 0.85
+    KG_OVERRIDE_MIN_CONFIDENCE = thresholds.stage_b_override.direct_to_tension.min_confidence
 
     if candidate == ResponseMode.DIRECT and tension and tension_enabled and not fallback:
         tension_texts = tension.evidence.get("tension_texts", [])
