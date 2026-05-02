@@ -10,7 +10,7 @@
 ## 🔥 Priorité haute
 
 ### CH-01 — Recovery script worker
-- **Statut** : DONE (2026-05-02, commit à venir)
+- **Statut** : DONE (2026-05-02, commit 3a35e64)
 - **Effort** : ~0.5j
 - **Fichiers** : `BurstOrchestrator.__init__`, `JobsV2Manager.boot()`
 - **Quoi** : Au boot de l'app/worker, balayer `mgr.list_active_jobs()` et relancer chaque job depuis son dernier checkpoint Redis (`osmose:job:<id>:state`).
@@ -22,12 +22,38 @@
 
 ## 🚧 Engagés mais non finalisés
 
-### CH-02 — Sprint V3.3 : modèle de données contradictions (à repenser)
-- **Statut** : DEFERRED — le runtime 7-modes a été déprisé par V2 anchor-driven, le modèle reste valide mais doit être repensé proprement
-- **Effort** : 2-3 sprints estimés post-refactor
-- **Quoi** : 12 LogicalRelations (SUBSET, SUPERSEDES, EXCEPTION, EXCLUSION, NUANCES…) avec 3 axes orthogonaux (Scope/Temporality/Lifecycle), persistées sur déclaration explicite (cf. règle V2-S1 `LIFECYCLE_RELATION` strict).
-- **Pourquoi** : Le KG actuel a 12 503 edges legacy CONTRADICTS/REFINES/QUALIFIES purgées en V2. Sans typage fin, on ne peut pas distinguer "supersession EU" de "exception ETOPS" — donc pas de tour guidé conflit pour Armand.
-- **Acceptation** : à définir lors de la reprise. Pas avant la fin du refactor profond.
+### CH-02 — Modèle V3.3 résiduel post-V2 anchor-driven
+- **Statut** : IN_PROGRESS — Phase 1 cadrage livrée 2026-05-02 (`CADRAGE_CH02_V33_VS_V2_2026-05-02.md`), périmètre réduit à 4 sous-chantiers
+- **Effort total** : ~4j (au lieu des 2-3 sprints initiaux — V2 a absorbé l'essentiel de V3.3)
+- **Ordre validé** : CH-02.1 → CH-02.4 → CH-02.3 → CH-02.2
+
+#### CH-02.1 — Backfill lifecycle_status DocumentContext
+- **Statut** : DONE (2026-05-02, commit à venir)
+- **Effort** : 0.5j
+- **Quoi** : 0/17 docs ont `lifecycle_status`. Inférer de manière déterministe : ACTIVE par défaut, DEPRECATED si un successor EVOLVES_FROM/SUPERSEDES sortant existe.
+- **Pourquoi** : Bloque l'étape Current Resolver V2 (filtrage `WHERE dc.lifecycle_status = 'ACTIVE'`).
+- **Acceptation** : 17/17 DC ont une valeur, distribution audit log.
+
+#### CH-02.4 — Finaliser validity_start claim-level (résidu S1b)
+- **Statut** : TODO
+- **Effort** : 1-1.5j
+- **Quoi** : 333/40 196 claims (0.83%) ont l'override Tier 4. Cible S1b = 3 401 candidates Tier 3 (8.5%). Relancer le batch LLM evidence-locked sur EC2 vLLM.
+- **Pourquoi** : Anchor Filter range nécessite une couverture validity_start meilleure pour discriminer.
+- **Acceptation** : ≥3 000 claims avec override, 0 hallucination validator.
+
+#### CH-02.3 — REAFFIRMS Doc→Doc (extension V2-S1)
+- **Statut** : TODO
+- **Effort** : 1j
+- **Quoi** : Type LIFECYCLE_RELATION manquant. Réutilise pattern V2-S1 strict : déclaration textuelle explicite, validator evidence-locked.
+- **Pourquoi** : Compléter la triade EVOLVES_FROM / SUPERSEDES / REAFFIRMS pour le Current Resolver et l'audit compliance.
+- **Acceptation** : ≥1 REAFFIRMS détecté sur le corpus aerospace avec evidence_quote présente verbatim.
+
+#### CH-02.2 — Audit qualité 4 862 LOGICAL_RELATION existantes
+- **Statut** : TODO — exécution sous responsabilité Claude (user n'a pas l'expertise corpus)
+- **Effort** : 1-1.5j (annotation par Claude)
+- **Quoi** : 4 319 EQUIVALENT (89%) suspects de sur-classification + 16 CONFLICT à valider. Échantillon stratifié 30-50 paires, annotation par Claude en tant qu'expert aerospace/dual-use, décision : GO/PURGE/RECLASSIFY par type.
+- **Pourquoi** : Sans ce filtre, le KG retourne du bruit en CONFLICT/EQUIVALENT. Le Conflict Detector V2 (étape 5a) en dépend.
+- **Acceptation** : rapport d'audit chiffré par type + recommandation de purge/garde, validator humain user (lecture rapide pour sanity-check).
 
 ### CH-03 — LIFECYCLE_RELATION strict (V2-S1)
 - **Statut** : IN_PROGRESS (amorcé)
