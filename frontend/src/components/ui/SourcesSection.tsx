@@ -15,8 +15,7 @@ import {
 import { SynthesisResult } from '@/types/api'
 import { FiFileText } from 'react-icons/fi'
 import { formatDocumentName, getFileExtension } from '@/lib/formatDocumentName'
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+import { openSourceFile } from '@/lib/openSourceFile'
 
 interface SourcesSectionProps {
   synthesis: SynthesisResult
@@ -40,29 +39,12 @@ export default function SourcesSection({ synthesis }: SourcesSectionProps) {
     return FILE_TYPE_CONFIG[extension] || FILE_TYPE_CONFIG.DEFAULT
   }
 
-  const openSourceFile = async (source: string) => {
-    // Si c'est déjà une URL absolue, ouvrir directement (cas knowbase legacy)
-    if (/^https?:\/\//i.test(source)) {
-      window.open(source, '_blank', 'noopener,noreferrer')
-      return
-    }
-    // Sinon, c'est un doc_id → fetch authentifié vers le backend
-    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
-    const apiUrl = `${API_BASE_URL}/api/documents/source-file?doc_id=${encodeURIComponent(source)}`
-    try {
-      const res = await fetch(apiUrl, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      window.open(url, '_blank', 'noopener,noreferrer')
-      // Libère l'objet URL après 60s (le tab a déjà chargé le PDF)
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch (err) {
+  const handleOpenSource = async (source: string) => {
+    const err = await openSourceFile(source)
+    if (err) {
       toast({
         title: 'Source indisponible',
-        description: `Impossible d'ouvrir le fichier source (${(err as Error).message})`,
+        description: `Impossible d'ouvrir le fichier source (${err.message})`,
         status: 'warning',
         duration: 4000,
         isClosable: true,
@@ -106,7 +88,7 @@ export default function SourcesSection({ synthesis }: SourcesSectionProps) {
               <Box
                 key={index}
                 as="button"
-                onClick={() => openSourceFile(source)}
+                onClick={() => handleOpenSource(source)}
                 px={2}
                 py={1}
                 bg="bg.tertiary"
