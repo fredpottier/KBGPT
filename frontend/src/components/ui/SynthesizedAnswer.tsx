@@ -24,10 +24,13 @@ import remarkGfm from 'remark-gfm'
 import type { Components } from 'react-markdown'
 import { SynthesisResult, SearchChunk, ExplorationIntelligence } from '@/types/api'
 import CopyButton from './CopyButton'
-import { renderWithSourcePills } from './SourcePill'
+import { renderWithRefs } from './SourcePill'
+import SourcesFootnotes from './SourcesFootnotes'
 import { ResponseGraph } from '@/components/chat'
 import TensionIndicator from '@/components/chat/TensionIndicator'
 import type { GraphData, ProofGraph } from '@/types/graph'
+import { indexAndReplaceSources, type SourceRef } from '@/lib/sourceRefs'
+import { useMemo } from 'react'
 
 interface SynthesizedAnswerProps {
   synthesis: SynthesisResult
@@ -53,7 +56,8 @@ interface SynthesizedAnswerProps {
 // Composants Chakra UI personnalisés pour le rendu Markdown
 const createMarkdownComponents = (
   chunks?: SearchChunk[],
-  onSlideClick?: (chunk: SearchChunk) => void
+  onSlideClick?: (chunk: SearchChunk) => void,
+  sourceRefs: SourceRef[] = []
 ): Components => {
   // Map des numéros de slides vers les chunks
   const slideToChunk = new Map<string, SearchChunk>()
@@ -127,24 +131,23 @@ const createMarkdownComponents = (
     return parts.length > 0 ? <>{parts}</> : text
   }
 
-  // Traiter les children : slides cliquables + source pills
+  // Traiter les children : slides cliquables + ref pills [[REF:N]]
   const processChildren = (children: React.ReactNode): React.ReactNode => {
     if (typeof children === 'string') {
-      // D'abord les source pills, puis les slides
-      const withPills = renderWithSourcePills(children)
-      if (typeof withPills === 'string') {
-        return renderTextWithSlides(withPills)
+      const withRefs = renderWithRefs(children, sourceRefs)
+      if (typeof withRefs === 'string') {
+        return renderTextWithSlides(withRefs)
       }
-      return withPills
+      return withRefs
     }
     if (Array.isArray(children)) {
       return children.map((child, i) => {
         if (typeof child === 'string') {
-          const withPills = renderWithSourcePills(child)
-          if (typeof withPills === 'string') {
-            return <span key={i}>{renderTextWithSlides(withPills)}</span>
+          const withRefs = renderWithRefs(child, sourceRefs)
+          if (typeof withRefs === 'string') {
+            return <span key={i}>{renderTextWithSlides(withRefs)}</span>
           }
-          return <span key={i}>{withPills}</span>
+          return <span key={i}>{withRefs}</span>
         }
         return child
       })
@@ -282,8 +285,15 @@ export default function SynthesizedAnswer({
   onSearch,
   contradictionEnvelope,
 }: SynthesizedAnswerProps) {
-  // Créer les composants Markdown avec le contexte des slides
-  const markdownComponents = createMarkdownComponents(chunks, onSlideClick)
+  // Pre-process : indexer les sources [[SOURCE:doc_id|page]] → [[REF:N]] +
+  // construire la liste numérotée pour le rendu footnotes en bas (CH-05.4).
+  const { text: processedAnswer, refs: sourceRefs } = useMemo(
+    () => indexAndReplaceSources(synthesis.synthesized_answer || ''),
+    [synthesis.synthesized_answer]
+  )
+
+  // Créer les composants Markdown avec le contexte des slides + refs
+  const markdownComponents = createMarkdownComponents(chunks, onSlideClick, sourceRefs)
 
   return (
     <Box w="full">
@@ -303,9 +313,12 @@ export default function SynthesizedAnswer({
               remarkPlugins={[remarkGfm]}
               components={markdownComponents}
             >
-              {synthesis.synthesized_answer}
+              {processedAnswer}
             </ReactMarkdown>
           </Box>
+
+          {/* Sources footnotes en bas de la réponse (CH-05.4) */}
+          <SourcesFootnotes refs={sourceRefs} />
 
           {/* Actions — en haut a droite, visible au hover */}
           <HStack
