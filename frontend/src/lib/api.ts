@@ -192,8 +192,7 @@ export const api = {
       solution?: string,
       useGraphContext?: boolean,
       graphEnrichmentLevel?: 'none' | 'light' | 'standard' | 'deep',
-      sessionId?: string,
-      useInstrumented?: boolean
+      sessionId?: string
     ) =>
       apiClient.post('/search', {
         question: message,
@@ -204,7 +203,6 @@ export const api = {
         graph_enrichment_level: graphEnrichmentLevel,
         session_id: sessionId,
         use_kg_traversal: useGraphContext !== false,  // 🔗 OSMOSE: Traversée KG multi-hop, liée au toggle Graph Context
-        use_instrumented: useInstrumented ?? true,  // 🎯 OSMOSE: Activer le rendu instrumenté par défaut
       }),
     history: () => apiClient.get('/chat/history'), // Not implemented in backend yet
     conversation: (id: string) => apiClient.get(`/chat/${id}`), // Not implemented in backend yet

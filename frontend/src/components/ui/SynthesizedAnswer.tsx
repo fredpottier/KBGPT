@@ -28,7 +28,6 @@ import { renderWithSourcePills } from './SourcePill'
 import { ResponseGraph } from '@/components/chat'
 import TensionIndicator from '@/components/chat/TensionIndicator'
 import type { GraphData, ProofGraph } from '@/types/graph'
-import { FiCheckCircle, FiAlertCircle, FiAlertTriangle } from 'react-icons/fi'
 
 interface SynthesizedAnswerProps {
   synthesis: SynthesisResult
@@ -286,29 +285,6 @@ export default function SynthesizedAnswer({
   // Créer les composants Markdown avec le contexte des slides
   const markdownComponents = createMarkdownComponents(chunks, onSlideClick)
 
-  const getConfidenceConfig = (confidence: number) => {
-    if (confidence >= 0.7) return {
-      color: 'green.400',
-      bg: 'rgba(34, 197, 94, 0.15)',
-      icon: FiCheckCircle,
-      label: 'Tres fiable'
-    }
-    if (confidence >= 0.5) return {
-      color: 'yellow.400',
-      bg: 'rgba(250, 204, 21, 0.15)',
-      icon: FiAlertTriangle,
-      label: 'Fiable'
-    }
-    return {
-      color: 'red.400',
-      bg: 'rgba(239, 68, 68, 0.15)',
-      icon: FiAlertCircle,
-      label: 'Peu fiable'
-    }
-  }
-
-  const confidenceConfig = getConfidenceConfig(synthesis.confidence)
-
   return (
     <Box w="full">
       <VStack spacing={3} align="stretch">
@@ -321,7 +297,6 @@ export default function SynthesizedAnswer({
           borderRadius="lg"
           border="1px solid"
           borderColor="border.default"
-          position="relative"
         >
           <Box className="markdown-answer">
             <ReactMarkdown

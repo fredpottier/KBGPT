@@ -291,8 +291,6 @@ export interface SearchResponse {
   knowledge_proof?: KnowledgeProofSummary
   reasoning_trace?: ReasoningTrace
   coverage_map?: CoverageMap
-  // 🎯 OSMOSE Assertion-Centric: Réponse instrumentée
-  instrumented_answer?: import('./instrumented').InstrumentedAnswer
   // 🌊 Atlas Convergence: Chat ↔ Atlas
   related_articles?: RelatedArticle[]
   insight_hints?: InsightHint[]

@@ -98,7 +98,7 @@
 - **Effort total** : ~2-3j (CH-04.1 = 0.5j fait, CH-04.2 = 1.5j déféré, CH-04.3 = 0.3j déféré, CH-04.4 = 0.5j-1j déféré)
 
 #### CH-04.1 — Externalisation seuils dans YAML
-- **Statut** : DONE (2026-05-02, commit à venir)
+- **Statut** : DONE (2026-05-02, commit e019fd7)
 - **Effort** : 0.5j (réel ~30 min)
 - **Livré** :
   - `config/response_modes_thresholds.yaml` — 12 seuils + generic_entities + tenant_overrides
@@ -123,12 +123,26 @@
 - **Pourquoi** : Sans cet outil d'observabilité, on ne sait pas SI les seuils nécessitent recalibration. C'est la condition préalable pour CH-04.2 (calibration auto).
 
 ### CH-05 — Refonte chat Phase 1 (nettoyer)
-- **Statut** : TODO
-- **Effort** : 2-3j
-- **Fichiers** : `frontend/src/app/chat/`, `ChatMessage.tsx`, `SourceBadge.tsx`
-- **Quoi** : Retirer score visible (62%), retirer bloc "vérité documentaire", rendre sources cliquables avec noms lisibles ("Security Guide 2023, p.42" au lieu de hash), intégrer sources dans le texte sous forme de micro-références.
-- **Pourquoi** : 12 problèmes UX identifiés. Le chat ressemble à un debug panel, pas à un produit. Aucune différenciation visible vs ChatGPT.
-- **Acceptation** : test utilisateur naïf sur 3 questions → comprend la réponse sans aide, identifie les sources sans demander.
+- **Statut** : IN_PROGRESS — CH-05.1 livré 2026-05-02
+- **Effort total révisé** : ~1.5j (vs 2-3j initial — beaucoup déjà fait par V2 cleanup 30/04)
+
+#### CH-05.1 — Cleanup composants obsolètes
+- **Statut** : DONE (2026-05-02, commit à venir)
+- **Effort** : 0.5j (réel ~30 min)
+- **Livré** :
+  - **Supprimés** : 11 composants chat obsolètes (~2 300 lignes) — `KnowledgeProofPanel`, `ReasoningTracePanel`, `CoverageMapPanel`, `InstrumentedToggle`, `TruthContractBadge`, `AssertionRenderer`, `AssertionPopover`, `ProofTicketCard`, `InstrumentedAnswerDisplay`, `SplitTruthView`, `SourceCard` (chat/)
+  - **Supprimé** : `frontend/src/types/instrumented.ts` (347 lignes)
+  - **Cleanup** : `chat/index.ts` (5 exports actifs), `lib/api.ts` (param `useInstrumented` retiré + body `use_instrumented`), `types/api.ts` (prop `instrumented_answer` retirée), `types/index.ts` (export instrumented retiré)
+  - **Bonus** : retiré dead code `getConfidenceConfig` dans `SynthesizedAnswer.tsx` + 3 imports orphelins + duplicate `position="relative"`
+- **Total cleanup** : ~2 650 lignes mortes
+- **Validation** : `tsc --noEmit` aucune nouvelle erreur (les erreurs préexistantes hors scope CH-05.1 conservées)
+
+#### CH-05.2 — Helper formatDocumentName centralisé (À faire)
+- **Effort** : 0.3j
+- **Quoi** : Mapping `027_SAP_S4HANA_2023_Security_Guide_c160af0e.pdf` → `SAP S/4HANA 2023 Security Guide`. Dédupliquer 3 implémentations actuelles (`SearchResultDisplay`, `SourcesSection`, `ThumbnailCarousel`).
+
+#### CH-05.3 — Sources cliquables (À faire)
+- **Effort** : 0.5j
 
 ### CH-06 — Refonte chat Phase 2 (Insight Cards + Audit auto)
 - **Statut** : TODO (dépend de CH-05)
