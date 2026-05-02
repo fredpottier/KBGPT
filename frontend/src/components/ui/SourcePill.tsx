@@ -127,7 +127,7 @@ function RefPill({ index, sourceRef }: RefPillProps) {
   const tooltip = `[${index}] ${displayName}`
 
   const handleClick = async () => {
-    const err = await openSourceFile(sourceRef.docId)
+    const err = await openSourceFile(sourceRef.docId, sourceRef.firstPage)
     if (err) {
       toast({
         title: 'Source indisponible',

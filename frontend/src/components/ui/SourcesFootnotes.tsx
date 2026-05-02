@@ -23,8 +23,8 @@ export default function SourcesFootnotes({ refs }: SourcesFootnotesProps) {
 
   if (!refs || refs.length === 0) return null
 
-  const handleClick = async (docId: string) => {
-    const err = await openSourceFile(docId)
+  const handleClick = async (ref: SourceRef) => {
+    const err = await openSourceFile(ref.docId, ref.firstPage)
     if (err) {
       toast({
         title: 'Source indisponible',
@@ -65,7 +65,7 @@ export default function SourcesFootnotes({ refs }: SourcesFootnotesProps) {
               fontSize="xs"
               color="text.secondary"
               as="button"
-              onClick={() => handleClick(ref.docId)}
+              onClick={() => handleClick(ref)}
               type="button"
               cursor="pointer"
               textAlign="left"

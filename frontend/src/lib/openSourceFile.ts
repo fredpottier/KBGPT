@@ -19,19 +19,27 @@ export interface OpenSourceFileError {
 /**
  * Ouvre le fichier source dans un nouveau tab.
  *
+ * Pour les PDFs, append `#page=N` à l'URL (RFC 3778) si `page` est fourni →
+ * le viewer PDF du navigateur ouvre directement à la bonne page (CH-05.5).
+ *
  * @param source doc_id ou URL absolue
+ * @param page numéro de page (1-based) — uniquement pour PDF
  * @returns null si succès, sinon objet d'erreur (à utiliser pour toast)
  */
 export async function openSourceFile(
   source: string,
+  page?: number,
 ): Promise<OpenSourceFileError | null> {
   if (!source) {
     return { message: 'Source vide' }
   }
 
-  // URL absolue → ouvrir directement
+  // Construit le fragment #page=N pour les PDFs (RFC 3778)
+  const pageFragment = page && page > 0 ? `#page=${page}` : ''
+
+  // URL absolue → ouvrir directement (avec fragment si fourni)
   if (/^https?:\/\//i.test(source)) {
-    window.open(source, '_blank', 'noopener,noreferrer')
+    window.open(source + pageFragment, '_blank', 'noopener,noreferrer')
     return null
   }
 
@@ -50,10 +58,14 @@ export async function openSourceFile(
       return { message: `HTTP ${res.status}`, status: res.status }
     }
     const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
+    let url = URL.createObjectURL(blob)
+    // Append #page=N uniquement pour les PDFs (les blobs Office ignorent)
+    if (pageFragment && blob.type === 'application/pdf') {
+      url += pageFragment
+    }
     window.open(url, '_blank', 'noopener,noreferrer')
     // Libère l'objet URL après 60s (le tab a déjà chargé le PDF)
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    setTimeout(() => URL.revokeObjectURL(url.split('#')[0]), 60_000)
     return null
   } catch (err) {
     return { message: (err as Error).message }

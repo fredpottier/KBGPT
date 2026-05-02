@@ -298,10 +298,15 @@ async def get_source_file_by_doc_id(
                     resolved.relative_to(base_resolved)
                 except ValueError:
                     continue
+                # Content-Disposition: inline → le navigateur affiche le doc
+                # plutôt que de le télécharger, ce qui permet à `#page=N` (RFC 3778)
+                # de fonctionner pour le deep-link à une page PDF (CH-05.5).
                 return FileResponse(
                     path=resolved,
                     media_type=None,  # auto-detect from extension
-                    filename=entry.name,
+                    headers={
+                        "Content-Disposition": f'inline; filename="{entry.name}"',
+                    },
                 )
 
     raise HTTPException(
