@@ -74,7 +74,7 @@ export default function SourcesFootnotes({ refs }: SourcesFootnotesProps) {
               py={0.5}
               _hover={{ bg: 'bg.hover', color: 'text.primary' }}
               transition="all 0.15s"
-              title={`Ouvrir : ${displayName}${ref.page ? ' ' + ref.page : ''}`}
+              title={`Ouvrir : ${displayName}`}
             >
               <Text
                 as="span"
@@ -88,11 +88,6 @@ export default function SourcesFootnotes({ refs }: SourcesFootnotesProps) {
               </Text>
               <Text as="span" flex="1" noOfLines={1}>
                 {displayName}
-                {ref.page ? (
-                  <Text as="span" color="text.muted" ml={1}>
-                    · {ref.page}
-                  </Text>
-                ) : null}
               </Text>
             </HStack>
           )

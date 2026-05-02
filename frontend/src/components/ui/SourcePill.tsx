@@ -124,7 +124,7 @@ interface RefPillProps {
 function RefPill({ index, sourceRef }: RefPillProps) {
   const toast = useToast()
   const displayName = formatDocumentName(sourceRef.docId) || sourceRef.docId
-  const tooltip = `[${index}] ${displayName}${sourceRef.page ? ' ' + sourceRef.page : ''}`
+  const tooltip = `[${index}] ${displayName}`
 
   const handleClick = async () => {
     const err = await openSourceFile(sourceRef.docId)
