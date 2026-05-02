@@ -3,26 +3,23 @@
  * index numéroté style Wikipedia footnotes.
  *
  * Avant : "Les portes [[SOURCE:cs25_amdt_22_...|p.433]] et [[SOURCE:cs25_amdt_22_...|p.585]]"
- * Après : "Les portes [[REF:1]] et [[REF:1]]" + refs = [{docId, firstPage: 433}]
+ * Après : "Les portes [[REF:1]] et [[REF:2]]" + refs = [
+ *   {docId: "cs25_amdt_22_...", page: "p.433"},
+ *   {docId: "cs25_amdt_22_...", page: "p.585"}
+ * ]
  *
- * Dédup par doc_id uniquement → un doc cité N fois = un seul numéro [N].
- * La page de la première occurrence est conservée dans `firstPage` pour
- * permettre le deep-link `#page=N` (RFC 3778) au clic — CH-05.5.
+ * Dédup par (docId, page) — chaque combinaison unique a son numéro.
+ * Permet le deep-link `#page=N` (RFC 3778) à la bonne page pour les PDFs.
+ * Pour les formats sans deep-link (PPTX, DOCX), même comportement mais le
+ * fragment est ignoré → page 1 pour tous (CH-05.5).
  */
 
 export interface SourceRef {
   docId: string
-  firstPage?: number
+  page?: string // ex: "p.433"
 }
 
 const SOURCE_PATTERN = /\[\[SOURCE:([^\]|]+?)(?:\|([^\]]+?))?\]\]/g
-const PAGE_NUM_RE = /(\d+)/
-
-function parsePageNumber(page: string | undefined): number | undefined {
-  if (!page) return undefined
-  const m = page.match(PAGE_NUM_RE)
-  return m ? parseInt(m[1], 10) : undefined
-}
 
 export function indexAndReplaceSources(text: string): {
   text: string
@@ -30,17 +27,19 @@ export function indexAndReplaceSources(text: string): {
 } {
   if (!text) return { text: '', refs: [] }
 
-  const seen = new Map<string, number>() // key = docId → index 1-based
+  const seen = new Map<string, number>() // key = "docId|page" → index 1-based
   const refs: SourceRef[] = []
 
   const replaced = text.replace(SOURCE_PATTERN, (_full, docId, page) => {
     const did = String(docId || '').trim()
     if (!did) return ''
-    let idx = seen.get(did)
+    const pg = page ? String(page).trim() : undefined
+    const key = `${did}|${pg || ''}`
+    let idx = seen.get(key)
     if (idx === undefined) {
       idx = refs.length + 1
-      seen.set(did, idx)
-      refs.push({ docId: did, firstPage: parsePageNumber(page) })
+      seen.set(key, idx)
+      refs.push({ docId: did, page: pg })
     }
     return `[[REF:${idx}]]`
   })

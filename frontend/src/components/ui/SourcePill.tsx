@@ -124,10 +124,10 @@ interface RefPillProps {
 function RefPill({ index, sourceRef }: RefPillProps) {
   const toast = useToast()
   const displayName = formatDocumentName(sourceRef.docId) || sourceRef.docId
-  const tooltip = `[${index}] ${displayName}`
+  const tooltip = `[${index}] ${displayName}${sourceRef.page ? ' ' + sourceRef.page : ''}`
 
   const handleClick = async () => {
-    const err = await openSourceFile(sourceRef.docId, sourceRef.firstPage)
+    const err = await openSourceFile(sourceRef.docId, sourceRef.page)
     if (err) {
       toast({
         title: 'Source indisponible',

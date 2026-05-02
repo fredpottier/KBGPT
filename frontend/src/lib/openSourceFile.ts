@@ -16,6 +16,17 @@ export interface OpenSourceFileError {
   status?: number
 }
 
+const PAGE_NUM_RE = /(\d+)/
+
+function parsePageNumber(page: number | string | undefined): number | undefined {
+  if (page === undefined || page === null) return undefined
+  if (typeof page === 'number') return page > 0 ? page : undefined
+  const m = page.match(PAGE_NUM_RE)
+  if (!m) return undefined
+  const n = parseInt(m[1], 10)
+  return n > 0 ? n : undefined
+}
+
 /**
  * Ouvre le fichier source dans un nouveau tab.
  *
@@ -23,19 +34,20 @@ export interface OpenSourceFileError {
  * le viewer PDF du navigateur ouvre directement à la bonne page (CH-05.5).
  *
  * @param source doc_id ou URL absolue
- * @param page numéro de page (1-based) — uniquement pour PDF
+ * @param page numéro de page (1-based, accepte "p.42" ou 42) — PDF uniquement
  * @returns null si succès, sinon objet d'erreur (à utiliser pour toast)
  */
 export async function openSourceFile(
   source: string,
-  page?: number,
+  page?: number | string,
 ): Promise<OpenSourceFileError | null> {
   if (!source) {
     return { message: 'Source vide' }
   }
 
+  const pageNum = parsePageNumber(page)
   // Construit le fragment #page=N pour les PDFs (RFC 3778)
-  const pageFragment = page && page > 0 ? `#page=${page}` : ''
+  const pageFragment = pageNum ? `#page=${pageNum}` : ''
 
   // URL absolue → ouvrir directement (avec fragment si fourni)
   if (/^https?:\/\//i.test(source)) {
