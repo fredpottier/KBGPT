@@ -147,8 +147,22 @@
   - **Bug fix** dans `SourcesSection.tsx` : `getFileExtension` recevait `filename` (déjà nettoyé sans extension) au lieu de `source` brute → tous les badges file type tombaient sur `DEFAULT`. Maintenant l'extension est extraite avant cleanup.
 - **Validation** : `tsc --noEmit` aucune erreur sur fichiers refactorés.
 
-#### CH-05.3 — Sources cliquables (À faire)
-- **Effort** : 0.5j
+#### CH-05.3 — Sources cliquables vers fichier source
+- **Statut** : DONE (2026-05-02, commit à venir)
+- **Effort** : 0.5j (réel ~45 min)
+- **Livré** :
+  - **Backend** : nouveau endpoint `GET /api/documents/source-file?doc_id=...` qui :
+    - Retire le suffix hash hex du doc_id (`cs25_amdt_22_8e69026c` → `cs25_amdt_22`)
+    - Cherche dans `data/docs_in/` puis `data/docs_done/` un fichier dont le stem match
+    - Retourne `FileResponse` avec auto-detect media_type
+    - Sécurité : path traversal bloqué (`/`, `\`, `..` rejetés sur le doc_id) + `resolve()` validé contre les whitelists
+  - **Frontend** : `SourcesSection.tsx` :
+    - Au clic sur une source, fetch authentifié (Bearer JWT) → blob → `URL.createObjectURL` → `window.open` nouveau tab
+    - Si `source_file` est déjà une URL absolue (`http://`/`https://`), ouvre directement
+    - Toast d'erreur si le fichier est introuvable / fetch échoue
+    - Cleanup `URL.revokeObjectURL` après 60s
+- **Limitation actuelle** : scan O(n) du filesystem à chaque clic (pas de cache/index doc_id → path). Acceptable pour les 17 docs aerospace, à optimiser si volume augmente.
+- **Tech debt** : créer une table de mapping doc_id → file_path en Postgres pour éliminer le scan FS (CH-05.3b futur).
 
 ### CH-06 — Refonte chat Phase 2 (Insight Cards + Audit auto)
 - **Statut** : TODO (dépend de CH-05)

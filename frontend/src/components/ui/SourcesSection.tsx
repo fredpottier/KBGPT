@@ -9,12 +9,14 @@ import {
   Text,
   VStack,
   HStack,
-  Link,
   Icon,
+  useToast,
 } from '@chakra-ui/react'
 import { SynthesisResult } from '@/types/api'
 import { FiFileText } from 'react-icons/fi'
 import { formatDocumentName, getFileExtension } from '@/lib/formatDocumentName'
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface SourcesSectionProps {
   synthesis: SynthesisResult
@@ -32,8 +34,40 @@ const FILE_TYPE_CONFIG: Record<string, { color: string; bg: string }> = {
 }
 
 export default function SourcesSection({ synthesis }: SourcesSectionProps) {
+  const toast = useToast()
+
   const getFileTypeConfig = (extension: string) => {
     return FILE_TYPE_CONFIG[extension] || FILE_TYPE_CONFIG.DEFAULT
+  }
+
+  const openSourceFile = async (source: string) => {
+    // Si c'est déjà une URL absolue, ouvrir directement (cas knowbase legacy)
+    if (/^https?:\/\//i.test(source)) {
+      window.open(source, '_blank', 'noopener,noreferrer')
+      return
+    }
+    // Sinon, c'est un doc_id → fetch authentifié vers le backend
+    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+    const apiUrl = `${API_BASE_URL}/api/documents/source-file?doc_id=${encodeURIComponent(source)}`
+    try {
+      const res = await fetch(apiUrl, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank', 'noopener,noreferrer')
+      // Libère l'objet URL après 60s (le tab a déjà chargé le PDF)
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (err) {
+      toast({
+        title: 'Source indisponible',
+        description: `Impossible d'ouvrir le fichier source (${(err as Error).message})`,
+        status: 'warning',
+        duration: 4000,
+        isClosable: true,
+      })
+    }
   }
 
   if (!synthesis.sources_used || synthesis.sources_used.length === 0) {
@@ -69,10 +103,10 @@ export default function SourcesSection({ synthesis }: SourcesSectionProps) {
             const config = getFileTypeConfig(extension)
 
             return (
-              <Link
+              <Box
                 key={index}
-                href={source}
-                isExternal
+                as="button"
+                onClick={() => openSourceFile(source)}
                 px={2}
                 py={1}
                 bg="bg.tertiary"
@@ -81,6 +115,7 @@ export default function SourcesSection({ synthesis }: SourcesSectionProps) {
                 borderRadius="md"
                 fontSize="xs"
                 color="text.secondary"
+                cursor="pointer"
                 _hover={{
                   bg: 'bg.hover',
                   borderColor: 'border.active',
@@ -90,6 +125,7 @@ export default function SourcesSection({ synthesis }: SourcesSectionProps) {
                 alignItems="center"
                 gap={1.5}
                 transition="all 0.2s"
+                title="Ouvrir le fichier source"
               >
                 <HStack
                   px={1.5}
@@ -104,7 +140,7 @@ export default function SourcesSection({ synthesis }: SourcesSectionProps) {
                 <Text noOfLines={1} maxW="150px">
                   {filename.replace(`.${extension.toLowerCase()}`, '')}
                 </Text>
-              </Link>
+              </Box>
             )
           })}
         </HStack>
