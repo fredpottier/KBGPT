@@ -19,23 +19,80 @@ from knowbase.lifecycle.models import ValidatedLifecycleRelation
 logger = logging.getLogger(__name__)
 
 
+MIN_CONFIDENCE = 0.70
+MIN_QUOTE_LEN = 30
+
+
 class LifecyclePersister:
     """Persiste les ValidatedLifecycleRelation dans Neo4j.
 
     Idempotent : MERGE sur (source, target, type) — re-run safe.
+
+    Seuils de qualité (défense en profondeur après le validator V2-S1) :
+    - confidence ≥ 0.70 (sinon skip — cohérent avec PHASING_OSMOSIS_V2 P1.1
+      "cleanup conf < 0.7")
+    - len(evidence_quote) ≥ 30 chars (sinon skip — une quote trop courte
+      matche trivialement n'importe quel doc, ex: "CS-25" → faux positif)
     """
 
-    def __init__(self, driver: Driver, tenant_id: str = "default") -> None:
+    def __init__(
+        self,
+        driver: Driver,
+        tenant_id: str = "default",
+        min_confidence: float = MIN_CONFIDENCE,
+        min_quote_len: int = MIN_QUOTE_LEN,
+    ) -> None:
         self.driver = driver
         self.tenant_id = tenant_id
+        self.min_confidence = min_confidence
+        self.min_quote_len = min_quote_len
 
     def persist(self, validated: ValidatedLifecycleRelation) -> dict:
         """Persiste une relation validée. Renvoie {created: bool, source: ..., target: ...}.
 
         Étapes :
-        1. Trouve les claim_ids du source contenant l'evidence_quote (pour evidence_claim_ids)
-        2. MERGE LIFECYCLE_RELATION avec props strictes
+        1. Garde-fous qualité : confidence + len(quote)
+        2. Trouve les claim_ids du source contenant l'evidence_quote (pour evidence_claim_ids)
+        3. MERGE LIFECYCLE_RELATION avec props strictes
         """
+        if validated.confidence < self.min_confidence:
+            logger.warning(
+                "LIFECYCLE_RELATION SKIPPED (low confidence %.2f < %.2f): %s --[%s]--> %s",
+                validated.confidence,
+                self.min_confidence,
+                validated.source_doc_id,
+                validated.type.value,
+                validated.target_doc_id,
+            )
+            return {
+                "created": False,
+                "skipped": True,
+                "reason": "low_confidence",
+                "source_doc_id": validated.source_doc_id,
+                "target_doc_id": validated.target_doc_id,
+                "type": validated.type.value,
+                "confidence": validated.confidence,
+            }
+        if len(validated.evidence_quote.strip()) < self.min_quote_len:
+            logger.warning(
+                "LIFECYCLE_RELATION SKIPPED (quote too short, %d < %d chars): %s --[%s]--> %s (quote=%r)",
+                len(validated.evidence_quote.strip()),
+                self.min_quote_len,
+                validated.source_doc_id,
+                validated.type.value,
+                validated.target_doc_id,
+                validated.evidence_quote[:50],
+            )
+            return {
+                "created": False,
+                "skipped": True,
+                "reason": "quote_too_short",
+                "source_doc_id": validated.source_doc_id,
+                "target_doc_id": validated.target_doc_id,
+                "type": validated.type.value,
+                "quote_len": len(validated.evidence_quote.strip()),
+            }
+
         evidence_claim_ids = self._find_claims_with_quote(
             validated.source_doc_id, validated.evidence_quote
         )

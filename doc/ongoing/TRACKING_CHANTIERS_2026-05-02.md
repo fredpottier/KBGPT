@@ -47,11 +47,15 @@
 - **Conclusion** : LLM bien calibré (0 hallucination, 0 faux négatif évident). Pour le pipeline V2 anchor-driven, le fallback runtime via `doc.publication_date` (cf VISION §4.2) couvre les 39 863 claims sans override. Augmenter au-delà de 333 nécessiterait soit relâcher le validator (= hallucinations), soit confondre identifiant/adoption avec applicable_from (= faux).
 
 #### CH-02.3 — REAFFIRMS Doc→Doc (extension V2-S1)
-- **Statut** : TODO
-- **Effort** : 1j
-- **Quoi** : Type LIFECYCLE_RELATION manquant. Réutilise pattern V2-S1 strict : déclaration textuelle explicite, validator evidence-locked.
-- **Pourquoi** : Compléter la triade EVOLVES_FROM / SUPERSEDES / REAFFIRMS pour le Current Resolver et l'audit compliance.
-- **Acceptation** : ≥1 REAFFIRMS détecté sur le corpus aerospace avec evidence_quote présente verbatim.
+- **Statut** : DONE (2026-05-02, commit à venir)
+- **Effort réel** : 13 min batch sur burst EC2 (script `backfill_lifecycle_relations_strict.py --all` 17 docs)
+- **Résultat** : **0 REAFFIRMS détecté** dans le corpus aerospace
+- **Acceptation revisée** : le code REAFFIRMS était déjà en place (model + prompt + persister depuis V2-S1). Le batch a confirmé que **le corpus aerospace ne contient PAS de déclaration textuelle explicite de réaffirmation** (ex: "This document reaffirms..."). C'est un résultat factuel — le LLM a scanné et n'a rien hallucné.
+- **Bonus livré** :
+  - **+1 EVOLVES_FROM** détecté + supprimé (faux positif cs25_amdt_26→25, conf=0.5, quote="CS-25") — cleanup P1.1 du PHASING V2 appliqué
+  - **Durcissement persister** : ajout seuils `min_confidence ≥ 0.70` et `min_quote_len ≥ 30` dans `lifecycle_persister.py` pour empêcher la récurrence de ce type de faux positif
+- **État final KG** : 4 LIFECYCLE_RELATION (3 EVOLVES_FROM dualuse + 1 SUPERSEDES), tous conf ≥ 0.98 et quote ≥ 30 chars
+- **CH-03 implication** : CH-03 LIFECYCLE_RELATION strict V2-S1 est **absorbé par CH-02.3** — le scan multi-fenêtre a tourné sur les 17 docs avec le pattern V2-S1 complet. Pas besoin de relancer CH-03 séparément.
 
 #### CH-02.2 — Audit qualité 4 862 LOGICAL_RELATION existantes
 - **Statut** : TODO — exécution sous responsabilité Claude (user n'a pas l'expertise corpus)
@@ -61,8 +65,9 @@
 - **Acceptation** : rapport d'audit chiffré par type + recommandation de purge/garde, validator humain user (lecture rapide pour sanity-check).
 
 ### CH-03 — LIFECYCLE_RELATION strict (V2-S1)
-- **Statut** : IN_PROGRESS (amorcé)
-- **Effort** : reste ~1.5j
+- **Statut** : DONE — absorbé par CH-02.3 (2026-05-02)
+- **Note** : le backfill `backfill_lifecycle_relations_strict.py --all` exécuté en CH-02.3 a couvert le scope V2-S1 complet (3 types LIFECYCLE × 17 docs). Plus de delta à livrer côté code. Si nouveaux docs ingérés → relancer le script.
+- **Effort restant** : 0
 - **Fichiers** : `lifecycle_relation_extractor.py` (à créer), validator commun avec apply_frame_v2
 - **Quoi** : Persister `(:Claim)-[:LIFECYCLE_RELATION {kind, evidence_quote, doc_id}]→(:Claim)` UNIQUEMENT si une déclaration textuelle explicite l'établit ("This regulation supersedes Reg 2021/821..."). Validator evidence-locked obligatoire.
 - **Pourquoi** : Le compliance officer doit tracer la chaîne légale d'évolution. Aujourd'hui les liens versionnels sont implicites (release_id), pas exploitables en query "qu'est-ce qui remplace cet article ?".
