@@ -70,10 +70,14 @@
   - **SUPERSET** 0/2 = 0% — direction d'inclusion incorrecte
   - **SUBSET** 1/1 = 100% ✅
   - **DEFINITION_OF** 1/1 = 100% ✅
-- **Recommandations user (en attente validation)** :
-  - Q1 : Purge OVERLAP (436) + EXCEPTION (84) + SUPERSET (2) = 522 edges ?
-  - Q2 : CONFLICT — purge 12-14 faux positifs ou purge tout et re-classifier en sprint dédié ?
-  - Q3 : EQUIVALENT 4 319 — garder, tagger verbatim/paraphrase, ou purger les verbatim ?
+- **Recommandations user — VALIDÉES "a" (option safe partout) 2026-05-02** :
+  - Q1 ✅ Purgé OVERLAP (436) + EXCEPTION (84) + SUPERSET (2) = **522 edges**
+  - Q2 ✅ Option A — purgé 12 faux positifs CONFLICT (frequency changers, Appendix O facets, DS/SC alloys, Output energy J, ETOPS thresholds), gardé **4 vrais/borderline** : hazardous/catastrophic ×2, service history, impact energy
+  - Q3 ✅ Option (a) — EQUIVALENT (4 319) gardés tels quels (no-op)
+- **État final KG** : 4 328 LOGICAL_RELATION (vs 4 862 avant, -534 edges = -11%)
+  - EQUIVALENT 4 319 (gardés, ~90% verbatim cross-doc)
+  - CONFLICT 4 (vrais/borderline, conf ≥ 0.9)
+  - DISJOINT 3, SUBSET 1, DEFINITION_OF 1 (gardés, 100% précision)
 - **Patterns d'erreur identifiés** :
   - CONFLICT : décomposition d'énumération "X may be A or B" en 2 claims contradictoires
   - OVERLAP : utilisé comme fallback quand classifier ne sait pas trancher SUPERSET/SUBSET/DISJOINT
