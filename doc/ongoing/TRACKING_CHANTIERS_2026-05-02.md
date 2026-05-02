@@ -47,7 +47,7 @@
 - **Conclusion** : LLM bien calibré (0 hallucination, 0 faux négatif évident). Pour le pipeline V2 anchor-driven, le fallback runtime via `doc.publication_date` (cf VISION §4.2) couvre les 39 863 claims sans override. Augmenter au-delà de 333 nécessiterait soit relâcher le validator (= hallucinations), soit confondre identifiant/adoption avec applicable_from (= faux).
 
 #### CH-02.3 — REAFFIRMS Doc→Doc (extension V2-S1)
-- **Statut** : DONE (2026-05-02, commit à venir)
+- **Statut** : DONE (2026-05-02, commit 3682bd1)
 - **Effort réel** : 13 min batch sur burst EC2 (script `backfill_lifecycle_relations_strict.py --all` 17 docs)
 - **Résultat** : **0 REAFFIRMS détecté** dans le corpus aerospace
 - **Acceptation revisée** : le code REAFFIRMS était déjà en place (model + prompt + persister depuis V2-S1). Le batch a confirmé que **le corpus aerospace ne contient PAS de déclaration textuelle explicite de réaffirmation** (ex: "This document reaffirms..."). C'est un résultat factuel — le LLM a scanné et n'a rien hallucné.
@@ -58,11 +58,27 @@
 - **CH-03 implication** : CH-03 LIFECYCLE_RELATION strict V2-S1 est **absorbé par CH-02.3** — le scan multi-fenêtre a tourné sur les 17 docs avec le pattern V2-S1 complet. Pas besoin de relancer CH-03 séparément.
 
 #### CH-02.2 — Audit qualité 4 862 LOGICAL_RELATION existantes
-- **Statut** : TODO — exécution sous responsabilité Claude (user n'a pas l'expertise corpus)
-- **Effort** : 1-1.5j (annotation par Claude)
-- **Quoi** : 4 319 EQUIVALENT (89%) suspects de sur-classification + 16 CONFLICT à valider. Échantillon stratifié 30-50 paires, annotation par Claude en tant qu'expert aerospace/dual-use, décision : GO/PURGE/RECLASSIFY par type.
-- **Pourquoi** : Sans ce filtre, le KG retourne du bruit en CONFLICT/EQUIVALENT. Le Conflict Detector V2 (étape 5a) en dépend.
-- **Acceptation** : rapport d'audit chiffré par type + recommandation de purge/garde, validator humain user (lecture rapide pour sanity-check).
+- **Statut** : DONE (2026-05-02, audit livré, en attente validation user pour exécution purge)
+- **Effort réel** : ~1h (47 paires auditées par Claude expert)
+- **Livrable** : `doc/ongoing/AUDIT_LOGICAL_RELATION_CH02_2_2026-05-02.md`
+- **Résultats** :
+  - **EQUIVALENT** 12/12 = 100% factuel (mais ~90% verbatim copies — utilité faible)
+  - **OVERLAP** 0/6 = 0% — fallback générique cassé (en réalité = SUPERSET/SUBSET/DISJOINT)
+  - **EXCEPTION** 0/6 = 0% — confusion avec EQUIVALENT/LIFECYCLE
+  - **CONFLICT** 2-4/16 = 12-25% — confusion énumération OR avec opposition
+  - **DISJOINT** 3/3 = 100% ✅
+  - **SUPERSET** 0/2 = 0% — direction d'inclusion incorrecte
+  - **SUBSET** 1/1 = 100% ✅
+  - **DEFINITION_OF** 1/1 = 100% ✅
+- **Recommandations user (en attente validation)** :
+  - Q1 : Purge OVERLAP (436) + EXCEPTION (84) + SUPERSET (2) = 522 edges ?
+  - Q2 : CONFLICT — purge 12-14 faux positifs ou purge tout et re-classifier en sprint dédié ?
+  - Q3 : EQUIVALENT 4 319 — garder, tagger verbatim/paraphrase, ou purger les verbatim ?
+- **Patterns d'erreur identifiés** :
+  - CONFLICT : décomposition d'énumération "X may be A or B" en 2 claims contradictoires
+  - OVERLAP : utilisé comme fallback quand classifier ne sait pas trancher SUPERSET/SUBSET/DISJOINT
+  - EXCEPTION : utilisé pour toute différence textuelle (paraphrases, évolutions de version)
+- **Implication V2** : refactor du classifier 12-types pour résoudre ces patterns = sprint dédié hors scope CH-02 (déféré V2-S2/S3 ou plus tard)
 
 ### CH-03 — LIFECYCLE_RELATION strict (V2-S1)
 - **Statut** : DONE — absorbé par CH-02.3 (2026-05-02)
