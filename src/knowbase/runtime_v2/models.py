@@ -93,5 +93,22 @@ class PipelineResponse(BaseModel):
     # Synthèse LLM (V2-P2.1) — réponse en prose en langue de la question
     synthesized_answer: Optional[str] = None
 
+    # CH-14 — HALT/EPR Logprob Entropy
+    # Entropie Shannon moyenne des top-5 logprobs sur la sortie LLM.
+    # H bas (<0.5) = LLM confiant ; H haut (>1.5) = signal hallucination potentielle.
+    synthesis_entropy: Optional[float] = None
+    synthesis_low_confidence: bool = False  # True si entropy >= seuil (1.5 par défaut)
+
+    # CH-13 — Answer Gap Detector (TF-IDF)
+    # Mesure pré-LLM du gap question/contexte. classification ∈ ANSWERABLE/UNCERTAIN/UNANSWERABLE.
+    answer_gap_score: Optional[float] = None  # 0 = tous trouvés, 1 = tous manquants
+    answer_gap_classification: Optional[str] = None
+    answer_gap_missing_terms: list[str] = Field(default_factory=list)
+
+    # CH-06.1 — Insight Cards (post-processing, alimenté par le router)
+    # Format léger : list[dict] pour rester domain-agnostic et flexible.
+    # Chaque card = { type: 'attention'|'evolution'|'cross_doc', title, message, priority, metadata }
+    insight_hints: list[dict[str, Any]] = Field(default_factory=list)
+
     # Diagnostics pour debug/audit
     diagnostic: dict[str, Any] = Field(default_factory=dict)

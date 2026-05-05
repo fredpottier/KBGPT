@@ -126,6 +126,19 @@ def answer(request: AnswerRequest) -> PipelineResponse:
             as_of=request.as_of,
             top_k_claims=request.top_k_claims,
         )
+
+        # CH-06.1 — Insight Cards (post-processing, non-bloquant)
+        try:
+            from knowbase.runtime_v2.insight_hints import build_insight_hints
+            tenant_id = os.getenv("TENANT_ID", "default")
+            response.insight_hints = build_insight_hints(
+                response=response,
+                driver=pipeline.driver,
+                tenant_id=tenant_id,
+            )
+        except Exception as exc:
+            logger.warning("[CH-06.1] insight_hints build failed: %s", exc)
+
         # P5 polish — log structuré JSON pour Loki/Grafana (ADR_RUNTIME_V2_OPERATIONAL)
         try:
             entry = {
@@ -144,6 +157,11 @@ def answer(request: AnswerRequest) -> PipelineResponse:
                     if not c.is_resolved_by_lifecycle
                 ),
                 "n_evolution_points": len(response.evolution_points or []),
+                "n_insight_hints": len(response.insight_hints or []),
+                "synthesis_entropy": response.synthesis_entropy,
+                "synthesis_low_confidence": response.synthesis_low_confidence,
+                "answer_gap_score": response.answer_gap_score,
+                "answer_gap_classification": response.answer_gap_classification,
                 "trust_score": response.trust_score,
                 "latency_ms": round((_time.time() - t_start) * 1000, 1),
                 "has_synthesis": bool(response.synthesized_answer),

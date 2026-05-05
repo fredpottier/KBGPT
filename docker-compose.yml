@@ -26,6 +26,16 @@ services:
       - qdrant
       - redis
     shm_size: '2gb'  # Nécessaire pour OnnxTR/PyTorch (défaut 64MB insuffisant)
+    # CH-35.A4 — accès GPU pour cross-encoder rerank (BAAI/bge-reranker-v2-m3)
+    # GPU partagé avec worker (ingestion). Acceptable car query rerank ~50ms,
+    # ingestion bursty et pas concurrente avec query.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     env_file:
       - .env
     environment:
@@ -88,12 +98,20 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
       OSMOSIS_API_URL: http://app:8000
+      # CH-39 — runtime version (v3 = refonte minimaliste, v2 = ancien)
+      RUNTIME_VERSION: v3
       # Judges centralises — switch d'Ollama vers llama.cpp self-hosted
       # (container prometheus-judge, GPU, stable vs Ollama timeout 14B)
-      T2T5_JUDGE_PROVIDER: llamacpp
-      T2T5_JUDGE_MODEL_NAME: m-prometheus-14b
-      RAGAS_JUDGE_PROVIDER: llamacpp
-      RAGAS_JUDGE_MODEL: m-prometheus-14b
+      # CH-34 (04/05/2026) — bascule de Prometheus (sous-évaluait 90% des cas, +0.687 delta)
+      # vers Llama-3.3-70B-Instruct sur DeepInfra (calibration honnête, distingue
+      # abstention correcte vs hallucination). Audit benchmark/audit_judge_calibration_llama70b.json
+      T2T5_JUDGE_PROVIDER: deepinfra
+      T2T5_JUDGE_MODEL_NAME: meta-llama/Llama-3.3-70B-Instruct
+      RAGAS_JUDGE_PROVIDER: deepinfra
+      RAGAS_JUDGE_MODEL: meta-llama/Llama-3.3-70B-Instruct
+      ROBUSTNESS_JUDGE_PROVIDER: deepinfra
+      ROBUSTNESS_JUDGE_MODEL: meta-llama/Llama-3.3-70B-Instruct
+      OSMOSIS_JUDGE_MODEL: meta-llama/Llama-3.3-70B-Instruct  # used by robustness pour le label
       LLAMACPP_URL: http://prometheus-judge:8000
       OLLAMA_URL: http://host.docker.internal:11434  # fallback si besoin
       DEV_MODE: "false"  # Mode production: worker tourne en continu (10 jobs avant reload)
@@ -162,10 +180,18 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
       OSMOSIS_API_URL: http://app:8000
-      T2T5_JUDGE_PROVIDER: llamacpp
-      T2T5_JUDGE_MODEL_NAME: m-prometheus-14b
-      RAGAS_JUDGE_PROVIDER: llamacpp
-      RAGAS_JUDGE_MODEL: m-prometheus-14b
+      # CH-39 — runtime version (v3 = refonte minimaliste, v2 = ancien)
+      RUNTIME_VERSION: v3
+      # CH-34 (04/05/2026) — bascule de Prometheus (sous-évaluait 90% des cas, +0.687 delta)
+      # vers Llama-3.3-70B-Instruct sur DeepInfra (calibration honnête, distingue
+      # abstention correcte vs hallucination). Audit benchmark/audit_judge_calibration_llama70b.json
+      T2T5_JUDGE_PROVIDER: deepinfra
+      T2T5_JUDGE_MODEL_NAME: meta-llama/Llama-3.3-70B-Instruct
+      RAGAS_JUDGE_PROVIDER: deepinfra
+      RAGAS_JUDGE_MODEL: meta-llama/Llama-3.3-70B-Instruct
+      ROBUSTNESS_JUDGE_PROVIDER: deepinfra
+      ROBUSTNESS_JUDGE_MODEL: meta-llama/Llama-3.3-70B-Instruct
+      OSMOSIS_JUDGE_MODEL: meta-llama/Llama-3.3-70B-Instruct  # used by robustness pour le label
       LLAMACPP_URL: http://prometheus-judge:8000
       OLLAMA_URL: http://host.docker.internal:11434
       DEV_MODE: "false"

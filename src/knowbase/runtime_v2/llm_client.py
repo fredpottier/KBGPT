@@ -167,6 +167,7 @@ class RuntimeLLMClient:
         max_tokens: int = 1000,
         json_mode: bool = False,
         timeout: Optional[float] = None,
+        model_override: Optional[str] = None,
     ) -> str:
         """Envoie un chat completion. Returns le content (string).
 
@@ -177,18 +178,58 @@ class RuntimeLLMClient:
             json_mode: si True, demande response_format JSON
             timeout: override du timeout par défaut
         """
+        result = self.chat_completion_with_meta(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
+            timeout=timeout,
+            model_override=model_override,
+        )
+        return result["content"]
+
+    def chat_completion_with_meta(
+        self,
+        messages: list[dict],
+        temperature: float = 0.1,
+        max_tokens: int = 1000,
+        json_mode: bool = False,
+        logprobs: bool = False,
+        top_logprobs: int = 5,
+        timeout: Optional[float] = None,
+        model_override: Optional[str] = None,
+    ) -> dict:
+        """Variante de `chat_completion` qui renvoie aussi les métadonnées
+        (logprobs si demandé). CH-14 — HALT/EPR Logprob Entropy.
+
+        Returns:
+            {
+                "content": str,
+                "logprobs": list[dict] | None,  # si logprobs=True : list de {token, logprob, top_logprobs}
+                "provider": str,
+                "model": str,
+            }
+        """
         endpoint = self._resolve_endpoint()
         if endpoint is None:
             raise LLMBackendUnavailable("No backend resolved")
 
+        # CH-33 — model_override (DeepInfra only). Pour vLLM EC2, on garde le
+        # modèle local (override ignoré, le 14B AWQ est déjà rapide).
+        eff_model = endpoint["model"]
+        if model_override and endpoint.get("provider") == "deepinfra":
+            eff_model = model_override
         payload: dict[str, Any] = {
-            "model": endpoint["model"],
+            "model": eff_model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if logprobs:
+            payload["logprobs"] = True
+            payload["top_logprobs"] = top_logprobs
 
         eff_timeout = timeout if timeout is not None else self.timeout
         try:
@@ -199,7 +240,19 @@ class RuntimeLLMClient:
                     headers=endpoint["headers"],
                 )
                 resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"]
+                data = resp.json()
+                choice = data["choices"][0]
+                out = {
+                    "content": choice["message"]["content"],
+                    "logprobs": None,
+                    "provider": endpoint["provider"],
+                    "model": eff_model,
+                }
+                if logprobs:
+                    lp = choice.get("logprobs") or {}
+                    # Format OpenAI : choice.logprobs.content = [{token, logprob, top_logprobs[]}]
+                    out["logprobs"] = lp.get("content")
+                return out
         except (httpx.HTTPError, KeyError, IndexError) as exc:
             logger.error(
                 f"LLM call failed via {endpoint['provider']}: {exc}"
