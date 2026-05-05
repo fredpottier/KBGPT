@@ -138,3 +138,7 @@ frontend/tsconfig.tsbuildinfo
 # Runtime caches and locks
 app/.nv/
 .claude/scheduled_tasks.lock
+
+# Benchmark execution outputs (kept locally only)
+benchmark/results/
+*.jsonl
