@@ -131,30 +131,43 @@ pipelines:
     redis_key: "osmose:benchmark:state"
     redis_type: json
     stages:
+      - name: "Authentification"
+        short: "Auth"
+        phase_match:
+          - "init"
+          - "auth"
       - name: "API OSMOSIS"
         short: "API"
-        phase_match: "api_call"
+        phase_match:
+          - "api_call_osmosis"
+          - "api_call"
         iterable: true
         progress_fields:
           done: "progress"
           total: "total"
       - name: "Eval OSMOSIS"
         short: "Eval"
-        phase_match: "ragas_eval"
+        phase_match:
+          - "ragas_eval_osmosis"
+          - "ragas_eval"
         iterable: true
         progress_fields:
           done: "progress"
           total: "total"
       - name: "API RAG"
         short: "RAG"
-        phase_match: "rag_baseline"
+        phase_match:
+          - "api_call_rag"
+          - "rag_baseline"
         iterable: true
         progress_fields:
           done: "progress"
           total: "total"
       - name: "Eval RAG"
         short: "EvRAG"
-        phase_match: "rag_eval"
+        phase_match:
+          - "ragas_eval_rag"
+          - "rag_eval"
         iterable: true
         progress_fields:
           done: "progress"
@@ -174,9 +187,18 @@ pipelines:
     redis_key: "osmose:benchmark:robustness:state"
     redis_type: json
     stages:
-      - name: "API + Evaluation"
-        short: "Eval"
-        phase_match: "api_eval"
+      - name: "Collecte API"
+        short: "Coll"
+        phase_match:
+          - "api_eval"
+          - "api_collect"
+        iterable: true
+        progress_fields:
+          done: "progress"
+          total: "total"
+      - name: "Juge LLM"
+        short: "Judge"
+        phase_match: "llm_judge"
         iterable: true
         progress_fields:
           done: "progress"
@@ -199,9 +221,18 @@ pipelines:
       - name: "Authentification"
         short: "Auth"
         phase_match: "auth"
-      - name: "API + Evaluation"
-        short: "Eval"
-        phase_match: "api_eval"
+      - name: "Collecte API"
+        short: "Coll"
+        phase_match:
+          - "api_collect"
+          - "api_eval"
+        iterable: true
+        progress_fields:
+          done: "progress"
+          total: "total"
+      - name: "Juge LLM"
+        short: "Judge"
+        phase_match: "llm_judge"
         iterable: true
         progress_fields:
           done: "progress"

@@ -51,14 +51,15 @@ interface OverviewTabProps {
 
 // ── Design tokens ──────────────────────────────────────────────────────
 
+// Aligné sur preset-vars.css du thème actif
 const tokens = {
-  bgBase: '#0a0a1a',
-  bgCard: '#12122a',
-  bgElevated: '#1a1a35',
-  borderSubtle: '#1e1e3a',
-  textPrimary: '#f8fafc',
-  textSecondary: '#94a3b8',
-  textMuted: '#475569',
+  bgBase: 'var(--bg-canvas)',
+  bgCard: 'var(--bg-surface)',
+  bgElevated: 'var(--bg-surface-alt)',
+  borderSubtle: 'var(--border-default)',
+  textPrimary: 'var(--fg-primary)',
+  textSecondary: 'var(--fg-secondary)',
+  textMuted: 'var(--fg-muted)',
   accentBlue: '#5B7FFF',
   accentPurple: '#7C3AED',
   accentOrange: '#f97316',

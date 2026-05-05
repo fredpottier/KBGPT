@@ -51,7 +51,11 @@ async def broadcast_state(state):
             await ws.send_text(payload)
         except Exception:
             disconnected.add(ws)
-    ws_clients -= disconnected
+    # Bug Python classique : `ws_clients -= disconnected` fait croire à Python
+    # que ws_clients est une variable locale (à cause de l'assignation), donc
+    # `if not ws_clients:` plus haut lève UnboundLocalError. On utilise
+    # difference_update (méthode in-place sans réassignement de nom).
+    ws_clients.difference_update(disconnected)
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────

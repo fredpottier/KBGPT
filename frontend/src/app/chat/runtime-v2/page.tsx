@@ -39,6 +39,7 @@ import {
   useDisclosure,
 } from '@chakra-ui/react'
 import { LifecycleGraphMini } from '@/components/runtime/LifecycleGraphMini'
+import InsightCards, { type InsightHint } from '@/components/runtime/InsightCards'
 import { fetchWithAuth } from '@/lib/fetchWithAuth'
 
 type AnchorType = 'point' | 'range' | 'current_default'
@@ -95,6 +96,7 @@ type PipelineResponse = {
   alternatives: { doc_id: string; confidence: number }[]
   conflicts: ConflictReport[]
   synthesized_answer?: string | null
+  insight_hints?: InsightHint[]
   trust_score: number
   trust_breakdown: Record<string, unknown>
   diagnostic: Record<string, unknown>
@@ -334,6 +336,11 @@ export default function RuntimeV2Chat() {
                 <Heading size="sm" mb={2} color="var(--accent-base)">Réponse</Heading>
                 <Text fontSize="md" whiteSpace="pre-wrap">{response.synthesized_answer}</Text>
               </Box>
+            )}
+
+            {/* CH-06 — Insight Cards (Point d'attention / Évolution / Cross-doc) */}
+            {response.insight_hints && response.insight_hints.length > 0 && (
+              <InsightCards hints={response.insight_hints} />
             )}
 
             {/* Sources autoritaires */}

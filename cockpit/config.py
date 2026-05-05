@@ -19,7 +19,20 @@ BURST_COLLECT_INTERVAL = float(os.getenv("COCKPIT_BURST_INTERVAL", "15"))
 LLM_COLLECT_INTERVAL = float(os.getenv("COCKPIT_LLM_INTERVAL", "10"))
 
 # Redis
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+# Si REDIS_URL n'est pas explicite, on construit l'URL avec REDIS_PASSWORD si fourni
+# (le Redis du repo principal exige une auth depuis l'incident 27/04 — cf. memory).
+def _build_redis_url() -> str:
+    if "REDIS_URL" in os.environ:
+        return os.environ["REDIS_URL"]
+    pwd = os.getenv("REDIS_PASSWORD", "").strip()
+    host = os.getenv("REDIS_HOST", "localhost")
+    port = os.getenv("REDIS_PORT", "6379")
+    db = os.getenv("REDIS_DB", "0")
+    if pwd:
+        return f"redis://:{pwd}@{host}:{port}/{db}"
+    return f"redis://{host}:{port}/{db}"
+
+REDIS_URL = _build_redis_url()
 
 # Qdrant
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
