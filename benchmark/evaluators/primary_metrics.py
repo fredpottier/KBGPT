@@ -137,11 +137,9 @@ def eval_p2_contradiction_f1(results: List[Dict]) -> Dict[str, float]:
         elif side1_present or side2_present:
             silent_arbitration += 1
 
-        # Verifier si le type de tension est mentionne
-        contradiction_keywords = [
-            "contradiction", "contradictoire", "divergen", "tension",
-            "different", "contraire", "oppose", "incoheren",
-        ]
+        # Verifier si le type de tension est mentionne (CH-12 — externalisé)
+        from knowbase.config.detection_keywords import get_detection_keywords
+        contradiction_keywords = get_detection_keywords().contradiction_keywords
         if any(kw in answer.lower() for kw in contradiction_keywords):
             tension_type_correct += 1
 
@@ -278,11 +276,9 @@ def eval_p5_faithfulness(results: List[Dict]) -> Dict[str, float]:
     hallucination_count = 0
     idk_count = 0
 
-    idk_phrases = [
-        "je ne dispose pas", "je n'ai pas", "pas d'information",
-        "non documente", "pas dans les sources", "aucune information",
-        "i don't have", "no information", "not documented",
-    ]
+    # CH-12 — externalisé vers config/detection_keywords.yaml
+    from knowbase.config.detection_keywords import get_detection_keywords
+    idk_phrases = get_detection_keywords().idk_phrases
 
     for r in results:
         total += 1

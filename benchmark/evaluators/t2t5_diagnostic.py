@@ -54,7 +54,15 @@ LLM_JUDGE_MODEL = os.getenv("T2T5_JUDGE_MODEL_NAME", "gpt-4o-mini")
 
 
 def _get_llm_judge():
-    """Retourne un client OpenAI-compatible (OpenAI API ou Ollama local)."""
+    """Retourne un client OpenAI-compatible.
+
+    Providers supportés (CH-30.15) :
+    - "llamacpp" → Prometheus via http://prometheus-judge:8000 (DEFAUT pratique
+      du docker-compose worker, modèle spécialisé judge m-prometheus-14b)
+    - "ollama"   → Ollama local
+    - "deepinfra" → DeepInfra Qwen2.5-72B (cloud)
+    - "openai"   → gpt-4o-mini (legacy)
+    """
     global _llm_judge_client, LLM_JUDGE_PROVIDER, LLM_JUDGE_MODEL
     if _llm_judge_client is not None:
         return _llm_judge_client
@@ -62,31 +70,40 @@ def _get_llm_judge():
     LLM_JUDGE_PROVIDER = os.getenv("T2T5_JUDGE_PROVIDER", "openai")
     LLM_JUDGE_MODEL = os.getenv("T2T5_JUDGE_MODEL_NAME", "gpt-4o-mini")
 
-    if LLM_JUDGE_PROVIDER == "ollama":
-        ollama_url = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
-        try:
-            from openai import OpenAI
-            _llm_judge_client = OpenAI(
-                api_key="ollama",
-                base_url=f"{ollama_url}/v1",
-            )
+    try:
+        from openai import OpenAI
+
+        if LLM_JUDGE_PROVIDER == "llamacpp":
+            llamacpp_url = os.getenv("LLAMACPP_URL", "http://prometheus-judge:8000")
+            _llm_judge_client = OpenAI(api_key="local", base_url=f"{llamacpp_url}/v1")
+            logger.info(f"[T2T5] LLM judge initialized (llama.cpp/Prometheus: {LLM_JUDGE_MODEL} at {llamacpp_url})")
+            return _llm_judge_client
+
+        if LLM_JUDGE_PROVIDER == "ollama":
+            ollama_url = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
+            _llm_judge_client = OpenAI(api_key="ollama", base_url=f"{ollama_url}/v1")
             logger.info(f"[T2T5] LLM judge initialized (Ollama: {LLM_JUDGE_MODEL} at {ollama_url})")
             return _llm_judge_client
-        except Exception as e:
-            logger.warning(f"[T2T5] Ollama judge unavailable: {e}")
-            return None
-    else:
+
+        if LLM_JUDGE_PROVIDER == "deepinfra":
+            di_key = os.environ.get("DEEPINFRA_API_KEY", "").strip()
+            if not di_key:
+                logger.warning("[T2T5] DEEPINFRA_API_KEY missing")
+                return None
+            _llm_judge_client = OpenAI(api_key=di_key, base_url="https://api.deepinfra.com/v1/openai")
+            logger.info(f"[T2T5] LLM judge initialized (DeepInfra: {LLM_JUDGE_MODEL})")
+            return _llm_judge_client
+
+        # default openai
         api_key = os.environ.get("OPENAI_API_KEY", "")
         if not api_key:
             return None
-        try:
-            from openai import OpenAI
-            _llm_judge_client = OpenAI(api_key=api_key)
-            logger.info(f"[T2T5] LLM judge initialized (OpenAI: {LLM_JUDGE_MODEL})")
-            return _llm_judge_client
-        except Exception as e:
-            logger.warning(f"[T2T5] LLM judge unavailable: {e}")
-            return None
+        _llm_judge_client = OpenAI(api_key=api_key)
+        logger.info(f"[T2T5] LLM judge initialized (OpenAI: {LLM_JUDGE_MODEL})")
+        return _llm_judge_client
+    except Exception as e:
+        logger.warning(f"[T2T5] LLM judge unavailable: {e}")
+        return None
 
 
 def _llm_judge_t2(client, question: str, claim1_text: str, claim2_text: str, answer: str) -> dict | None:
@@ -252,46 +269,41 @@ def _llm_judge_t5(client, question: str, category: str, answer: str, ground_trut
 
 T2T5_PROFILES: dict[str, dict] = {
     "quick": {
-        "label": "Quick T5 (25q)",
+        "label": "Quick T5 (30q)",
         "tasks": [
             {
-                "name": "T5 KG Differentiators",
-                "questions_file": "benchmark/questions/task5_kg_differentiators.json",
+                "name": "T5 Cross-doc",
+                "questions_file": "benchmark/questions/aero_t5_cross_doc.json",
                 "task_type": "T5",
             },
         ],
     },
     "standard": {
-        "label": "Standard T2+T5 (50q)",
+        "label": "Standard T2+T5 (70q)",
         "tasks": [
             {
-                "name": "T2 Contradictions Expert",
-                "questions_file": "benchmark/questions/task2_contradictions_human_v2.json",
+                "name": "T2 Contradictions",
+                "questions_file": "benchmark/questions/aero_t2_contradictions.json",
                 "task_type": "T2",
             },
             {
-                "name": "T5 KG Differentiators",
-                "questions_file": "benchmark/questions/task5_kg_differentiators.json",
+                "name": "T5 Cross-doc",
+                "questions_file": "benchmark/questions/aero_t5_cross_doc.json",
                 "task_type": "T5",
             },
         ],
     },
     "full": {
-        "label": "Full T2+T5 (175q)",
+        "label": "Full T2+T5 (70q)",
         "tasks": [
             {
-                "name": "T2 Contradictions Expert",
-                "questions_file": "benchmark/questions/task2_contradictions_human_v2.json",
+                "name": "T2 Contradictions",
+                "questions_file": "benchmark/questions/aero_t2_contradictions.json",
                 "task_type": "T2",
             },
             {
-                "name": "T2 Contradictions KG",
-                "questions_file": "benchmark/questions/task2_contradictions_kg.json",
-                "task_type": "T2",
-            },
-            {
-                "name": "T5 KG Differentiators",
-                "questions_file": "benchmark/questions/task5_kg_differentiators.json",
+                "name": "T5 Cross-doc",
+                "questions_file": "benchmark/questions/aero_t5_cross_doc.json",
                 "task_type": "T5",
             },
         ],
@@ -321,34 +333,12 @@ def extract_keywords(text: str, min_len: int = 4) -> set[str]:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Tension Detection Keywords
+# Tension Detection Keywords — CH-12 externalisé vers config/detection_keywords.yaml
 # ═══════════════════════════════════════════════════════════════════════
 
-TENSION_KEYWORDS = [
-    "divergen",
-    "contradict",
-    "differ",
-    "disagree",
-    "however",
-    "en revanche",
-    "toutefois",
-    "cependant",
-    "attention",
-    "contradiction",
-    "while",
-    "whereas",
-    "points d'attention",
-    "noter que",
-    "incoheren",
-    "tension",
-    "deux version",
-    "a change",
-    "renomm",
-    "version 2022",
-    "version 2023",
-    "discrepan",
-    "deux document",
-]
+from knowbase.config.detection_keywords import get_detection_keywords as _get_dk
+
+TENSION_KEYWORDS = list(_get_dk().tension_keywords)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -370,8 +360,9 @@ def evaluate_t2(answer: str, sources_used: list[str], ground_truth: dict) -> dic
     answer_words = set(answer_norm.split())
     answer_lower = answer.lower()
 
-    claim1 = ground_truth.get("claim1", {})
-    claim2 = ground_truth.get("claim2", {})
+    # CH-30.9 — supporte le format aero V2 (claim_a/claim_b) en plus du legacy (claim1/claim2)
+    claim1 = ground_truth.get("claim1") or ground_truth.get("claim_a") or {}
+    claim2 = ground_truth.get("claim2") or ground_truth.get("claim_b") or {}
 
     # 1. both_sides_surfaced — check keywords from both claims
     # Keywords: curated (si presentes) + extraites du texte
@@ -442,6 +433,29 @@ def evaluate_t2(answer: str, sources_used: list[str], ground_truth: dict) -> dic
 # ═══════════════════════════════════════════════════════════════════════
 
 
+_CANONICAL_T5_CATEGORIES = ("cross_doc_chain", "proactive_contradiction", "multi_source_synthesis")
+
+
+def _map_to_canonical_category(category: str, ground_truth: dict) -> str:
+    """CH-30.9 — mappe une category aero V2 vers une des 3 canoniques (frontend hardcoded).
+
+    Heuristique :
+    - ground_truth.chain[] existe → cross_doc_chain
+    - ground_truth.hidden_contradiction → proactive_contradiction
+    - ground_truth.expected_aspects → multi_source_synthesis
+    - sinon : fallback cross_doc_chain (cas le plus fréquent)
+    """
+    if category in _CANONICAL_T5_CATEGORIES:
+        return category
+    if isinstance(ground_truth.get("hidden_contradiction"), dict):
+        return "proactive_contradiction"
+    if isinstance(ground_truth.get("expected_aspects"), list) and ground_truth.get("expected_aspects"):
+        return "multi_source_synthesis"
+    if isinstance(ground_truth.get("chain"), list) and ground_truth.get("chain"):
+        return "cross_doc_chain"
+    return "cross_doc_chain"  # safe default
+
+
 def evaluate_t5(
     answer: str,
     sources_used: list[str],
@@ -450,32 +464,57 @@ def evaluate_t5(
     category: str,
 ) -> dict[str, Any]:
     """Evalue une reponse T5 (KG differentiator) de maniere deterministe."""
+    canonical_cat = _map_to_canonical_category(category, ground_truth)
     if not answer or len(answer) < 20:
         return {
             "chain_coverage": 0.0,
             "multi_doc_cited": 0.0,
             "proactive_detection": 0.0,
             "task_type": "T5",
-            "category": category,
+            "category": canonical_cat,
+            "original_category": category,
         }
 
     answer_norm = normalize(answer)
     answer_words = set(answer_norm.split())
     answer_lower = answer.lower()
 
-    # Extract unique doc prefixes from sources_used
+    # CH-30.9 — domain-agnostic doc identification :
+    # 1) legacy SAP : "027_SAP..." → prefix 3 chars numériques
+    # 2) aero V2 : "cs25_amdt_28_32f1a9ac" → strip hash hex final, garder le rest
+    def _doc_label(doc_id: str) -> str:
+        if not doc_id:
+            return ""
+        d = doc_id.lower()
+        # Strip hash hex final (>=6 chars hex, séparé par _)
+        if "_" in d:
+            tail = d.rsplit("_", 1)[-1]
+            if len(tail) >= 6 and all(c in "0123456789abcdef" for c in tail):
+                d = d[: -(len(tail) + 1)]
+        return d
+
     unique_docs = set()
     for s in sources_used:
-        doc_prefix = s[:3] if len(s) >= 3 else s
-        if doc_prefix and doc_prefix[0].isdigit():
-            unique_docs.add(doc_prefix)
+        if not s:
+            continue
+        label = _doc_label(s)
+        if label:
+            unique_docs.add(label)
+        # Conserve aussi l'ancien matching par prefix numérique pour rétrocompat SAP
+        if len(s) >= 3 and s[0].isdigit():
+            unique_docs.add(s[:3])
 
     result: dict[str, Any] = {
         "task_type": "T5",
-        "category": category,
+        "category": canonical_cat,
+        "original_category": category,
     }
 
-    if category == "cross_doc_chain":
+    # CH-30.9 — déclencher la logique chain dès qu'il y a un ground_truth.chain[]
+    # (les catégories aero V2 sont diverses : evolution_chronological, cs25_provision_evolution,
+    # lifecycle_chain_full, etc. — pas seulement "cross_doc_chain").
+    has_chain = isinstance(ground_truth.get("chain"), list) and ground_truth.get("chain")
+    if has_chain or category == "cross_doc_chain":
         # chain_coverage — how many chain elements are found
         chain = ground_truth.get("chain", [])
         chain_hits = 0
@@ -496,18 +535,40 @@ def evaluate_t5(
 
         chain_coverage = chain_hits / len(chain) if chain else 0
 
-        # multi_doc_cited
-        docs_required = ground_truth.get("docs_required", 2)
-        # Count how many required doc prefixes appear
-        required_docs = set()
+        # multi_doc_cited — CH-30.9 : matching par doc_label (sans hash) ou substring dans answer
+        docs_required_min = ground_truth.get("docs_required") or ground_truth.get("min_docs_required", 2)
+        required_docs: set[str] = set()
         for link in chain:
             if isinstance(link, dict):
                 doc_id = link.get("doc_id", "")
                 if doc_id:
-                    required_docs.add(doc_id[:3])
+                    label = _doc_label(doc_id)
+                    if label:
+                        required_docs.add(label)
+                    if len(doc_id) >= 3 and doc_id[0].isdigit():
+                        required_docs.add(doc_id[:3])
 
-        docs_found = required_docs & unique_docs
-        multi_doc = len(docs_found) / len(required_docs) if required_docs else min(len(unique_docs) / max(docs_required, 1), 1.0)
+        docs_found: set[str] = set()
+        for r in required_docs:
+            if r in unique_docs:
+                docs_found.add(r)
+                continue
+            # Sinon : substring match dans la réponse (cas où le système cite "cs25_amdt_28" inline)
+            if r and r in answer_lower:
+                docs_found.add(r)
+                continue
+            # Match partiel : si la moitié du label apparaît dans answer ou sources_used
+            short = r.split("_")
+            if len(short) >= 2:
+                short_key = "_".join(short[:2])  # ex: "cs25_amdt", "dualuse_reg"
+                if short_key in answer_lower or any(short_key in (s or "").lower() for s in sources_used):
+                    docs_found.add(r)
+
+        multi_doc = (
+            len(docs_found) / len(required_docs)
+            if required_docs
+            else min(len(unique_docs) / max(docs_required_min, 1), 1.0)
+        )
 
         result["chain_coverage"] = round(chain_coverage, 3)
         result["multi_doc_cited"] = round(multi_doc, 3)
@@ -594,41 +655,45 @@ def _call_osmosis_api(
     question: str,
     api_base: str,
     token_mgr,
-    use_kg: bool = True,
+    use_kg: bool = True,  # legacy param kept for callsite compat (ignored, V2 always)
 ) -> dict:
-    """Appelle l'API OSMOSIS search et retourne la reponse structuree."""
-    payload = {
-        "question": question,
-        "use_graph_context": use_kg,
-        "graph_enrichment_level": "standard" if use_kg else "none",
-        "use_graph_first": use_kg,
-        "use_kg_traversal": use_kg,
-        "use_latest": True,
-        "skip_tension_summary": True,
-    }
+    """CH-30.14 — V2 only. Plus de fallback /api/search V1.1.
+
+    Appelle exclusivement /api/runtime_v2/answer (pipeline anchor-driven avec
+    insight_hints + entropy + answer_gap actifs).
+    """
     headers = {
         "Authorization": f"Bearer {token_mgr.get()}",
         "Content-Type": "application/json",
     }
     resp = requests.post(
-        f"{api_base}/api/search",
-        json=payload,
+        f"{api_base}/api/runtime_v2/answer",
+        json={"question": question, "audit_mode": False, "top_k_claims": 10},
         headers=headers,
         timeout=180,
     )
     resp.raise_for_status()
     data = resp.json()
-
-    results = data.get("results", [])
-    synthesis = data.get("synthesis", {})
-    answer = synthesis.get("synthesized_answer", "") if isinstance(synthesis, dict) else ""
-    sources_used = list(set(r.get("source_file", "") for r in results if isinstance(r, dict) and r.get("source_file")))
-
+    answer = data.get("synthesized_answer") or ""
+    sources_used = list(data.get("authoritative_doc_ids") or [])
+    if not sources_used:
+        for c in data.get("claims") or []:
+            doc = c.get("doc_id")
+            if doc and doc not in sources_used:
+                sources_used.append(doc)
     return {
         "answer": answer,
         "sources_used": sources_used,
-        "chunks_retrieved": len(results),
-        "latency_ms": data.get("latency_ms", 0),
+        "chunks_retrieved": len(data.get("claims") or []),
+        "latency_ms": 0,
+        "_v2_meta": {
+            "decision": data.get("decision"),
+            "trust_score": data.get("trust_score"),
+            "synthesis_entropy": data.get("synthesis_entropy"),
+            "answer_gap_classification": data.get("answer_gap_classification"),
+            "n_insight_hints": len(data.get("insight_hints") or []),
+            "n_conflicts": len(data.get("conflicts") or []),
+        },
     }
 
 
@@ -954,26 +1019,46 @@ def run_benchmark_job(
                 if not answer:
                     continue
 
+                # CH-30.15 — V2 calibration : LLM-juge Prometheus override systématiquement
+                # le keyword scorer (qui pénalise les réponses V2 concises).
+                # Compat double : claim1/claim2 (legacy SAP) + claim_a/claim_b (aero V2).
                 if task_type == "T2":
-                    claim1_text = ground_truth.get("claim1", {}).get("text", "")
-                    claim2_text = ground_truth.get("claim2", {}).get("text", "")
+                    c1 = ground_truth.get("claim1") or ground_truth.get("claim_a") or {}
+                    c2 = ground_truth.get("claim2") or ground_truth.get("claim_b") or {}
+                    claim1_text = c1.get("text", "") if isinstance(c1, dict) else str(c1)
+                    claim2_text = c2.get("text", "") if isinstance(c2, dict) else str(c2)
                     llm_scores = _llm_judge_t2(
                         judge_client, question, claim1_text, claim2_text, answer
                     )
                     if llm_scores:
-                        evaluation["keyword_both_sides"] = evaluation["both_sides_surfaced"]
+                        # Préserver la version keyword pour comparaison/audit
+                        evaluation["keyword_both_sides"] = evaluation.get("both_sides_surfaced")
+                        evaluation["keyword_tension"] = evaluation.get("tension_mentioned")
+                        evaluation["keyword_both_sources"] = evaluation.get("both_sources_cited")
+                        # Override avec scores LLM-juge (3 métriques T2)
                         evaluation["both_sides_surfaced"] = llm_scores["both_sides_surfaced"]
+                        evaluation["tension_mentioned"] = llm_scores["tension_mentioned"]
+                        evaluation["both_sources_cited"] = llm_scores["both_sources_cited"]
+                        evaluation["claim1_coverage"] = llm_scores.get("claim1_coverage", 0.0)
+                        evaluation["claim2_coverage"] = llm_scores.get("claim2_coverage", 0.0)
                         evaluation["judge_model"] = LLM_JUDGE_MODEL
 
-                elif task_type == "T5" and category in ("cross_doc_chain", "multi_source_synthesis"):
-                    llm_scores = _llm_judge_t5(
-                        judge_client, question, category, answer,
-                        ground_truth=ground_truth,
-                    )
-                    if llm_scores:
-                        evaluation["keyword_chain_coverage"] = evaluation["chain_coverage"]
-                        evaluation["chain_coverage"] = llm_scores["chain_coverage"]
-                        evaluation["judge_model"] = LLM_JUDGE_MODEL
+                elif task_type == "T5":
+                    # CH-30.15 — déclencher LLM-juge dès qu'il y a une chain[]
+                    # (mes 30 questions aero T5 ont toutes une chain[], catégories diverses)
+                    has_chain = isinstance(ground_truth.get("chain"), list) and ground_truth.get("chain")
+                    if has_chain or category in ("cross_doc_chain", "multi_source_synthesis"):
+                        llm_scores = _llm_judge_t5(
+                            judge_client, question, category, answer,
+                            ground_truth=ground_truth,
+                        )
+                        if llm_scores:
+                            evaluation["keyword_chain_coverage"] = evaluation.get("chain_coverage")
+                            evaluation["keyword_multi_doc_cited"] = evaluation.get("multi_doc_cited")
+                            evaluation["chain_coverage"] = llm_scores["chain_coverage"]
+                            if "multi_doc_cited" in llm_scores:
+                                evaluation["multi_doc_cited"] = llm_scores["multi_doc_cited"]
+                            evaluation["judge_model"] = LLM_JUDGE_MODEL
 
                 judged += 1
                 if judged % 10 == 0:

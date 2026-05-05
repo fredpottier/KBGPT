@@ -40,59 +40,14 @@ REDIS_TTL = 7200
 # Keyword utilities
 # ═══════════════════════════════════════════════════════════════════════
 
-IGNORANCE_KEYWORDS = [
-    "pas d'information",
-    "ne dispose pas",
-    "pas mentionne",
-    "non disponible",
-    "aucune donnee",
-    "aucune reference",
-    "ne mentionne pas",
-    "ne traite pas",
-    "hors du scope",
-    "pas de donnee",
-    "je ne sais pas",
-    "impossible de repondre",
-    "aucune information",
-    "pas trouve",
-    "not found",
-    "no information",
-    "cannot answer",
-    "documents ne contiennent pas",
-    "corpus ne contient pas",
-    "pas dans les documents",
-    "pas dans le corpus",
-]
+# CH-12 — IGNORANCE/CORRECTION/TEMPORAL keywords externalisées vers
+# config/detection_keywords.yaml
+from knowbase.config.detection_keywords import get_detection_keywords as _get_dk
 
-CORRECTION_KEYWORDS = [
-    "en realite",
-    "contrairement",
-    "cependant",
-    "neanmoins",
-    "toutefois",
-    "en fait",
-    "il est important de noter",
-    "attention",
-    "incorrect",
-    "inexact",
-    "faux",
-    "erreur",
-    "la premisse",
-    "actually",
-    "however",
-    "contrary",
-    "not correct",
-    "supporte", "supportent",
-    "est disponible", "sont disponibles",
-]
-
-TEMPORAL_KEYWORDS = [
-    "2021", "2022", "2023", "2024", "2025",
-    "evolution", "evolue", "change", "modifie",
-    "avant", "apres", "precedent", "nouveau",
-    "ancienne", "nouvelle", "mise a jour",
-    "version", "edition", "fps",
-]
+_dk = _get_dk()
+IGNORANCE_KEYWORDS = list(_dk.ignorance_keywords)
+CORRECTION_KEYWORDS = list(_dk.correction_keywords)
+TEMPORAL_KEYWORDS = list(_dk.temporal_keywords)
 
 
 def normalize(text: str) -> str:
@@ -405,6 +360,26 @@ CATEGORY_JUDGE_CRITERIA = {
     "conditional": "The question asks about a specific condition or prerequisite. A good answer identifies and explains the condition from the sources. A bad answer misses the conditional aspect.",
     "set_list": "The question asks to LIST or ENUMERATE items. A good answer lists the correct items from the sources. A bad answer misses items or lists wrong ones.",
     "multi_hop": "The question requires CHAINING facts from multiple sources. A good answer connects the facts logically. A bad answer only addresses part of the chain.",
+    "unanswerable": "The question asks for information that does NOT exist in the corpus. A good answer abstains, says it cannot find the information, or explains why the answer is unavailable. A bad answer fabricates an answer.",
+    # CH-30.10 — catégories T7 V2 anchor (lifecycle + applicability + scope)
+    "lifecycle_supersedes": "The question asks about a regulation that REPLACED another (SUPERSEDES). A good answer identifies the replacement regulation and cites the explicit repeal/replacement. A bad answer misses the lifecycle relationship.",
+    "lifecycle_evolves_from": "The question asks about regulations that MODIFY or update another via delegated/amending acts. A good answer identifies the modifications and the parent regulation. A bad answer treats them as unrelated documents.",
+    "lifecycle_filtering_active": "The question requires returning ACTIVE versions only and excluding DEPRECATED ones. A good answer correctly filters and explains why deprecated content is excluded. A bad answer cites obsolete sources as applicable.",
+    "anchor_applicability_temporal": "The question requires identifying which version was applicable at a given DATE (temporal anchor). A good answer selects the right version using publication dates. A bad answer ignores the date or uses the latest version.",
+    "anchor_scope_hierarchy": "The question asks about the SCOPE relationship between concepts (subset/superset/disjoint). A good answer correctly identifies the hierarchy. A bad answer conflates distinct scopes.",
+    "lifecycle_vs_conflict": "The question tests whether OSMOSIS distinguishes a real CONFLICT from a regulatory EVOLUTION (lifecycle). A good answer identifies it as evolution and selects the active value. A bad answer raises a false alarm of contradiction.",
+}
+
+# CH-30.10 — Mapping des catégories T7 vers les évaluateurs keyword T6 quand un
+# match sémantique direct existe. Les catégories T7 non listées tombent
+# dans le fallback LLM-juge (criteria définis dans CATEGORY_JUDGE_CRITERIA).
+T7_TO_T6_KEYWORD_FALLBACK = {
+    "lifecycle_supersedes": "temporal_evolution",
+    "lifecycle_evolves_from": "temporal_evolution",
+    "lifecycle_filtering_active": "temporal_evolution",
+    "anchor_applicability_temporal": "temporal_evolution",
+    "anchor_scope_hierarchy": "set_list",
+    "lifecycle_vs_conflict": "false_premise",
 }
 
 _llm_judge_client = None
@@ -412,12 +387,14 @@ _judge_failure_count = 0
 _judge_success_count = 0
 
 def _get_llm_judge_client():
-    """Retourne le client OpenAI pour le LLM-juge.
+    """Retourne le client OpenAI-compatible pour le LLM-juge.
 
-    IMPORTANT : le juge utilise gpt-4o-mini par defaut. Pour le changer,
-    definir explicitement OSMOSIS_JUDGE_MODEL=xxx. On n'herite PAS de
-    OSMOSIS_SYNTHESIS_MODEL car celui-ci peut etre un modele Anthropic
-    (Claude) qui n'est pas compatible avec le client OpenAI.
+    Provider défaut : **openai** (legacy compat). Pour utiliser Prometheus
+    (m-prometheus-14b — modèle spécialisé juge, choix produit), définir
+    `T2T5_JUDGE_PROVIDER=llamacpp` + `LLAMACPP_URL=http://prometheus-judge:8000`
+    (déjà en place dans docker-compose worker).
+
+    Override possible via `ROBUSTNESS_JUDGE_PROVIDER` (priorité haute).
     """
     global _llm_judge_client
     if _llm_judge_client is not None:
@@ -428,7 +405,15 @@ def _get_llm_judge_client():
     try:
         from openai import OpenAI
 
-        if judge_provider == "ollama":
+        if judge_provider == "llamacpp":
+            llamacpp_url = os.getenv("LLAMACPP_URL", "http://prometheus-judge:8000")
+            _llm_judge_client = OpenAI(
+                base_url=f"{llamacpp_url}/v1",
+                api_key="local",
+            )
+            model = os.getenv("ROBUSTNESS_JUDGE_MODEL", os.getenv("T2T5_JUDGE_MODEL_NAME", "m-prometheus-14b"))
+            logger.info(f"[JUDGE] llama.cpp judge initialized: {model} at {llamacpp_url}")
+        elif judge_provider == "ollama":
             ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
             _llm_judge_client = OpenAI(
                 base_url=f"{ollama_url}/v1",
@@ -436,6 +421,17 @@ def _get_llm_judge_client():
             )
             model = os.getenv("ROBUSTNESS_JUDGE_MODEL", os.getenv("T2T5_JUDGE_MODEL_NAME", "m-prometheus-14b"))
             logger.info(f"[JUDGE] Ollama judge initialized: {model} at {ollama_url}")
+        elif judge_provider == "deepinfra":
+            di_key = os.getenv("DEEPINFRA_API_KEY", "").strip()
+            if not di_key:
+                logger.warning("[JUDGE] DEEPINFRA_API_KEY missing — LLM judge unavailable")
+                return None
+            _llm_judge_client = OpenAI(
+                base_url="https://api.deepinfra.com/v1/openai",
+                api_key=di_key,
+            )
+            model = os.getenv("ROBUSTNESS_JUDGE_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+            logger.info(f"[JUDGE] DeepInfra judge initialized: {model}")
         else:
             openai_key = os.getenv("OPENAI_API_KEY", "")
             if not openai_key:
@@ -509,7 +505,9 @@ REASON: <one short sentence explaining the score, max 25 words>"""
 
     try:
         judge_provider = os.getenv("ROBUSTNESS_JUDGE_PROVIDER", os.getenv("T2T5_JUDGE_PROVIDER", "openai"))
-        if judge_provider == "ollama":
+        # CH-34 : "ollama" était un legacy alias — le default actuel est "llamacpp"
+        # (Prometheus via llama.cpp). On supporte les deux pour compat ascendante.
+        if judge_provider in ("llamacpp", "ollama"):
             judge_model = os.getenv("ROBUSTNESS_JUDGE_MODEL", os.getenv("T2T5_JUDGE_MODEL_NAME", "m-prometheus-14b"))
         else:
             judge_model = os.getenv("OSMOSIS_JUDGE_MODEL", "gpt-4o-mini")
@@ -562,10 +560,18 @@ REASON: <one short sentence explaining the score, max 25 words>"""
 # Router
 # ═══════════════════════════════════════════════════════════════════════
 
-# Categories evaluees par LLM-juge (cross-lingue, keyword insuffisant)
+# Categories evaluees par LLM-juge — CH-30.16 : étendues à TOUTES les catégories
+# T6 + T7 (cross-lingue, keyword scorer insuffisant pour réponses V2 concises).
+# `unanswerable` ajouté car la question V2 répond souvent "information non disponible"
+# qui peut ne pas matcher les keywords figés.
 LLM_JUDGE_CATEGORIES = {
+    # T6 (10 catégories)
     "false_premise", "temporal_evolution", "causal_why", "hypothetical",
     "negation", "synthesis_large", "conditional", "set_list", "multi_hop",
+    "unanswerable",
+    # T7 V2 anchor (6 catégories)
+    "lifecycle_supersedes", "lifecycle_evolves_from", "lifecycle_filtering_active",
+    "anchor_applicability_temporal", "anchor_scope_hierarchy", "lifecycle_vs_conflict",
 }
 
 # Keyword evaluators (fallback ou categories non-LLM)
@@ -590,41 +596,63 @@ EVALUATORS = KEYWORD_EVALUATORS  # Kept for backward compat
 # ═══════════════════════════════════════════════════════════════════════
 
 def _call_osmosis_api(question: str, api_base: str, token: str = "") -> dict:
+    """CH-30.14 — V2 par défaut. CH-39 — V3 si env RUNTIME_VERSION=v3."""
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
+    runtime_version = os.getenv("RUNTIME_VERSION", "v2").lower()
+    if runtime_version == "v3":
+        resp = requests.post(
+            f"{api_base}/api/runtime_v3/answer",
+            json={"question": question, "top_k_claims": 10},
+            headers=headers,
+            timeout=300,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "answer": data.get("answer") or "",
+            "sources_used": data.get("doc_ids_cited") or [],
+            "_v3_meta": {
+                "decision": data.get("decision"),
+                "confidence": data.get("confidence"),
+                "false_premise_detected": data.get("false_premise_detected"),
+                "faithfulness_score": data.get("faithfulness_score"),
+                "faithfulness_verdict": data.get("faithfulness_verdict"),
+                "n_chunks_retrieved": data.get("n_chunks_retrieved"),
+                "regenerated": data.get("regenerated"),
+            },
+        }
+
+    # Default V2
     resp = requests.post(
-        f"{api_base}/api/search",
-        json={
-            "question": question,
-            "graph_enrichment_level": "standard",
-            "use_graph_first": True,
-            "use_kg_traversal": True,
-            "use_latest": True,
-            "skip_tension_summary": True,
-        },
+        f"{api_base}/api/runtime_v2/answer",
+        json={"question": question, "audit_mode": False, "top_k_claims": 10},
         headers=headers,
         timeout=300,
     )
     resp.raise_for_status()
     data = resp.json()
-
-    # Extraire la reponse (format OSMOSIS: synthesis.synthesized_answer)
-    synthesis = data.get("synthesis", {})
-    if isinstance(synthesis, dict):
-        answer = synthesis.get("synthesized_answer", "")
-    else:
-        answer = data.get("answer", data.get("response", ""))
-
-    sources = []
-    for s in data.get("results", data.get("sources", data.get("chunks", []))):
-        if isinstance(s, dict):
-            src = s.get("source_file", s.get("doc_id", s.get("metadata", {}).get("source_file", "")))
-            if src:
-                sources.append(src)
-
-    return {"answer": answer, "sources_used": sources}
+    answer = data.get("synthesized_answer") or ""
+    sources = list(data.get("authoritative_doc_ids") or [])
+    if not sources:
+        for c in data.get("claims") or []:
+            doc = c.get("doc_id")
+            if doc and doc not in sources:
+                sources.append(doc)
+    return {
+        "answer": answer,
+        "sources_used": sources,
+        "_v2_meta": {
+            "decision": data.get("decision"),
+            "trust_score": data.get("trust_score"),
+            "synthesis_entropy": data.get("synthesis_entropy"),
+            "answer_gap_classification": data.get("answer_gap_classification"),
+            "n_insight_hints": len(data.get("insight_hints") or []),
+            "n_conflicts": len(data.get("conflicts") or []),
+        },
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -692,15 +720,26 @@ def run_benchmark_job(
     job_start = time.time()
     api_base = os.getenv("OSMOSIS_API_URL", "http://localhost:8000")
 
-    questions_file = Path("benchmark/questions/task6_robustness.json")
-    if not questions_file.exists():
-        _update_redis_state(redis_url, {"status": "failed", "error": "Questions file not found"})
+    # CH-30.9 — fichiers V2 (T6 + T7 — T7 traité comme catégorie de robustesse temporelle)
+    files_to_load = [
+        Path("benchmark/questions/aero_t6_robustness.json"),
+        Path("benchmark/questions/aero_t7_v2_anchor.json"),
+    ]
+    all_questions: list[dict] = []
+    for qfile in files_to_load:
+        if not qfile.exists():
+            logger.warning(f"[ROBUSTESSE] Missing: {qfile}")
+            continue
+        loaded = json.loads(qfile.read_text(encoding="utf-8"))
+        # Format flat array (aero V2) ou wrapped {questions:[]} (legacy)
+        items = loaded if isinstance(loaded, list) else loaded.get("questions", [])
+        all_questions.extend(items)
+
+    if not all_questions:
+        _update_redis_state(redis_url, {"status": "failed", "error": "No question files found"})
         return
 
-    data = json.loads(questions_file.read_text(encoding="utf-8"))
-    all_questions = data.get("questions", [])
-
-    logger.info(f"[ROBUSTESSE] Starting benchmark — {len(all_questions)} questions, tag={tag}")
+    logger.info(f"[ROBUSTESSE] Starting benchmark — {len(all_questions)} questions (T6 + T7 V2 anchor), tag={tag}")
 
     _update_redis_state(redis_url, {
         "status": "running",
@@ -729,8 +768,12 @@ def run_benchmark_job(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     is_local_judge = os.getenv("T2T5_JUDGE_PROVIDER") == "ollama"
-    collect_concurrency = int(os.getenv("BENCHMARK_COLLECT_CONCURRENCY", "15"))
-    judge_concurrency = 1 if is_local_judge else int(os.getenv("BENCHMARK_CONCURRENCY", "15"))
+    # CH-35/36 — pipeline V2 plus lent (~50s/q avec rerank+faithfulness+hallu_guard).
+    # Avec 4+ concurrent et RAGAS en parallèle, DeepInfra rate-limit fait grimper
+    # chaque appel à 300s+ → timeouts. Solo (concurrency=1) = ~50s/q × 170 = ~2h30
+    # mais sans timeout. À monter quand l'infra le supporte (vLLM EC2 dédié).
+    collect_concurrency = int(os.getenv("BENCHMARK_COLLECT_CONCURRENCY", "1"))
+    judge_concurrency = 1 if is_local_judge else int(os.getenv("BENCHMARK_CONCURRENCY", "4"))
     logger.info(f"[ROBUSTESSE] Collect concurrency: {collect_concurrency}, Judge concurrency: {judge_concurrency}")
 
     # ══════════════════════════════════════════════════════════════
@@ -770,11 +813,28 @@ def run_benchmark_job(
             answer = api_result["answer"]
             sources = api_result["sources_used"]
 
-            # Keyword evaluation (deterministe, pas de LLM)
+            # CH-30.10 — Dispatch :
+            # 1) keyword evaluator si la catégorie est connue
+            # 2) sinon mapping T7 → T6 si applicable
+            # 3) sinon stub (le LLM judge prendra le relais via evaluate_with_llm_judge)
             evaluator = KEYWORD_EVALUATORS.get(category)
-            keyword_eval = evaluator(answer, sources, ground_truth) if evaluator else {
-                "category": category, "score": 0.0, "error": f"Unknown category: {category}"
-            }
+            mapped_cat = None
+            if evaluator is None:
+                mapped_cat = T7_TO_T6_KEYWORD_FALLBACK.get(category)
+                if mapped_cat:
+                    evaluator = KEYWORD_EVALUATORS.get(mapped_cat)
+            if evaluator is not None:
+                keyword_eval = evaluator(answer, sources, ground_truth)
+                # Préserver la category originale pour traçabilité dans le report
+                keyword_eval["category"] = category
+                if mapped_cat:
+                    keyword_eval["mapped_from_t7_to"] = mapped_cat
+            else:
+                keyword_eval = {
+                    "category": category,
+                    "score": 0.0,
+                    "needs_llm_judge_only": True,  # signal au scorer agrégé
+                }
 
             result = {
                 "question_id": question_id,
