@@ -13,7 +13,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics, markers, claimfirst, verify, gpu, backup, wiki, kg_hygiene, domain_packs, post_import, corpus_intelligence, atlas, kg_health, relations_explorer, runtime_v2
+from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics, markers, claimfirst, verify, gpu, backup, wiki, kg_hygiene, domain_packs, post_import, corpus_intelligence, atlas, kg_health, relations_explorer, runtime_v2, runtime_v3
 # Pipeline Stratified V2 — DEPRECATED 2026-05-01 (cf project_dispatcher_docs_in_stale.md).
 # Le pipeline productif est ClaimFirst. Stratified V2 produisait concepts=0/osmose_s=0
 # systématiquement. Router non inclus mais le code reste (utilities pass0/pass1 utilisées par ClaimFirst).
@@ -258,6 +258,7 @@ def create_app() -> FastAPI:
     app.include_router(relations_explorer.router, prefix="/api")  # 🔗 Relations Explorer V3.3 - Mini-runtime LOGICAL_RELATION (S3.E)
     # Runtime V1.1 supprimé 30/04/2026 (P1) — voir runtime_v2 ci-dessous
     app.include_router(runtime_v2.router, prefix="/api")  # 🌟 Runtime V2 — Pipeline anchor-driven (Vision recentrée 30/04/2026)
+    app.include_router(runtime_v3.router, prefix="/api")  # 🌟 Runtime V3 — Refonte minimaliste 5 stages (CH-39, 2026-05-05)
 
     # 🖥️ OSMOSE GPU Infrastructure - Health check & restart services EC2
     app.include_router(gpu.router)  # Endpoints: /api/gpu/health, /api/gpu/restart-service
