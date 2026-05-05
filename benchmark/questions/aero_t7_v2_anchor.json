@@ -1,0 +1,666 @@
+[
+  {
+    "id": "T7_AERO_0001",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_supersedes",
+    "question": "Quel règlement a remplacé le règlement (CE) n° 428/2009 du Conseil ?",
+    "ground_truth": {
+      "expected_anchor": "dualuse_reg_2021_821_original_65eef5dc",
+      "expected_lifecycle_kind": "SUPERSEDES",
+      "expected_lifecycle_source": "dualuse_reg_2021_821_original_65eef5dc",
+      "expected_lifecycle_target": "dualuse_reg_428_2009_original_372b7ac3",
+      "correct_fact": "Le règlement (UE) 2021/821 a remplacé le règlement (CE) 428/2009.",
+      "evidence_quote": "Regulation (EC) No 428/2009 is repealed."
+    },
+    "grading_rules": {"must_identify_replacement": "2021/821", "must_cite_repeal_clause": true, "must_mark_old_as_deprecated": true}
+  },
+  {
+    "id": "T7_AERO_0002",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_evolves_from",
+    "question": "Quels actes délégués modifient l'Annex I du règlement (UE) 2021/821 ?",
+    "ground_truth": {
+      "expected_anchor": "dualuse_reg_2021_821_original_65eef5dc",
+      "expected_lifecycle_kind": "EVOLVES_FROM",
+      "expected_lifecycle_sources": ["dualuse_del_2023_66_cdc2b691", "dualuse_del_2023_996_3616a044", "dualuse_del_2024_2547_cb08f84b"],
+      "correct_fact": "Trois actes délégués modifient l'Annex I : 2023/66, 2023/996, 2024/2547.",
+      "evidence_quote": "Annex I to Regulation (EU) 2021/821 is replaced by the text in the Annex to this Regulation."
+    },
+    "grading_rules": {"must_list_all_three_delegated": ["2023/66", "2023/996", "2024/2547"], "min_docs_cited": 3}
+  },
+  {
+    "id": "T7_AERO_0003",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_filtering_active",
+    "question": "Quelle est la version actuellement en vigueur du règlement EU sur les exportations de produits à double usage ?",
+    "ground_truth": {
+      "expected_anchor": "dualuse_reg_2021_821_original_65eef5dc",
+      "expected_lifecycle_status": "ACTIVE",
+      "must_exclude_lifecycle_status": ["DEPRECATED"],
+      "correct_fact": "Le règlement (UE) 2021/821 est ACTIVE. Le 428/2009 est DEPRECATED.",
+      "evidence_doc": "dualuse_reg_2021_821_original_65eef5dc"
+    },
+    "grading_rules": {"must_cite_2021_821_as_active": true, "must_not_cite_428_2009_as_applicable": true}
+  },
+  {
+    "id": "T7_AERO_0004",
+    "task": "T7_v2_anchor",
+    "category": "anchor_applicability_temporal",
+    "question": "Quelles règles CS-25 sont applicables à la certification d'un large aeroplane dont le dossier a été ouvert en mars 2024 ?",
+    "ground_truth": {
+      "expected_anchor": "cs25_amdt_28_32f1a9ac",
+      "expected_lifecycle_status": "ACTIVE",
+      "applicability_rule": "publication_date <= 2024-03 AND lifecycle_status = ACTIVE",
+      "correct_fact": "CS-25 Amendment 28 (publié 2023-12-15, ED Decision 2023/021/R) est l'amendment applicable à mars 2024.",
+      "evidence_quote": "Annex to ED Decision 2023/021/R"
+    },
+    "grading_rules": {"must_identify_amendment_28": true, "must_handle_temporal_anchor": true}
+  },
+  {
+    "id": "T7_AERO_0005",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_vs_conflict",
+    "question": "L'écart entre l'énergie d'impact prescrite par CS-25 Amendment 26 (3.5 J) et CS-25 Amendment 28 (21 J) constitue-t-il une vraie contradiction réglementaire ?",
+    "ground_truth": {
+      "expected_anchor": "cs25_amdt_28_32f1a9ac",
+      "expected_resolution": "lifecycle_evolution_not_conflict",
+      "must_distinguish_lifecycle_from_conflict": true,
+      "correct_fact": "Non, c'est une évolution réglementaire (LIFECYCLE) : amdt 28 (2023) durcit l'exigence vs amdt 26 (2020). Pour une certification post-2023, c'est 21 J qui s'applique.",
+      "evidence_docs": ["cs25_amdt_26_6450b31e", "cs25_amdt_28_32f1a9ac"]
+    },
+    "grading_rules": {"must_explicitly_state_not_conflict": true, "must_explain_lifecycle_evolution": true, "must_identify_current_value_as_21J": true}
+  },
+  {
+    "id": "T7_AERO_0006",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_supersedes",
+    "question": "Le règlement 428/2009 est-il toujours en vigueur ?",
+    "ground_truth": {
+      "expected_anchor": "dualuse_reg_2021_821_original_65eef5dc",
+      "expected_lifecycle_status_of_target": "DEPRECATED",
+      "expected_lifecycle_kind": "SUPERSEDES",
+      "correct_fact": "Non. Le règlement (CE) 428/2009 a été abrogé (repealed) par le règlement (UE) 2021/821 et est marqué DEPRECATED dans le KG. Le régime applicable depuis 2021 est 2021/821.",
+      "evidence_quote": "Regulation (EC) No 428/2009 is repealed."
+    },
+    "grading_rules": {"must_state_repealed": true, "must_identify_replacement": "2021/821"}
+  },
+  {
+    "id": "T7_AERO_0007",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_evolves_from",
+    "question": "Quel est le règlement délégué le plus récent qui modifie l'Annex I de la régulation 2021/821 ?",
+    "ground_truth": {
+      "expected_anchor": "dualuse_del_2024_2547_cb08f84b",
+      "expected_lifecycle_kind": "EVOLVES_FROM",
+      "expected_publication_date": "2024-09-05",
+      "correct_fact": "Le règlement délégué (UE) 2024/2547 du 5 septembre 2024 est le plus récent acte délégué modifiant l'Annex I.",
+      "evidence_doc": "dualuse_del_2024_2547_cb08f84b"
+    },
+    "grading_rules": {"must_identify_latest_delegated": "2024/2547", "must_cite_publication_date_2024": true}
+  },
+  {
+    "id": "T7_AERO_0008",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_evolves_from",
+    "question": "Combien d'actes délégués ont été adoptés pour mettre à jour l'Annex I depuis l'entrée en vigueur du règlement 2021/821 ?",
+    "ground_truth": {
+      "expected_anchor": "dualuse_reg_2021_821_original_65eef5dc",
+      "expected_lifecycle_count": 3,
+      "expected_lifecycle_sources": ["dualuse_del_2023_66_cdc2b691", "dualuse_del_2023_996_3616a044", "dualuse_del_2024_2547_cb08f84b"],
+      "correct_fact": "Trois actes délégués listés dans le KG modifient l'Annex I : 2023/66, 2023/996, 2024/2547.",
+      "evidence_quote": "Annex I to Regulation (EU) 2021/821 is replaced"
+    },
+    "grading_rules": {"must_count_three_delegated_acts": true, "min_docs_cited": 3}
+  },
+  {
+    "id": "T7_AERO_0009",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_filtering_active",
+    "question": "Si un exportateur EU souhaite connaître la liste actuelle des items dual-use soumis à autorisation, vers quel(s) document(s) doit-il se tourner aujourd'hui ?",
+    "ground_truth": {
+      "expected_anchor": "dualuse_del_2024_2547_cb08f84b",
+      "expected_secondary_anchor": "dualuse_reg_2021_821_original_65eef5dc",
+      "expected_lifecycle_status": "ACTIVE",
+      "correct_fact": "L'exportateur doit consulter le règlement (UE) 2021/821 (cadre + obligation d'autorisation) ET la dernière version de l'Annex I via le délégué 2024/2547 (le plus récent ACTIVE).",
+      "evidence_docs": ["dualuse_reg_2021_821_original_65eef5dc", "dualuse_del_2024_2547_cb08f84b"]
+    },
+    "grading_rules": {"must_cite_master_regulation": "2021/821", "must_cite_latest_active_delegated": "2024/2547", "must_not_cite_428_2009": true}
+  },
+  {
+    "id": "T7_AERO_0010",
+    "task": "T7_v2_anchor",
+    "category": "anchor_applicability_temporal",
+    "question": "Quelle version de CS-25 était applicable à un nouveau dossier de certification ouvert en septembre 2020 ?",
+    "ground_truth": {
+      "expected_anchor": "cs25_amdt_25_a41bdc85",
+      "expected_lifecycle_status": "ACTIVE",
+      "applicability_rule": "publication_date <= 2020-09",
+      "correct_fact": "CS-25 Amendment 25 (publié 2020-06-24) était l'amendment applicable en septembre 2020. L'Amendment 26 (2020-12-15) est postérieur.",
+      "evidence_doc": "cs25_amdt_25_a41bdc85"
+    },
+    "grading_rules": {"must_identify_amendment_25": true, "must_not_select_amendment_26_or_later": true}
+  },
+  {
+    "id": "T7_AERO_0011",
+    "task": "T7_v2_anchor",
+    "category": "anchor_applicability_temporal",
+    "question": "Quelle est la version la plus récente de CS-25 publiée par EASA dans le corpus ?",
+    "ground_truth": {
+      "expected_anchor": "cs25_amdt_28_32f1a9ac",
+      "expected_lifecycle_status": "ACTIVE",
+      "expected_publication_date": "2023-12-15",
+      "correct_fact": "CS-25 Amendment 28 (publié 2023-12-15, ED Decision 2023/021/R) est la version la plus récente.",
+      "evidence_quote": "ED Decision 2023/021/R"
+    },
+    "grading_rules": {"must_identify_amendment_28": true, "must_cite_ed_decision_2023_021": true}
+  },
+  {
+    "id": "T7_AERO_0012",
+    "task": "T7_v2_anchor",
+    "category": "anchor_applicability_temporal",
+    "question": "Quelle réglementation EU sur les exports dual-use s'appliquait à une transaction réalisée en mars 2020 ?",
+    "ground_truth": {
+      "expected_anchor": "dualuse_reg_428_2009_original_372b7ac3",
+      "expected_lifecycle_status_at_date": "ACTIVE_at_2020",
+      "applicability_rule": "publication_date <= 2020-03 AND not_yet_repealed",
+      "correct_fact": "En mars 2020, le règlement applicable était le règlement (CE) 428/2009 — le 2021/821 n'a été adopté qu'en juin 2021. Aujourd'hui, 428/2009 est marqué DEPRECATED.",
+      "evidence_doc": "dualuse_reg_428_2009_original_372b7ac3"
+    },
+    "grading_rules": {"must_identify_428_2009_as_applicable_at_2020": true, "must_acknowledge_subsequent_repeal": true, "should_handle_historical_anchor": true}
+  },
+  {
+    "id": "T7_AERO_0013",
+    "task": "T7_v2_anchor",
+    "category": "anchor_scope_hierarchy",
+    "question": "L'Annex I du règlement 2021/821 et l'Annex IV (transferts intra-Union) ont-ils le même périmètre de couverture des items ?",
+    "ground_truth": {
+      "expected_scope_relation": "OVERLAP",
+      "correct_fact": "Non. L'Annex I couvre les exports hors UE des items dual-use ; l'Annex IV couvre les transferts intra-Union d'une sous-catégorie sensible. Les deux peuvent contenir des items communs (cf. clause d'amendement coordonné).",
+      "evidence_quote": "where the amendment of Annex I concerns dual-use items which are also listed in Annex II or IV, those Annexes shall be amended accordingly."
+    },
+    "grading_rules": {"must_distinguish_two_annexes": true, "must_identify_overlap_zone": true}
+  },
+  {
+    "id": "T7_AERO_0014",
+    "task": "T7_v2_anchor",
+    "category": "anchor_scope_hierarchy",
+    "question": "Les exigences CS-25 couvrent-elles tous les types d'aéronefs ou seulement une sous-catégorie ?",
+    "ground_truth": {
+      "expected_scope_relation": "SUBSET_of_aircraft",
+      "correct_fact": "CS-25 ne couvre qu'une sous-catégorie : les Large Aeroplanes propulsés par turbines. D'autres CS (CS-23 pour avions plus petits, CS-29 pour grands hélicoptères, etc.) couvrent les autres types d'aéronefs.",
+      "evidence_quote": "These Certification Specifications are applicable to turbine powered Large Aeroplanes."
+    },
+    "grading_rules": {"must_identify_subset_scope": true, "must_mention_other_cs_for_other_aircraft": true}
+  },
+  {
+    "id": "T7_AERO_0015",
+    "task": "T7_v2_anchor",
+    "category": "anchor_scope_hierarchy",
+    "question": "Le périmètre d'application du règlement (UE) 2021/821 est-il identique à celui du règlement (UE) n° 952/2013 (Code des douanes de l'Union) ?",
+    "ground_truth": {
+      "expected_scope_relation": "DISJOINT_with_terminology_alignment",
+      "correct_fact": "Non. Le 2021/821 vise spécifiquement les items dual-use ; le 952/2013 vise l'ensemble des opérations douanières. Le 2021/821 demande seulement que la terminologie soit cohérente avec celle du 952/2013, pas que les périmètres se confondent.",
+      "evidence_quote": "consistent with the definitions set out in Regulation (EU) No 952/2013"
+    },
+    "grading_rules": {"must_distinguish_scope": true, "must_identify_terminology_alignment": true}
+  },
+  {
+    "id": "T7_AERO_0016",
+    "task": "T7_v2_anchor",
+    "category": "anchor_scope_hierarchy",
+    "question": "L'item 0B001 (plant for separation of uranium isotopes) est-il un cas particulier d'une catégorie plus large dans l'Annex I ?",
+    "ground_truth": {
+      "expected_scope_relation": "SUBSET_under_category_0",
+      "correct_fact": "Oui. 0B001 appartient à la catégorie 0 (Nuclear materials, facilities and equipment). 0B identifie spécifiquement les 'Test, Inspection and Production Equipment' nucléaires.",
+      "evidence_quote": "0B001 Plant for the separation of isotopes"
+    },
+    "grading_rules": {"must_identify_category_hierarchy": true}
+  },
+  {
+    "id": "T7_AERO_0017",
+    "task": "T7_v2_anchor",
+    "category": "anchor_scope_hierarchy",
+    "question": "Les définitions de 'global export authorisation' et de 'large project authorisation' du règlement 2021/821 décrivent-elles le même type d'autorisation ?",
+    "ground_truth": {
+      "expected_scope_relation": "RELATED_DISTINCT",
+      "correct_fact": "Non. Une 'global export authorisation' couvre une catégorie d'items et plusieurs end-users/pays tiers. Une 'large project authorisation' est plus restreinte : elle est délivrée pour un projet de grande envergure spécifique. La large project authorisation peut être individuelle OU globale dans sa nature.",
+      "evidence_doc": "dualuse_reg_2021_821_original_65eef5dc"
+    },
+    "grading_rules": {"must_distinguish_two_authorisations": true, "must_explain_project_specific_nature": true}
+  },
+  {
+    "id": "T7_AERO_0018",
+    "task": "T7_v2_anchor",
+    "category": "anchor_scope_hierarchy",
+    "question": "L'AMC 25.1322 et la CS 25.1322 ont-elles la même portée normative ?",
+    "ground_truth": {
+      "expected_scope_relation": "DISTINCT_NORMATIVE_LEVELS",
+      "correct_fact": "Non. La CS 25.1322 est une exigence normative (Certification Specification, opposable). L'AMC 25.1322 est un Acceptable Means of Compliance (méthode acceptable pour démontrer la conformité). L'AMC est non-prescriptive, la CS l'est.",
+      "evidence_doc": null
+    },
+    "grading_rules": {"must_distinguish_cs_vs_amc": true, "must_identify_normative_vs_compliance_means": true}
+  },
+  {
+    "id": "T7_AERO_0019",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_filtering_active",
+    "question": "Pour répondre à 'Quelles règles s'appliquent aux exports dual-use depuis l'UE ?', faut-il citer le règlement 428/2009 ?",
+    "ground_truth": {
+      "expected_lifecycle_filter": "ACTIVE_only",
+      "must_exclude_doc_id": "dualuse_reg_428_2009_original_372b7ac3",
+      "correct_fact": "Non. Le règlement 428/2009 est DEPRECATED. La réponse correcte cite uniquement les sources ACTIVE : 2021/821 + actes délégués 2023/66, 2023/996, 2024/2547.",
+      "evidence_quote": "Regulation (EC) No 428/2009 is repealed."
+    },
+    "grading_rules": {"must_filter_out_deprecated": true, "should_cite_only_active_sources": true}
+  },
+  {
+    "id": "T7_AERO_0020",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_filtering_active",
+    "question": "Combien de versions ACTIVE du règlement EU sur les exports dual-use existent dans le corpus ?",
+    "ground_truth": {
+      "expected_count_active_master": 1,
+      "expected_count_active_delegated": 3,
+      "expected_count_active_total": 4,
+      "correct_fact": "Une seule version master ACTIVE (2021/821) + trois actes délégués ACTIVE (2023/66, 2023/996, 2024/2547). Le 428/2009 est DEPRECATED.",
+      "evidence_doc_filter": "lifecycle_status = ACTIVE"
+    },
+    "grading_rules": {"must_count_correctly": true, "must_distinguish_master_from_delegated": true}
+  },
+  {
+    "id": "T7_AERO_0021",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_filtering_active",
+    "question": "Si je cherche 'la version actuellement applicable de la liste dual-use', dois-je consulter l'Annex I du règlement 2021/821 originel ?",
+    "ground_truth": {
+      "expected_lifecycle_filter": "ACTIVE_and_latest_evolution",
+      "must_prefer_doc_id": "dualuse_del_2024_2547_cb08f84b",
+      "correct_fact": "Non. L'Annex I du règlement 2021/821 originel a été remplacée par les actes délégués successifs. La version applicable est celle du dernier délégué (2024/2547).",
+      "evidence_quote": "Annex I to Regulation (EU) 2021/821 is replaced"
+    },
+    "grading_rules": {"must_redirect_to_latest_delegated": true}
+  },
+  {
+    "id": "T7_AERO_0022",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_filtering_active",
+    "question": "Le KG comporte-t-il un risque de citer du contenu obsolète si la requête concerne une question 'compliance officer applicabilité actuelle' ?",
+    "ground_truth": {
+      "expected_behavior": "filter_by_lifecycle_active",
+      "must_apply_filter": "lifecycle_status = ACTIVE",
+      "correct_fact": "Oui, sans filtre LIFECYCLE le KG remonterait des claims du 428/2009 (DEPRECATED) ou d'amendments CS-25 antérieurs. Le runtime V2 doit appliquer un filtre lifecycle_status = ACTIVE pour les questions d'applicabilité courante.",
+      "evidence_doc": null
+    },
+    "grading_rules": {"must_identify_filtering_need": true, "must_explain_runtime_v2_behavior": true}
+  },
+  {
+    "id": "T7_AERO_0023",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_vs_conflict",
+    "question": "Comment OSMOSIS V2 distingue-t-il une vraie contradiction (CONFLICT) d'une simple évolution réglementaire (LIFECYCLE) ?",
+    "ground_truth": {
+      "expected_distinction": "CONFLICT_vs_LIFECYCLE",
+      "correct_fact": "OSMOSIS V2 distingue : (1) si les 2 claims contradictoires viennent de docs reliés par une LIFECYCLE_RELATION (SUPERSEDES/EVOLVES_FROM) → ce n'est pas une vraie contradiction, c'est une évolution. (2) Si les 2 docs sont indépendants (mêmes lifecycle_status) → c'est un vrai CONFLICT à signaler.",
+      "evidence_doc": null
+    },
+    "grading_rules": {"must_explain_lifecycle_path": true, "must_explain_independent_docs_conflict": true}
+  },
+  {
+    "id": "T7_AERO_0024",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_vs_conflict",
+    "question": "Si un compliance officer pose la question 'Y a-t-il une contradiction sur l'énergie d'impact des grands items en verre ?', que doit répondre OSMOSIS V2 ?",
+    "ground_truth": {
+      "expected_resolution": "lifecycle_evolution_not_conflict",
+      "expected_active_value": "21 J",
+      "expected_outdated_value": "3.5 J",
+      "correct_fact": "Pas de contradiction réelle : amdt 28 (2023, ACTIVE) prescrit 21 J ; amdt 26 (2020) prescrit 3.5 J. Pour une certif post-2023, c'est 21 J. La V2 doit signaler 'évolution réglementaire' et non 'contradiction'.",
+      "evidence_docs": ["cs25_amdt_28_32f1a9ac", "cs25_amdt_26_6450b31e"]
+    },
+    "grading_rules": {"must_state_not_contradiction": true, "must_identify_active_value_21J": true, "must_explain_evolution": true}
+  },
+  {
+    "id": "T7_AERO_0025",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_vs_conflict",
+    "question": "Existe-t-il une contradiction réelle (non résolue par lifecycle) entre les exigences CS-25 et celles du règlement 2021/821 ?",
+    "ground_truth": {
+      "expected_answer": "no_real_conflict_different_domains",
+      "correct_fact": "Non. CS-25 (certification technique de navigabilité, EASA) et 2021/821 (contrôle des exports, Commission) opèrent dans des domaines régulatoires distincts. Les deux peuvent s'appliquer en parallèle à un même produit sans se contredire.",
+      "evidence_docs": ["cs25_amdt_28_32f1a9ac", "dualuse_reg_2021_821_original_65eef5dc"]
+    },
+    "grading_rules": {"must_identify_distinct_regulatory_domains": true, "must_state_parallel_application": true}
+  },
+  {
+    "id": "T7_AERO_0026",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_vs_conflict",
+    "question": "Si on découvre que CS-25 Amendment 24 et CS-25 Amendment 23 énoncent presque le même claim sur le service history, est-ce une contradiction ou une réaffirmation ?",
+    "ground_truth": {
+      "expected_resolution": "reaffirmation_not_conflict",
+      "correct_fact": "C'est une réaffirmation (REAFFIRMS) : amdt 24 (2020-01) postérieur à amdt 23 (2019-07) répète quasi-verbatim la même règle, ce qui indique que la règle reste valide. Le KG signale ce cas comme un faux-positif CONFLICT à requalifier.",
+      "evidence_docs": ["cs25_amdt_23_0869bab2", "cs25_amdt_24_86b11545"]
+    },
+    "grading_rules": {"must_identify_reaffirmation": true, "must_not_label_as_real_conflict": true}
+  },
+  {
+    "id": "T7_AERO_0027",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_vs_conflict",
+    "question": "Si l'Annex I 2024/2547 et l'Annex I de 2021/821 (originel) listent des items différents, est-ce une contradiction ?",
+    "ground_truth": {
+      "expected_resolution": "lifecycle_replacement_not_conflict",
+      "correct_fact": "Non. C'est une évolution par remplacement : 2024/2547 remplace explicitement le texte de l'Annex I de 2021/821. C'est une LIFECYCLE EVOLVES_FROM, pas un CONFLICT.",
+      "evidence_quote": "Annex I to Regulation (EU) 2021/821 is replaced"
+    },
+    "grading_rules": {"must_state_replacement": true, "must_not_label_as_conflict": true}
+  },
+  {
+    "id": "T7_AERO_0028",
+    "task": "T7_v2_anchor",
+    "category": "anchor_applicability_temporal",
+    "question": "Pour une certification CS-25 ouverte en juillet 2018, quel amendment était applicable au démarrage du dossier ?",
+    "ground_truth": {
+      "expected_anchor": "cs25_amdt_22_8e69026c",
+      "applicability_rule": "publication_date <= 2018-07",
+      "correct_fact": "CS-25 Amendment 22 a été publié 2018-11-05, donc en juillet 2018 c'était l'Amendment 21 (hors corpus) ou antérieur qui s'appliquait. L'Amendment 22 n'est devenu applicable qu'à partir de novembre 2018.",
+      "evidence_doc": "cs25_amdt_22_8e69026c"
+    },
+    "grading_rules": {"must_handle_temporal_anchor_with_pre_corpus": true, "must_note_amendment_22_post_july_2018": true}
+  },
+  {
+    "id": "T7_AERO_0029",
+    "task": "T7_v2_anchor",
+    "category": "anchor_applicability_temporal",
+    "question": "Pour une certification CS-25 ouverte le 1er janvier 2024, quel amendment est applicable ?",
+    "ground_truth": {
+      "expected_anchor": "cs25_amdt_28_32f1a9ac",
+      "expected_publication_date_max": "2023-12-15",
+      "correct_fact": "CS-25 Amendment 28 (publié 2023-12-15) est applicable au 1er janvier 2024.",
+      "evidence_doc": "cs25_amdt_28_32f1a9ac"
+    },
+    "grading_rules": {"must_identify_amendment_28": true}
+  },
+  {
+    "id": "T7_AERO_0030",
+    "task": "T7_v2_anchor",
+    "category": "anchor_applicability_temporal",
+    "question": "L'acte délégué 2023/66 est-il applicable à un export réalisé le 15 octobre 2022 ?",
+    "ground_truth": {
+      "expected_answer": "not_applicable_pre_publication",
+      "expected_publication_date": "2022-10-21",
+      "correct_fact": "Non. Le délégué 2023/66 a été publié le 21 octobre 2022. Un export du 15 octobre 2022 est antérieur à sa publication, donc le délégué 2023/66 n'est pas applicable. C'est l'Annex I originel du 2021/821 qui s'appliquait à cette date.",
+      "evidence_doc": "dualuse_del_2023_66_cdc2b691"
+    },
+    "grading_rules": {"must_handle_pre_publication_logic": true, "must_redirect_to_original_annex_I": true}
+  },
+  {
+    "id": "T7_AERO_0031",
+    "task": "T7_v2_anchor",
+    "category": "anchor_applicability_temporal",
+    "question": "Quels documents listés dans le corpus étaient ACTIVE au 1er juin 2023 ?",
+    "ground_truth": {
+      "expected_active_at_date": [
+        "cs25_amdt_22_8e69026c",
+        "cs25_amdt_23_0869bab2",
+        "cs25_amdt_24_86b11545",
+        "cs25_amdt_25_a41bdc85",
+        "cs25_amdt_26_6450b31e",
+        "cs25_amdt_27_992260a7",
+        "cs25_change_amdt_23_2e2b5e95",
+        "cs25_change_amdt_24_cdd7474b",
+        "cs25_change_amdt_26_28f2c375",
+        "dualuse_reg_2021_821_original_65eef5dc",
+        "dualuse_del_2023_66_cdc2b691",
+        "dualuse_del_2023_996_3616a044"
+      ],
+      "expected_not_active_at_date": [
+        "cs25_amdt_28_32f1a9ac",
+        "cs25_change_amdt_28_69cf602f",
+        "dualuse_del_2024_2025_908a03cf",
+        "dualuse_del_2024_2547_cb08f84b",
+        "dualuse_reg_428_2009_original_372b7ac3"
+      ],
+      "correct_fact": "Au 1er juin 2023 : tous les amdt CS-25 jusqu'à 27 (publié 2021-11-24) sont ACTIVE ; amdt 28 (2023-12-15) pas encore publié. Pour dual-use : 2021/821 + del 2023/66 + del 2023/996 (tous publiés avant juin 2023). 428/2009 déjà DEPRECATED. del 2024/2547 et del 2024/2025 pas encore publiés.",
+      "evidence_doc": null
+    },
+    "grading_rules": {"must_apply_temporal_filter": true, "must_exclude_pre_2023_06_published": true}
+  },
+  {
+    "id": "T7_AERO_0032",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_supersedes",
+    "question": "Existe-t-il une chaîne complète de SUPERSEDES dans le corpus aerospace ?",
+    "ground_truth": {
+      "expected_chain": ["dualuse_reg_2021_821_original_65eef5dc", "dualuse_reg_428_2009_original_372b7ac3"],
+      "expected_chain_length": 1,
+      "correct_fact": "Une seule chaîne SUPERSEDES dans le KG : 2021/821 → 428/2009 (repealed). Pas de chaîne plus longue (428/2009 n'a pas de prédécesseur dans le corpus).",
+      "evidence_quote": "Regulation (EC) No 428/2009 is repealed."
+    },
+    "grading_rules": {"must_identify_unique_supersedes_chain": true, "must_state_chain_length": 1}
+  },
+  {
+    "id": "T7_AERO_0033",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_evolves_from",
+    "question": "Y a-t-il un acte délégué dual-use du corpus qui ne semble pas modifier l'Annex I de 2021/821 ?",
+    "ground_truth": {
+      "expected_anomaly_doc": "dualuse_del_2024_2025_908a03cf",
+      "expected_lifecycle_kind_missing": "EVOLVES_FROM",
+      "correct_fact": "Le règlement délégué 2024/2025 n'a pas de LIFECYCLE_RELATION détectée. Son titre dans le KG ('Electronic Freight Transport Information') suggère qu'il pourrait ne pas concerner l'Annex I dual-use, ou qu'une LIFECYCLE_RELATION est manquante.",
+      "evidence_doc": "dualuse_del_2024_2025_908a03cf"
+    },
+    "grading_rules": {"must_identify_anomaly": true, "should_flag_for_review": true}
+  },
+  {
+    "id": "T7_AERO_0034",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_supersedes",
+    "question": "Le règlement (UE) 2021/821 abroge-t-il en totalité ou partiellement le règlement 428/2009 ?",
+    "ground_truth": {
+      "expected_supersession_type": "total_repeal",
+      "correct_fact": "Le règlement 2021/821 abroge totalement le 428/2009 ('Regulation (EC) No 428/2009 is repealed.'). Cependant, les références au 428/2009 dans d'autres textes EU sont à interpréter comme renvoyant au 2021/821, selon la pratique habituelle de continuité juridique.",
+      "evidence_quote": "Regulation (EC) No 428/2009 is repealed."
+    },
+    "grading_rules": {"must_state_total_repeal": true, "should_mention_continuity": true}
+  },
+  {
+    "id": "T7_AERO_0035",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_filtering_active",
+    "question": "Quel est l'état lifecycle du règlement 428/2009 dans le KG ?",
+    "ground_truth": {
+      "expected_lifecycle_status": "DEPRECATED",
+      "correct_fact": "Le règlement 428/2009 est marqué DEPRECATED dans le KG (suite au backfill CH-02.1 et à la détection LIFECYCLE_RELATION).",
+      "evidence_doc": "dualuse_reg_428_2009_original_372b7ac3"
+    },
+    "grading_rules": {"must_state_deprecated": true}
+  },
+  {
+    "id": "T7_AERO_0036",
+    "task": "T7_v2_anchor",
+    "category": "anchor_applicability_temporal",
+    "question": "Si je certifie un large aeroplane et que mon dossier a été ouvert en mai 2019, sur quelle base CS-25 puis-je m'appuyer ?",
+    "ground_truth": {
+      "expected_anchor": "cs25_amdt_22_8e69026c",
+      "applicability_rule": "publication_date <= 2019-05",
+      "correct_fact": "En mai 2019, l'Amendment 22 (publié 2018-11-05) est l'amendment le plus récent applicable. L'Amendment 23 a été publié 2019-07-15.",
+      "evidence_doc": "cs25_amdt_22_8e69026c"
+    },
+    "grading_rules": {"must_identify_amendment_22": true, "must_not_select_amendment_23": true}
+  },
+  {
+    "id": "T7_AERO_0037",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_evolves_from",
+    "question": "Existe-t-il une LIFECYCLE_RELATION entre deux amendments CS-25 successifs (par exemple amdt 27 → amdt 28) ?",
+    "ground_truth": {
+      "expected_lifecycle_kind_missing_for_cs25": true,
+      "correct_fact": "Non, le KG ne contient pas de LIFECYCLE_RELATION explicite entre les amdt CS-25 successifs (la stratégie V2 = persister une LIFECYCLE_RELATION uniquement sur déclaration textuelle explicite). Les évolutions CS-25 sont implicites via les change tables, mais pas formalisées en LIFECYCLE_RELATION.",
+      "evidence_doc": null
+    },
+    "grading_rules": {"must_state_no_lifecycle_relation_cs25": true, "must_explain_v2_strict_policy": true}
+  },
+  {
+    "id": "T7_AERO_0038",
+    "task": "T7_v2_anchor",
+    "category": "anchor_scope_hierarchy",
+    "question": "L'Annex II du règlement 2021/821 (autorisations générales d'export de l'Union) a-t-elle un périmètre plus large ou plus restreint que l'Annex I ?",
+    "ground_truth": {
+      "expected_scope_relation": "subset_of_annex_I_with_destinations",
+      "correct_fact": "L'Annex II établit des autorisations générales pour CERTAINS items de l'Annex I exportés vers CERTAINS pays tiers. C'est un sous-ensemble simplifié et facilité (pas une autorisation individuelle requise), avec des exclusions possibles via Section I de l'Annex II.",
+      "evidence_quote": "exclude from their scope items listed in Section I of Annex II"
+    },
+    "grading_rules": {"must_identify_subset": true, "must_explain_simplification": true}
+  },
+  {
+    "id": "T7_AERO_0039",
+    "task": "T7_v2_anchor",
+    "category": "anchor_scope_hierarchy",
+    "question": "Les exigences de sécurité CS-25 (Subpart D — Design and Construction) couvrent-elles toutes les sous-sections relatives aux portes, aux issues d'évacuation et aux sièges ?",
+    "ground_truth": {
+      "expected_scope_relation": "SUPERSET_for_subpart_D",
+      "correct_fact": "Oui, le Subpart D de CS-25 couvre la conception et la construction, y compris CS 25.785 (sièges), CS 25.787 (rangements), CS 25.788, et autres exigences relatives aux occupants. Ces exigences ont été enrichies par NPA 2013-11 et NPA 2015-19.",
+      "evidence_quote": "Subpart D"
+    },
+    "grading_rules": {"must_identify_superset": true, "must_cite_subsection_examples": true}
+  },
+  {
+    "id": "T7_AERO_0040",
+    "task": "T7_v2_anchor",
+    "category": "anchor_applicability_temporal",
+    "question": "Une transaction d'export d'item dual-use réalisée en juillet 2024 doit-elle se conformer au délégué 2024/2547 ?",
+    "ground_truth": {
+      "expected_answer": "no_pre_publication",
+      "expected_publication_date_2024_2547": "2024-09-05",
+      "correct_fact": "Non. Le délégué 2024/2547 a été publié le 5 septembre 2024. Une transaction de juillet 2024 est antérieure et doit se conformer à la version de l'Annex I valide à cette date (le délégué 2023/996 du 23 février 2023, à moins qu'un délégué intermédiaire existe).",
+      "evidence_doc": "dualuse_del_2024_2547_cb08f84b"
+    },
+    "grading_rules": {"must_apply_publication_date_filter": true}
+  },
+  {
+    "id": "T7_AERO_0041",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_filtering_active",
+    "question": "Si un système V1 (sans gestion lifecycle) répondait 'Le règlement 428/2009 prévoit X', quel serait le risque pour un compliance officer ?",
+    "ground_truth": {
+      "expected_risk_type": "outdated_compliance_advice",
+      "correct_fact": "Le compliance officer recevrait un conseil basé sur une régulation abrogée (DEPRECATED). Risque concret : non-conformité, sanctions, ou simple obsolescence. C'est précisément le type d'erreur que la couche LIFECYCLE V2 d'OSMOSIS prévient.",
+      "evidence_doc": null
+    },
+    "grading_rules": {"must_explain_compliance_risk": true, "must_link_to_v2_lifecycle_value": true}
+  },
+  {
+    "id": "T7_AERO_0042",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_vs_conflict",
+    "question": "Si le KG signale un CONFLICT entre amdt 27 et change_amdt 24 (CS 25.1309(c)), faut-il alerter le compliance officer comme contradiction réelle ?",
+    "ground_truth": {
+      "expected_resolution": "complementary_text_not_conflict",
+      "correct_fact": "Non. Les deux textes décrivent CS 25.1309(c) sous des angles complémentaires (alerting général + warning indication immediate). C'est une nuance, pas un conflit. Le classifier 12-types V2 a en effet flaggé ce cas comme CONFLICT borderline (à requalifier en NUANCE).",
+      "evidence_docs": ["cs25_amdt_27_992260a7", "cs25_change_amdt_24_cdd7474b"]
+    },
+    "grading_rules": {"must_state_not_real_conflict": true, "must_explain_complementary_angles": true}
+  },
+  {
+    "id": "T7_AERO_0043",
+    "task": "T7_v2_anchor",
+    "category": "anchor_applicability_temporal",
+    "question": "Si je veux savoir 'quelle était la valeur de l'énergie d'impact pour les grands items en verre en 2021 ?', quelle réponse fournir ?",
+    "ground_truth": {
+      "expected_anchor": "cs25_amdt_26_6450b31e",
+      "expected_value": "3.5 J",
+      "applicability_rule": "publication_date <= 2021",
+      "correct_fact": "En 2021, c'est l'Amendment 26 (publié 2020-12-15) qui s'appliquait, avec la valeur de 3.5 J. La valeur de 21 J n'a été introduite qu'avec l'Amendment 28 (publié 2023-12-15).",
+      "evidence_doc": "cs25_amdt_26_6450b31e"
+    },
+    "grading_rules": {"must_handle_historical_query": true, "must_identify_3_5J_for_2021": true, "must_distinguish_from_current_21J": true}
+  },
+  {
+    "id": "T7_AERO_0044",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_evolves_from",
+    "question": "L'EVOLVES_FROM du délégué 2023/66 vers 2021/821 implique-t-il que 2021/821 est DEPRECATED ?",
+    "ground_truth": {
+      "expected_lifecycle_status_master": "ACTIVE",
+      "correct_fact": "Non. EVOLVES_FROM signifie que 2023/66 modifie partiellement 2021/821 (remplace l'Annex I), sans abroger le master. Le règlement 2021/821 reste ACTIVE (cadre + mécanisme d'autorisation) ; seul son Annex I a été remplacé.",
+      "evidence_quote": "Annex I to Regulation (EU) 2021/821 is replaced"
+    },
+    "grading_rules": {"must_distinguish_evolves_from_supersedes": true, "must_keep_master_active": true}
+  },
+  {
+    "id": "T7_AERO_0045",
+    "task": "T7_v2_anchor",
+    "category": "anchor_scope_hierarchy",
+    "question": "L'item 1A006 (équipements de neutralisation IED) appartient-il à une catégorie plus large dans la liste dual-use ?",
+    "ground_truth": {
+      "expected_scope_relation": "SUBSET_under_category_1A",
+      "correct_fact": "Oui. 1A006 appartient à la catégorie 1A (Special Materials and Related Equipment — éléments) du Annex I. Plus largement à la catégorie 1 (Materials, Chemicals, Microorganisms and Toxins).",
+      "evidence_quote": "1A006 Equipment, specially designed or modified for the disposal of Improvised Explosive Devices (IEDs)"
+    },
+    "grading_rules": {"must_identify_category_hierarchy": true}
+  },
+  {
+    "id": "T7_AERO_0046",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_supersedes",
+    "question": "Combien de SUPERSEDES sont matérialisées dans le KG aerospace ?",
+    "ground_truth": {
+      "expected_count_supersedes": 1,
+      "expected_pair": ["dualuse_reg_2021_821_original_65eef5dc", "dualuse_reg_428_2009_original_372b7ac3"],
+      "correct_fact": "Une seule SUPERSEDES : 2021/821 → 428/2009. Aucune SUPERSEDES entre amdt CS-25 (la politique stricte V2 exige une déclaration textuelle explicite, et les amdt CS-25 ne 'supersedent' pas formellement leurs prédécesseurs).",
+      "evidence_doc": "dualuse_reg_2021_821_original_65eef5dc"
+    },
+    "grading_rules": {"must_state_count_one": true, "must_explain_v2_strict_policy_for_cs25": true}
+  },
+  {
+    "id": "T7_AERO_0047",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_evolves_from",
+    "question": "Est-ce que les CS-25 change_amdt sont en LIFECYCLE_RELATION avec les amdt principaux ?",
+    "ground_truth": {
+      "expected_lifecycle_kind_missing": true,
+      "correct_fact": "Non. Le KG ne contient pas de LIFECYCLE_RELATION explicite entre change_amdt et amdt. Les change_amdt sont des documents complémentaires (NPAs / explanatory notes accompagnant un amdt) sans déclaration textuelle de remplacement formel. La V2 V2-S1 ne les rattache pas en LIFECYCLE_RELATION.",
+      "evidence_doc": null
+    },
+    "grading_rules": {"must_state_no_lifecycle_relation": true, "must_explain_complementary_nature": true}
+  },
+  {
+    "id": "T7_AERO_0048",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_filtering_active",
+    "question": "Si on filtre par lifecycle_status = ACTIVE, combien de docs reste-t-il dans le corpus ?",
+    "ground_truth": {
+      "expected_count_active": 16,
+      "expected_excluded_doc": "dualuse_reg_428_2009_original_372b7ac3",
+      "correct_fact": "16/17 docs sont ACTIVE. Seul le 428/2009 est DEPRECATED.",
+      "evidence_doc": null
+    },
+    "grading_rules": {"must_count_active": 16, "must_identify_only_deprecated": "428/2009"}
+  },
+  {
+    "id": "T7_AERO_0049",
+    "task": "T7_v2_anchor",
+    "category": "anchor_applicability_temporal",
+    "question": "Si une question demande 'quelles règles dual-use s'appliquaient au 31 décembre 2020', quelle réponse complète OSMOSIS V2 doit-il donner ?",
+    "ground_truth": {
+      "expected_anchor": "dualuse_reg_428_2009_original_372b7ac3",
+      "expected_lifecycle_status_at_date": "ACTIVE_at_2020",
+      "correct_fact": "Au 31 décembre 2020, le règlement applicable était (CE) 428/2009 — le 2021/821 n'a été adopté qu'en juin 2021. La V2 doit citer 428/2009 comme source historique applicable, en signalant qu'il a depuis été abrogé (DEPRECATED aujourd'hui).",
+      "evidence_doc": "dualuse_reg_428_2009_original_372b7ac3"
+    },
+    "grading_rules": {"must_handle_historical_anchor": true, "must_cite_428_2009_for_2020": true, "must_acknowledge_subsequent_repeal": true}
+  },
+  {
+    "id": "T7_AERO_0050",
+    "task": "T7_v2_anchor",
+    "category": "lifecycle_vs_conflict",
+    "question": "Le bench V2 considère-t-il les CONFLICT ayant un derivation_path lifecycle comme des vrais conflits à reporter ?",
+    "ground_truth": {
+      "expected_classification": "lifecycle_resolution",
+      "correct_fact": "Non. Les CONFLICT dont le derivation_path indique une LIFECYCLE_RELATION ne doivent PAS être reportés comme contradictions. Le runtime V2 (réponse compliance) doit les présenter comme 'évolution réglementaire' et indiquer la valeur ACTIVE.",
+      "evidence_doc": null
+    },
+    "grading_rules": {"must_explain_lifecycle_resolution": true, "must_not_label_as_conflict": true}
+  }
+]

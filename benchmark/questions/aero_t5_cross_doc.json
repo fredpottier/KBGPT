@@ -1,0 +1,495 @@
+[
+  {
+    "id": "T5_AERO_0001",
+    "task": "T5_cross_doc",
+    "question": "Comment a évolué le régime communautaire de contrôle des exportations de produits à double usage entre 2009 et 2024 ? Cite les textes successifs.",
+    "ground_truth": {
+      "chain": [
+        {"text": "Council Regulation (EC) No 428/2009 setting up a Community regime.", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+        {"text": "Regulation (EU) 2021/821... Regulation (EC) No 428/2009 is repealed.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "Annex I to Regulation (EU) 2021/821 is replaced. (Delegated Regulation 2023/66)", "doc_id": "dualuse_del_2023_66_cdc2b691"},
+        {"text": "Annex I to Regulation (EU) 2021/821 is replaced. (Delegated Regulation 2023/996)", "doc_id": "dualuse_del_2023_996_3616a044"},
+        {"text": "Annex I to Regulation (EU) 2021/821 is replaced. (Delegated Regulation 2024/2547)", "doc_id": "dualuse_del_2024_2547_cb08f84b"}
+      ],
+      "expected_doc_ids": ["dualuse_reg_428_2009_original_372b7ac3", "dualuse_reg_2021_821_original_65eef5dc", "dualuse_del_2023_66_cdc2b691", "dualuse_del_2023_996_3616a044", "dualuse_del_2024_2547_cb08f84b"],
+      "min_docs_required": 3,
+      "reasoning": "Chronologie : 428/2009 → 2021/821 → délégués 2023-2024."
+    },
+    "grading_rules": {"must_mention_supersession_2021_over_2009": true, "must_mention_at_least_one_delegated": true, "min_docs_cited": 3},
+    "category": "evolution_chronological"
+  },
+  {
+    "id": "T5_AERO_0002",
+    "task": "T5_cross_doc",
+    "question": "Quels CS-25 amendments ont introduit ou modifié les exigences relatives à CS 25.795 (security) ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "CS 25.795 | Amended (NPA 2015-11) — Amendment 28", "doc_id": "cs25_amdt_28_32f1a9ac"},
+        {"text": "CS 25.795 référencé dans amdt 27 change tables.", "doc_id": "cs25_amdt_27_992260a7"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_28_32f1a9ac", "cs25_amdt_27_992260a7"],
+      "min_docs_required": 2,
+      "reasoning": "CS 25.795 amendé via NPA 2015-11."
+    },
+    "grading_rules": {"must_cite_npa_reference": "NPA 2015-11", "min_docs_cited": 2},
+    "category": "cs25_provision_evolution"
+  },
+  {
+    "id": "T5_AERO_0003",
+    "task": "T5_cross_doc",
+    "question": "Quel est l'état actuel des règles dual-use applicables à un exportateur EU en 2025, en tenant compte de toutes les modifications récentes de l'Annex I ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "Cadre = Regulation (EU) 2021/821.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "Annex I remplacé successivement par 2023/66, 2023/996, 2024/2547.", "doc_id": "dualuse_del_2024_2547_cb08f84b"},
+        {"text": "428/2009 abrogé (DEPRECATED).", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"}
+      ],
+      "expected_doc_ids": ["dualuse_reg_2021_821_original_65eef5dc", "dualuse_del_2024_2547_cb08f84b", "dualuse_del_2023_996_3616a044", "dualuse_del_2023_66_cdc2b691"],
+      "min_docs_required": 3,
+      "reasoning": "2021/821 + dernier délégué (2024/2547) + 428/2009 DEPRECATED."
+    },
+    "grading_rules": {"must_mention_active_regulation": "2021/821", "must_mention_latest_delegated": "2024/2547", "must_mark_428_2009_as_deprecated": true, "min_docs_cited": 2},
+    "category": "current_state_synthesis"
+  },
+  {
+    "id": "T5_AERO_0004",
+    "task": "T5_cross_doc",
+    "question": "Quelles sont les évolutions principales de CS-25 sur l'impact d'objets sur les grands items en verre entre l'Amendment 26 et l'Amendment 28 ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "amdt 26 : 3.5 J, 51mm ball.", "doc_id": "cs25_amdt_26_6450b31e"},
+        {"text": "amdt 28 : 21 J, 51mm or 40mm ball.", "doc_id": "cs25_amdt_28_32f1a9ac"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_26_6450b31e", "cs25_amdt_28_32f1a9ac"],
+      "min_docs_required": 2,
+      "reasoning": "3.5 J → 21 J + ajout option bille 40 mm."
+    },
+    "grading_rules": {"must_mention_both_values": ["3.5 J", "21 J"], "min_docs_cited": 2},
+    "category": "cs25_evolution_specific"
+  },
+  {
+    "id": "T5_AERO_0005",
+    "task": "T5_cross_doc",
+    "question": "Existe-t-il un chevauchement entre les obligations de CS-25 (certification d'aéronefs) et celles du règlement 2021/821 (dual-use) lorsqu'un constructeur européen exporte un large aeroplane vers un pays tiers ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "CS-25 = certification technique.", "doc_id": "cs25_amdt_28_32f1a9ac"},
+        {"text": "2021/821 = contrôle d'export Annex I.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_28_32f1a9ac", "dualuse_reg_2021_821_original_65eef5dc"],
+      "min_docs_required": 2,
+      "reasoning": "Les deux régimes coexistent en parallèle."
+    },
+    "grading_rules": {"must_distinguish_two_regimes": true, "must_not_present_as_conflict": true, "min_docs_cited": 2},
+    "category": "cross_domain_coexistence"
+  },
+  {
+    "id": "T5_AERO_0006",
+    "task": "T5_cross_doc",
+    "question": "Quels sont les changements introduits par l'Amendment 22 de CS-25 ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "ED Decision 2018/010/R = entrée en vigueur amdt 22.", "doc_id": "cs25_amdt_22_8e69026c"},
+        {"text": "Title of Appendix K amended (NPA 11/2004).", "doc_id": "cs25_amdt_22_8e69026c"},
+        {"text": "CS 25.21 amended (NPA 2008-05).", "doc_id": "cs25_amdt_22_8e69026c"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_22_8e69026c"],
+      "min_docs_required": 1,
+      "reasoning": "amdt 22 introduit divers changements via plusieurs NPAs."
+    },
+    "grading_rules": {"must_cite_ed_decision_2018_010": true, "min_docs_cited": 1},
+    "category": "amendment_changes"
+  },
+  {
+    "id": "T5_AERO_0007",
+    "task": "T5_cross_doc",
+    "question": "Comment l'Annex I dual-use a-t-elle été mise à jour entre fin 2022 et fin 2024 ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "2023/66 publié 2022-10-21 : remplacement Annex I.", "doc_id": "dualuse_del_2023_66_cdc2b691"},
+        {"text": "2023/996 publié 2023-02-23 : nouveau remplacement.", "doc_id": "dualuse_del_2023_996_3616a044"},
+        {"text": "2024/2547 publié 2024-09-05 : dernier remplacement.", "doc_id": "dualuse_del_2024_2547_cb08f84b"}
+      ],
+      "expected_doc_ids": ["dualuse_del_2023_66_cdc2b691", "dualuse_del_2023_996_3616a044", "dualuse_del_2024_2547_cb08f84b"],
+      "min_docs_required": 3,
+      "reasoning": "Trois actes délégués successifs ont remplacé l'Annex I."
+    },
+    "grading_rules": {"must_list_three_delegated": true, "min_docs_cited": 3},
+    "category": "annex_evolution"
+  },
+  {
+    "id": "T5_AERO_0008",
+    "task": "T5_cross_doc",
+    "question": "What is the regulatory chain from a 2009 dual-use export to today's compliance?",
+    "ground_truth": {
+      "chain": [
+        {"text": "Reg 428/2009 (initial, repealed).", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+        {"text": "Reg 2021/821 (current master).", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "Latest delegated 2024/2547 (Annex I update).", "doc_id": "dualuse_del_2024_2547_cb08f84b"}
+      ],
+      "expected_doc_ids": ["dualuse_reg_428_2009_original_372b7ac3", "dualuse_reg_2021_821_original_65eef5dc", "dualuse_del_2024_2547_cb08f84b"],
+      "min_docs_required": 3,
+      "reasoning": "Chain: 428/2009 → repealed → 2021/821 → Annex I delegated updates."
+    },
+    "grading_rules": {"must_cite_full_chain": true, "min_docs_cited": 3},
+    "category": "lifecycle_chain_full"
+  },
+  {
+    "id": "T5_AERO_0009",
+    "task": "T5_cross_doc",
+    "question": "Comment les exigences sur les conditions de fonctionnement non sûres (CS 25.1309) ont-elles été précisées entre l'amdt 27 et le change_amdt 24 ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "amdt 27 : exigence de base CS 25.1309(c) sur l'information de l'équipage.", "doc_id": "cs25_amdt_27_992260a7"},
+        {"text": "change_amdt 24 : ajout 'a warning indication must be provided if immediate corrective action is required'.", "doc_id": "cs25_change_amdt_24_cdd7474b"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_27_992260a7", "cs25_change_amdt_24_cdd7474b"],
+      "min_docs_required": 2,
+      "reasoning": "Précision incrémentale de la règle CS 25.1309(c) entre les versions."
+    },
+    "grading_rules": {"must_distinguish_base_vs_extension": true, "min_docs_cited": 2},
+    "category": "rule_refinement"
+  },
+  {
+    "id": "T5_AERO_0010",
+    "task": "T5_cross_doc",
+    "question": "Pour un large aeroplane certifié CS-25 et exporté hors UE, quels documents réglementaires un compliance officer doit-il consulter en 2025 ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "CS-25 amdt 28 (certification technique EASA).", "doc_id": "cs25_amdt_28_32f1a9ac"},
+        {"text": "Reg 2021/821 (master dual-use).", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "Délégué 2024/2547 (Annex I à jour).", "doc_id": "dualuse_del_2024_2547_cb08f84b"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_28_32f1a9ac", "dualuse_reg_2021_821_original_65eef5dc", "dualuse_del_2024_2547_cb08f84b"],
+      "min_docs_required": 3,
+      "reasoning": "Synthèse cross-domain : CS-25 (certif) + 2021/821 (export) + 2024/2547 (Annex I)."
+    },
+    "grading_rules": {"must_cite_cs25_and_dualuse": true, "must_cite_latest_versions": true, "min_docs_cited": 3},
+    "category": "compliance_officer_synthesis"
+  },
+  {
+    "id": "T5_AERO_0011",
+    "task": "T5_cross_doc",
+    "question": "Comment l'exemption pour les informations dans le domaine public a-t-elle évolué entre 428/2009 et 2021/821 ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "428/2009 : exemption public domain + basic scientific research + patent.", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+        {"text": "2021/821 : exemption identique, formulation légèrement précisée.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"}
+      ],
+      "expected_doc_ids": ["dualuse_reg_428_2009_original_372b7ac3", "dualuse_reg_2021_821_original_65eef5dc"],
+      "min_docs_required": 2,
+      "reasoning": "Continuité de l'exemption avec ajustements mineurs de formulation."
+    },
+    "grading_rules": {"must_explain_continuity": true, "min_docs_cited": 2},
+    "category": "exemption_evolution"
+  },
+  {
+    "id": "T5_AERO_0012",
+    "task": "T5_cross_doc",
+    "question": "Quels CS-25 paragraphes ont été créés ou amendés via NPA 2018-12 ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "CS 25.705 created (NPA 2018-12) — Amendment 28.", "doc_id": "cs25_amdt_28_32f1a9ac"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_28_32f1a9ac"],
+      "min_docs_required": 1,
+      "reasoning": "NPA 2018-12 a créé CS 25.705."
+    },
+    "grading_rules": {"must_cite_cs_25_705": true, "min_docs_cited": 1},
+    "category": "npa_traceability"
+  },
+  {
+    "id": "T5_AERO_0013",
+    "task": "T5_cross_doc",
+    "question": "Quels CS-25 paragraphes ont été supprimés au cours des amendments successifs ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "CS 25.729(f) deleted (NPA 2013-02) — Amendment 28 change tables.", "doc_id": "cs25_amdt_28_32f1a9ac"},
+        {"text": "CS 25.1522 deleted (NPA 10/2004) — référencé dans amdt 22.", "doc_id": "cs25_amdt_22_8e69026c"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_28_32f1a9ac", "cs25_amdt_22_8e69026c"],
+      "min_docs_required": 2,
+      "reasoning": "Plusieurs CS-25 paragraphes ont été supprimés via NPAs."
+    },
+    "grading_rules": {"must_cite_at_least_one_deletion": true, "min_docs_cited": 2},
+    "category": "deletion_traceability"
+  },
+  {
+    "id": "T5_AERO_0014",
+    "task": "T5_cross_doc",
+    "question": "Quelle est la chaîne d'autorisations et exemptions définie par 2021/821 pour un exportateur européen ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "2021/821 : autorisation requise pour items Annex I.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "2021/821 : exemption pour public domain, basic scientific research, patent applications.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "2021/821 : exclusions Section I de l'Annex II.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"}
+      ],
+      "expected_doc_ids": ["dualuse_reg_2021_821_original_65eef5dc"],
+      "min_docs_required": 1,
+      "reasoning": "Hiérarchie règle/exemption/exclusion dans 2021/821."
+    },
+    "grading_rules": {"must_explain_hierarchy": true, "min_docs_cited": 1},
+    "category": "rule_hierarchy"
+  },
+  {
+    "id": "T5_AERO_0015",
+    "task": "T5_cross_doc",
+    "question": "Comment les régimes internationaux (Wassenaar, MTCR, NSG) influencent-ils les Annex I successifs des règlements EU dual-use ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "428/2009 = transposition initiale des engagements internationaux.", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+        {"text": "2021/821 = continuation et harmonisation.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "Délégués 2023-2024 = mises à jour pour refléter Wassenaar/MTCR/NSG.", "doc_id": "dualuse_del_2024_2547_cb08f84b"}
+      ],
+      "expected_doc_ids": ["dualuse_reg_428_2009_original_372b7ac3", "dualuse_reg_2021_821_original_65eef5dc", "dualuse_del_2024_2547_cb08f84b"],
+      "min_docs_required": 2,
+      "reasoning": "Les Annex I dérivent des décisions des régimes internationaux."
+    },
+    "grading_rules": {"must_cite_international_regimes": true, "min_docs_cited": 2},
+    "category": "international_alignment"
+  },
+  {
+    "id": "T5_AERO_0016",
+    "task": "T5_cross_doc",
+    "question": "Quels documents doivent être consultés pour comprendre l'évolution complète des exigences sur le service history dans CS-25 ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "amdt 23 : règle de base sur service history pour CS 25.1309 hazard classification.", "doc_id": "cs25_amdt_23_0869bab2"},
+        {"text": "amdt 24 : réaffirmation quasi-verbatim.", "doc_id": "cs25_amdt_24_86b11545"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_23_0869bab2", "cs25_amdt_24_86b11545"],
+      "min_docs_required": 2,
+      "reasoning": "Service history apparaît dans 23 et est réaffirmé dans 24."
+    },
+    "grading_rules": {"must_explain_reaffirmation": true, "min_docs_cited": 2},
+    "category": "rule_continuity"
+  },
+  {
+    "id": "T5_AERO_0017",
+    "task": "T5_cross_doc",
+    "question": "Comment les change_amdt CS-25 documentent-ils les évolutions par rapport aux amdt principaux ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "change_amdt 23 = airplane safety regulations (NPAs).", "doc_id": "cs25_change_amdt_23_2e2b5e95"},
+        {"text": "change_amdt 24 = aeroelastic stability requirements.", "doc_id": "cs25_change_amdt_24_cdd7474b"},
+        {"text": "change_amdt 26 = amendment to CS-25.", "doc_id": "cs25_change_amdt_26_28f2c375"},
+        {"text": "change_amdt 28 = aviation safety regulations.", "doc_id": "cs25_change_amdt_28_69cf602f"}
+      ],
+      "expected_doc_ids": ["cs25_change_amdt_23_2e2b5e95", "cs25_change_amdt_24_cdd7474b", "cs25_change_amdt_26_28f2c375", "cs25_change_amdt_28_69cf602f"],
+      "min_docs_required": 2,
+      "reasoning": "Les change_amdt accompagnent les amdt en explicitant les changements."
+    },
+    "grading_rules": {"must_describe_complementary_role": true, "min_docs_cited": 2},
+    "category": "change_amdt_role"
+  },
+  {
+    "id": "T5_AERO_0018",
+    "task": "T5_cross_doc",
+    "question": "Quel est le parcours réglementaire pour exporter un 'communications channel controller' depuis l'UE vers un pays tiers en 2025 ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "Définition : Communications channel controller = interface physique pour flux numérique.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "Cadre : 2021/821 exige autorisation pour items Annex I.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "Annex I à jour via délégué 2024/2547.", "doc_id": "dualuse_del_2024_2547_cb08f84b"}
+      ],
+      "expected_doc_ids": ["dualuse_reg_2021_821_original_65eef5dc", "dualuse_del_2024_2547_cb08f84b"],
+      "min_docs_required": 2,
+      "reasoning": "Définition + cadre + Annex I à jour."
+    },
+    "grading_rules": {"must_synthesize_path": true, "min_docs_cited": 2},
+    "category": "compliance_path"
+  },
+  {
+    "id": "T5_AERO_0019",
+    "task": "T5_cross_doc",
+    "question": "What CS-25 amendments cover the introduction of CS 25.788 (occupant safety regulations)?",
+    "ground_truth": {
+      "chain": [
+        {"text": "CS 25.788 created (NPA 2015-19) — recorded in amdt 28 change tables.", "doc_id": "cs25_amdt_28_32f1a9ac"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_28_32f1a9ac"],
+      "min_docs_required": 1,
+      "reasoning": "CS 25.788 created via NPA 2015-19."
+    },
+    "grading_rules": {"must_cite_npa_2015_19": true, "min_docs_cited": 1},
+    "category": "rule_introduction"
+  },
+  {
+    "id": "T5_AERO_0020",
+    "task": "T5_cross_doc",
+    "question": "Quels documents doivent être consultés pour comprendre la chaîne d'autorisation pour un fournisseur d'assistance technique sur des items dual-use ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "428/2009 : règles initiales sur brokering (limitées).", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+        {"text": "2021/821 : extension aux fournisseurs d'assistance technique avec obligation de notification + autorisation.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"}
+      ],
+      "expected_doc_ids": ["dualuse_reg_428_2009_original_372b7ac3", "dualuse_reg_2021_821_original_65eef5dc"],
+      "min_docs_required": 2,
+      "reasoning": "Évolution du cadre : brokering 428/2009 → brokering + technical assistance 2021/821."
+    },
+    "grading_rules": {"must_identify_scope_extension": true, "min_docs_cited": 2},
+    "category": "scope_extension_chain"
+  },
+  {
+    "id": "T5_AERO_0021",
+    "task": "T5_cross_doc",
+    "question": "Quels CS-25 paragraphes liés à Subpart D (Design and Construction) ont été modifiés via NPA 2014-02 ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "CS 25.629(d), CS 25.671, CS 25.672 amended (NPA 2014-02) — Amendment 28.", "doc_id": "cs25_amdt_28_32f1a9ac"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_28_32f1a9ac"],
+      "min_docs_required": 1,
+      "reasoning": "NPA 2014-02 a modifié plusieurs paragraphes Subpart D."
+    },
+    "grading_rules": {"must_list_three_paragraphs": ["25.629(d)", "25.671", "25.672"], "min_docs_cited": 1},
+    "category": "npa_modifications"
+  },
+  {
+    "id": "T5_AERO_0022",
+    "task": "T5_cross_doc",
+    "question": "Comment les actes délégués 2023/66 et 2023/996 s'articulent-ils chronologiquement ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "2023/66 publié 2022-10-21.", "doc_id": "dualuse_del_2023_66_cdc2b691"},
+        {"text": "2023/996 publié 2023-02-23 (4 mois après 2023/66).", "doc_id": "dualuse_del_2023_996_3616a044"}
+      ],
+      "expected_doc_ids": ["dualuse_del_2023_66_cdc2b691", "dualuse_del_2023_996_3616a044"],
+      "min_docs_required": 2,
+      "reasoning": "2023/996 succède à 2023/66 4 mois plus tard."
+    },
+    "grading_rules": {"must_explain_succession": true, "min_docs_cited": 2},
+    "category": "delegated_succession"
+  },
+  {
+    "id": "T5_AERO_0023",
+    "task": "T5_cross_doc",
+    "question": "Quels sont les niveaux normatifs successifs (CS, AMC, AC) pour assurer la conformité avec CS 25.1309 ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "CS 25.1309 = exigence normative.", "doc_id": "cs25_amdt_27_992260a7"},
+        {"text": "AMC 25.1309 = méthode acceptable de conformité.", "doc_id": "cs25_amdt_27_992260a7"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_27_992260a7"],
+      "min_docs_required": 1,
+      "reasoning": "Hiérarchie normative CS-25 : CS (exigence) puis AMC (méthode)."
+    },
+    "grading_rules": {"must_distinguish_cs_amc": true, "min_docs_cited": 1},
+    "category": "normative_levels"
+  },
+  {
+    "id": "T5_AERO_0024",
+    "task": "T5_cross_doc",
+    "question": "Si un compliance officer doit auditer la conformité d'un export de 'Network access controller' réalisé en juin 2024, quels documents doit-il citer ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "Cadre 2021/821 (master).", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "Annex I version applicable en juin 2024 = délégué 2023/996 (le 2024/2547 publié seulement 2024-09-05).", "doc_id": "dualuse_del_2023_996_3616a044"}
+      ],
+      "expected_doc_ids": ["dualuse_reg_2021_821_original_65eef5dc", "dualuse_del_2023_996_3616a044"],
+      "min_docs_required": 2,
+      "reasoning": "Audit historique : 2024-06 → 2023/996 (le 2024/2547 pas encore publié)."
+    },
+    "grading_rules": {"must_apply_temporal_filter": true, "must_select_2023_996_for_june_2024": true, "min_docs_cited": 2},
+    "category": "audit_temporal_synthesis"
+  },
+  {
+    "id": "T5_AERO_0025",
+    "task": "T5_cross_doc",
+    "question": "Quelles sont les références EU externes (autres règlements EU) auxquelles renvoie le règlement 2021/821 ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "Reg 952/2013 (Code des douanes de l'Union) pour la terminologie.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "Reg 2016/679 (RGPD) pour les données personnelles.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "Reg 2018/1725 pour le traitement par les institutions EU.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"}
+      ],
+      "expected_doc_ids": ["dualuse_reg_2021_821_original_65eef5dc"],
+      "min_docs_required": 1,
+      "reasoning": "Chain de références externes : 952/2013, 2016/679, 2018/1725."
+    },
+    "grading_rules": {"must_cite_three_external_regs": true, "min_docs_cited": 1},
+    "category": "external_references"
+  },
+  {
+    "id": "T5_AERO_0026",
+    "task": "T5_cross_doc",
+    "question": "Comment les amdt CS-25 successifs traitent-ils les exigences d'AMC 25.1322 (alerting) ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "amdt 27 : référence à CS 25.1322 pour la conformité du flight crew alerting.", "doc_id": "cs25_amdt_27_992260a7"},
+        {"text": "amdt 28 : AMC 25.1322 amendé via NPA 2015-11 (change tables).", "doc_id": "cs25_amdt_28_32f1a9ac"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_27_992260a7", "cs25_amdt_28_32f1a9ac"],
+      "min_docs_required": 2,
+      "reasoning": "AMC 25.1322 référencé dans amdt 27 et amendé dans amdt 28."
+    },
+    "grading_rules": {"must_link_npa_2015_11": true, "min_docs_cited": 2},
+    "category": "rule_evolution_amc"
+  },
+  {
+    "id": "T5_AERO_0027",
+    "task": "T5_cross_doc",
+    "question": "Quelles différences observe-t-on entre la définition de 'global export authorisation' du règlement 428/2009 et celle du 2021/821 ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "428/2009 : 'global export authorisation' shall mean an authorisation granted...", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+        {"text": "2021/821 : 'global export authorisation' means an authorisation granted...", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"}
+      ],
+      "expected_doc_ids": ["dualuse_reg_428_2009_original_372b7ac3", "dualuse_reg_2021_821_original_65eef5dc"],
+      "min_docs_required": 2,
+      "reasoning": "Définitions quasi-identiques avec ajustements stylistiques."
+    },
+    "grading_rules": {"must_acknowledge_continuity": true, "min_docs_cited": 2},
+    "category": "definition_continuity"
+  },
+  {
+    "id": "T5_AERO_0028",
+    "task": "T5_cross_doc",
+    "question": "Quels documents doivent être consultés pour comprendre comment la liste d'items dual-use a évolué dans son contenu nucléaire (catégorie 0) ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "428/2009 Annex I catégorie 0 (Nuclear) : items 0B001 etc.", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+        {"text": "2021/821 Annex I originel : items 0B001 maintenus.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "Délégués 2023/2024 : mises à jour catégorie 0 selon NSG.", "doc_id": "dualuse_del_2024_2547_cb08f84b"}
+      ],
+      "expected_doc_ids": ["dualuse_reg_428_2009_original_372b7ac3", "dualuse_reg_2021_821_original_65eef5dc", "dualuse_del_2024_2547_cb08f84b"],
+      "min_docs_required": 2,
+      "reasoning": "Catégorie 0 évolue à travers la chaîne réglementaire."
+    },
+    "grading_rules": {"must_identify_category_continuity": true, "min_docs_cited": 2},
+    "category": "category_evolution_dualuse"
+  },
+  {
+    "id": "T5_AERO_0029",
+    "task": "T5_cross_doc",
+    "question": "Quelles obligations CS-25 + 2021/821 s'appliquent simultanément à un constructeur EU exportant un large aeroplane équipé de systèmes de cryptographie vers un pays tiers ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "CS-25 amdt 28 : certification du Large Aeroplane.", "doc_id": "cs25_amdt_28_32f1a9ac"},
+        {"text": "2021/821 : autorisation d'export pour items Annex I.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+        {"text": "Délégué 2024/2547 : items cryptographiques (Cryptographic activation, Network access controller) dans Annex I.", "doc_id": "dualuse_del_2024_2547_cb08f84b"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_28_32f1a9ac", "dualuse_reg_2021_821_original_65eef5dc", "dualuse_del_2024_2547_cb08f84b"],
+      "min_docs_required": 3,
+      "reasoning": "Cumul : certif technique + export control items cryptographiques."
+    },
+    "grading_rules": {"must_cumulate_obligations": true, "must_cite_three_docs": true, "min_docs_cited": 3},
+    "category": "cumulative_obligations"
+  },
+  {
+    "id": "T5_AERO_0030",
+    "task": "T5_cross_doc",
+    "question": "Si un audit retrospectif compare les exigences CS-25 sur les exigences d'impact en 2020 et en 2024, quels documents et valeurs faut-il citer ?",
+    "ground_truth": {
+      "chain": [
+        {"text": "2020 : CS-25 amdt 26 (publié 2020-12-15) — 3.5 J.", "doc_id": "cs25_amdt_26_6450b31e"},
+        {"text": "2024 : CS-25 amdt 28 (publié 2023-12-15) — 21 J.", "doc_id": "cs25_amdt_28_32f1a9ac"}
+      ],
+      "expected_doc_ids": ["cs25_amdt_26_6450b31e", "cs25_amdt_28_32f1a9ac"],
+      "min_docs_required": 2,
+      "reasoning": "Audit retrospectif : 3.5 J en 2020, 21 J en 2024 (durcissement)."
+    },
+    "grading_rules": {"must_cite_both_values_with_dates": true, "min_docs_cited": 2},
+    "category": "audit_retrospective"
+  }
+]
