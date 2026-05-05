@@ -1,0 +1,136 @@
+# CH-12 — Listes de mots/patterns linguistiques externalisées
+#
+# Migration depuis les hardcodes Python (TENSION_KEYWORDS, IGNORANCE_KEYWORDS, etc.).
+# Détection en substring match case-insensitive (cf. extract_keywords).
+#
+# Pour ajouter une langue : étendre la liste flat (les détecteurs ne discriminent
+# pas par langue, ils font juste du substring match).
+#
+# Pour customiser par tenant : ajouter une entrée sous tenant_overrides.
+
+tension_keywords:
+  - divergen
+  - contradict
+  - differ
+  - disagree
+  - however
+  - en revanche
+  - toutefois
+  - cependant
+  - attention
+  - contradiction
+  - while
+  - whereas
+  - points d'attention
+  - noter que
+  - incoheren
+  - tension
+  - deux version
+  - a change
+  - renomm
+  - version 2022
+  - version 2023
+  - discrepan
+  - deux document
+
+# Marqueurs d'abstention / "je ne sais pas" (utilisé dans robustness + primary_metrics)
+ignorance_keywords:
+  - pas d'information
+  - ne dispose pas
+  - pas mentionne
+  - non disponible
+  - aucune donnee
+  - aucune reference
+  - ne mentionne pas
+  - ne traite pas
+  - hors du scope
+  - pas de donnee
+  - je ne sais pas
+  - impossible de repondre
+  - aucune information
+  - pas trouve
+  - not found
+  - no information
+  - cannot answer
+  - documents ne contiennent pas
+  - corpus ne contient pas
+  - pas dans les documents
+  - pas dans le corpus
+
+# Marqueurs de correction de prémisse (false_premise detection)
+correction_keywords:
+  - en realite
+  - contrairement
+  - cependant
+  - neanmoins
+  - toutefois
+  - en fait
+  - il est important de noter
+  - attention
+  - incorrect
+  - inexact
+  - faux
+  - erreur
+  - la premisse
+  - actually
+  - however
+  - contrary
+  - not correct
+  - supporte
+  - supportent
+  - est disponible
+  - sont disponibles
+
+# Marqueurs temporels (mention de versions, dates, évolution)
+temporal_keywords:
+  - "2021"
+  - "2022"
+  - "2023"
+  - "2024"
+  - "2025"
+  - evolution
+  - evolue
+  - change
+  - modifie
+  - avant
+  - apres
+  - precedent
+  - nouveau
+  - ancienne
+  - nouvelle
+  - mise a jour
+  - version
+  - edition
+  - fps
+
+# Marqueurs de contradiction explicite (sous-ensemble de tension_keywords,
+# utilisé dans primary_metrics pour scorer T2 contradiction-aware)
+contradiction_keywords:
+  - contradiction
+  - contradictoire
+  - divergen
+  - tension
+  - different
+  - contraire
+  - oppose
+  - incoheren
+
+# Phrases "I don't know" (variant pour primary_metrics + rule_based_judge)
+idk_phrases:
+  - je ne dispose pas
+  - je n'ai pas
+  - pas d'information
+  - non documente
+  - pas dans les sources
+  - aucune information
+  - i don't have
+  - no information
+  - not documented
+  - information not available
+  - pas disponible
+  - not available in the sources
+  - je ne trouve pas
+
+# Override par tenant (vide par défaut — chaque clé override la liste de base)
+tenant_overrides:
+  default: {}

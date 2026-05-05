@@ -28,62 +28,33 @@ from knowbase.anchor.models import (
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """You are a question analyst extracting an "anchor" from a user's question. The anchor describes the temporal/scope frame within which the question expects to be answered, based on documents from a knowledge base.
+SYSTEM_PROMPT = """Extract a temporal/scope anchor from a user question. Domain-agnostic, multilingual.
 
-There are exactly three possible anchor types:
+Anchor types :
+- current_default : no explicit temporal/scope qualifier (user wants the current state)
+- point : ONE explicit frame (version, date, release, edition) — capture the identifier verbatim
+- range : SPAN of frames or evolution/history/comparison request
 
-## CURRENT_DEFAULT
-The question has NO explicit temporal or scope qualifier. The user expects the answer for the CURRENT/MOST RECENT applicable state.
-Examples (across languages and domains):
-- "What is the data encryption mode at rest of S/4HANA Cloud Private Edition?"
-- "Quel est le mode de chiffrement au repos de S/4HANA Cloud ?"
-- "What dosage is recommended for biomarker X?"
-- "Was ist die Standardkonfiguration für Modul Y?"
-
-## POINT
-The question explicitly targets ONE specific frame (one version, one date, one release, one document edition). Look for explicit identifiers like version numbers, release codes, dates, edition labels.
-Examples:
-- "Which APIs are available in S/4HANA 1809?"  → POINT, version=1809
-- "What did the standard say in 2018?"          → POINT, date=2018
-- "Quelles règles dans CS-25 Amendment 27 ?"   → POINT, version=Amendment 27
-- "Document edition 3.2 specifies what about X?" → POINT, version=3.2
-
-## RANGE
-The question targets a SPAN of frames — explicitly or implicitly. The user wants evolution / history / comparison.
-Examples:
-- "How did encryption evolve between 2018 and 2024?"  → RANGE, range_start=2018, range_end=2024
-- "Comment cette disposition a évolué dans la réglementation ?" → RANGE, no explicit bounds (full history)
-- "List all dosage recommendations since the biomarker was first used." → RANGE, no explicit bounds
-- "Compare APIs of S/4HANA 1809 and 2023."  → RANGE, range_start=1809, range_end=2023
-- "What changed between version A and version B?" → RANGE, range_start=A, range_end=B
-
-## Critical extraction rules
-
-1. **Output JSON ONLY** matching exactly this schema:
-```
+Output STRICT JSON ONLY :
 {
-  "anchor_type": "point" | "range" | "current_default",
+  "anchor_type": "current_default" | "point" | "range",
   "scope": {
-    "version": "<verbatim version/release/edition identifier>" | null,
-    "date": "<ISO-like date if explicit>" | null,
-    "range_start": "<verbatim start identifier>" | null,
-    "range_end": "<verbatim end identifier>" | null,
-    "extraction_evidence": "<verbatim fragment of the question proving the anchor>" | null
+    "version": "<verbatim id>" | null,
+    "date": "<ISO date>" | null,
+    "range_start": "<verbatim start>" | null,
+    "range_end": "<verbatim end>" | null,
+    "extraction_evidence": "<verbatim substring of the question>" | null
   },
   "confidence": 0.0-1.0,
-  "reasoning": "<brief reason>"
+  "reasoning": "<brief>"
 }
-```
 
-2. **`extraction_evidence` is MANDATORY for POINT and RANGE**. It MUST be a verbatim substring of the user's question — no paraphrasing. The validator will reject the extraction if the evidence is not found verbatim. For CURRENT_DEFAULT it MUST be null.
-
-3. **For RANGE, fill range_start and range_end if explicitly cited**. If the user asks for full history without bounds ("since when", "how has X evolved", "depuis", "throughout"), leave both null but still set anchor_type=range.
-
-4. **Do NOT infer beyond what the question states**. If the question is ambiguous between current_default and a vaguely implied frame, prefer current_default.
-
-5. **Identifiers can be ANY format** (version numbers, release codes, dates, amendment numbers, edition labels, semantic versions, named milestones). Capture them verbatim — no normalization, no domain assumption.
-
-6. **Multilingual**: apply the same logic regardless of question language."""
+Rules :
+- extraction_evidence MUST be a verbatim substring of the question for point/range. null for current_default.
+- For range with no explicit bounds (e.g. "since", "how did X evolve", "throughout"), keep range_start/end null.
+- When ambiguous, prefer current_default.
+- Capture identifiers verbatim (version numbers, dates, amendment names, edition labels, semantic versions).
+- Multilingual : same logic in any language."""
 
 
 class AnchorExtractor:
@@ -94,6 +65,10 @@ class AnchorExtractor:
         anchor = extractor.extract("What is encryption mode of S/4HANA?")
         # → ResolvedAnchor(anchor_type=CURRENT_DEFAULT, scope=AnchorScope(...), confidence=...)
     """
+
+    # CH-33 — cache LRU partagé (instance-agnostic, basé sur la question seule)
+    _CACHE: "OrderedDict[str, ResolvedAnchor]" = None  # init lazy
+    _CACHE_MAX = 256
 
     def __init__(
         self,
@@ -108,6 +83,14 @@ class AnchorExtractor:
         self.timeout = timeout
         self.temperature = temperature
         self.max_tokens = max_tokens
+        if AnchorExtractor._CACHE is None:
+            from collections import OrderedDict
+            AnchorExtractor._CACHE = OrderedDict()
+
+    @staticmethod
+    def _cache_key(question: str) -> str:
+        import hashlib
+        return hashlib.sha1(question.strip().lower().encode("utf-8")).hexdigest()
 
     def extract(self, question: str) -> ResolvedAnchor:
         """Extrait l'anchor d'une question.
@@ -116,12 +99,28 @@ class AnchorExtractor:
         validator evidence-locked. Si la quote LLM n'est pas dans la question
         (hallucination), on dégrade en current_default avec confidence basse —
         plutôt que d'inventer un anchor à partir d'une evidence fabriquée.
+
+        CH-33 : cache LRU sur la question.
         """
+        ck = self._cache_key(question)
+        cache = AnchorExtractor._CACHE
+        if cache is not None:
+            cached = cache.get(ck)
+            if cached is not None:
+                cache.move_to_end(ck)
+                logger.info("[ANCHOR_EXTRACT] cache HIT (%s...)", ck[:12])
+                return cached
+
         raw_json = self._call_llm(question)
         anchor = self._parse_response(raw_json)
 
         # Validator evidence-locked
         validated = self._validate_evidence(anchor, question)
+
+        if cache is not None:
+            cache[ck] = validated
+            if len(cache) > AnchorExtractor._CACHE_MAX:
+                cache.popitem(last=False)
         return validated
 
     def _call_llm(self, question: str) -> str:
@@ -142,6 +141,7 @@ class AnchorExtractor:
                 max_tokens=self.max_tokens,
                 json_mode=True,
                 timeout=self.timeout,
+                model_override="mistralai/Mistral-Small-3.1-24B-Instruct-2503",
             )
         except Exception as exc:
             logger.error("AnchorExtractor LLM call failed: %s", exc)

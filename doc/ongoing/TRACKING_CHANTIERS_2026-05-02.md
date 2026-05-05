@@ -123,8 +123,8 @@
 - **Pourquoi** : Sans cet outil d'observabilité, on ne sait pas SI les seuils nécessitent recalibration. C'est la condition préalable pour CH-04.2 (calibration auto).
 
 ### CH-05 — Refonte chat Phase 1 (nettoyer)
-- **Statut** : IN_PROGRESS — CH-05.1 livré 2026-05-02
-- **Effort total révisé** : ~1.5j (vs 2-3j initial — beaucoup déjà fait par V2 cleanup 30/04)
+- **Statut** : DONE (2026-05-02) — CH-05.1, CH-05.2, CH-05.3, CH-05.4, CH-05.5 livrés
+- **Effort total révisé** : ~2j (vs 2-3j initial — CH-05.4/5 ajoutés en cours de route en réaction au feedback UX "indigeste")
 
 #### CH-05.1 — Cleanup composants obsolètes
 - **Statut** : DONE (2026-05-02, commit à venir)
@@ -148,7 +148,7 @@
 - **Validation** : `tsc --noEmit` aucune erreur sur fichiers refactorés.
 
 #### CH-05.3 — Sources cliquables vers fichier source
-- **Statut** : DONE (2026-05-02, commit à venir)
+- **Statut** : DONE (2026-05-02, commit fdf72ea)
 - **Effort** : 0.5j (réel ~45 min)
 - **Livré** :
   - **Backend** : nouveau endpoint `GET /api/documents/source-file?doc_id=...` qui :
@@ -164,12 +164,68 @@
 - **Limitation actuelle** : scan O(n) du filesystem à chaque clic (pas de cache/index doc_id → path). Acceptable pour les 17 docs aerospace, à optimiser si volume augmente.
 - **Tech debt** : créer une table de mapping doc_id → file_path en Postgres pour éliminer le scan FS (CH-05.3b futur).
 
+#### CH-05.4 — Footnotes Wikipedia-style (refonte UX inline pills)
+- **Statut** : DONE (2026-05-02, commits `37397f0`, `5b171a5`)
+- **Effort** : 0.4j (réel ~30 min)
+- **Contexte** : feedback user "c'est indigeste et les liens ne semblent pas fonctionner" (6-8 pills `cs25_amdt_27_..., p.433` denses dans chaque paragraphe). Choix Option 3 footnotes-style.
+- **Livré** :
+  - **Nouveau** : `frontend/src/lib/sourceRefs.ts` — `indexAndReplaceSources(text)` parse `[[SOURCE:doc_id|page]]` → remplace par `[[REF:N]]` + retourne liste ordonnée `SourceRef[]`. Dédup par `(docId, page)` (initialement par docId seul, modifié en CH-05.5).
+  - **Nouveau** : `frontend/src/components/ui/SourcesFootnotes.tsx` — composant liste numérotée en bas de réponse. Chaque entrée `[N] DocName · p.XXX` cliquable, ouvre le fichier source.
+  - **Nouveau** : `RefPill` dans `SourcePill.tsx` — pill compacte `[N]` inline (~20px) cliquable, tooltip = `[N] DocName p.XXX`. Prop renommée `sourceRef` (collision React reserved `ref`).
+  - **Nouveau** : `renderWithRefs(text, refs)` dans `SourcePill.tsx` — parse `[[REF:N]]` → React nodes `<RefPill>`.
+  - **Modifié** : `SynthesizedAnswer.tsx` — pré-process `synthesis.synthesized_answer` via `indexAndReplaceSources` (useMemo), passe `sourceRefs` à `createMarkdownComponents`, rend `<SourcesFootnotes refs={sourceRefs} />` à la fin.
+- **Bug fix** : prop `ref` renommée `sourceRef` après runtime error "Cannot read properties of undefined (reading 'docId')" — `ref` est interceptée par React (forwardRef).
+- **Acceptation** : pills `[1]`, `[2]`, ... compactes inline ; liste détaillée en bas avec nom + page ; clic ouvre le fichier source.
+
+#### CH-05.5 — Deep-link PDF #page=N (RFC 3778)
+- **Statut** : DONE (2026-05-02, commits `fdc0646`, `59a527d`, `6208150`)
+- **Effort** : 0.3j (réel ~20 min)
+- **Contexte** : user demande "n'utiliser qu'un numéro pour chaque occurrence du doc dans le texte", puis confirme "il n'est pas possible d'ouvrir le pdf directement à la bonne page, hein ?" → vérifie faisabilité, implémente.
+- **Livré** :
+  - **Backend** : `documents.py` `/source-file` — ajoute `Content-Disposition: inline` (vs `attachment`) pour permettre rendu inline dans le viewer PDF du navigateur (au lieu de download).
+  - **Frontend** : `openSourceFile.ts` :
+    - Helper `parsePageNumber(page)` accepte `number | string` (parse `"p.433"` ou `42`).
+    - Append fragment `#page=N` à l'URL ouverte (RFC 3778).
+    - Pour blob URLs (doc_id → fetch authentifié) : fragment ajouté **uniquement si** `blob.type === 'application/pdf'` (ignoré sinon).
+    - `URL.revokeObjectURL` strip le fragment avant cleanup.
+  - **Frontend** : `sourceRefs.ts` — dédup par `(docId, page)` (au lieu de docId seul) → permet plusieurs entrées pour le même PDF cité à différentes pages, chaque clic ouvre la bonne page.
+  - **Frontend** : `RefPill` + `SourcesFootnotes` — passent `ref.page` à `openSourceFile`, tooltip et liste affichent la page.
+- **Comportement final** :
+  - PDFs → vrai deep-link à la page (`[1] Cs25 Amdt 27 · p.433` ouvre p.433, `[2] Cs25 Amdt 27 · p.585` ouvre p.585).
+  - PPTX/DOCX → fragment ignoré par le navigateur, ouvre page 1 (limitation RFC 3778, formats non concernés).
+- **Acceptation** : multi-pages PDF testé OK ; ouvre directement à la bonne page dans le viewer Chrome/Edge intégré.
+
 ### CH-06 — Refonte chat Phase 2 (Insight Cards + Audit auto)
-- **Statut** : TODO (dépend de CH-05)
-- **Effort** : 4-5j
-- **Quoi** : Split Truth View + Insight Cards (encarts ⚠️ Point d'attention / 📅 Évolution détectée / 🔗 Contexte cross-doc) qui apparaissent SOUS la réponse uniquement si le KG apporte de la valeur. Switch automatique mode Audit quand tension détectée.
-- **Pourquoi** : Différenciateur visible vs ChatGPT. Aujourd'hui les `insight_hints` sont générés par le backend mais invisibles côté frontend.
-- **Acceptation** : sur 10 questions du benchmark T2 (tensions), au moins 8 affichent une Insight Card pertinente.
+- **Statut** : IN_PROGRESS (CH-06.1, CH-06.2, CH-06.3 livrés 2026-05-03 — reste validation runtime CH-06.4)
+- **Effort réel** : ~1.5h (vs 4-5j initial — squelette V1 réutilisable, refonte ciblée)
+- **Diagnostic état avant** : 60% du squelette existait (types `InsightHint`, fonction `_generate_insight_hints` legacy V1.1, `InsightHintsBlock` UI legacy) MAIS la fonction backend interrogeait `:CONTRADICTS|REFINES|QUALIFIES` (relations purgées en V2 le 30/04) et n'était pas branchée à `/api/runtime_v2/answer`.
+
+#### CH-06.1 — Backend insight_hints V2 (LOGICAL + LIFECYCLE)
+- **Statut** : DONE (2026-05-03)
+- **Livré** :
+  - `src/knowbase/runtime_v2/insight_hints.py` (nouveau) — `build_insight_hints(response, driver, tenant_id)` qui génère 3 types de cards depuis `PipelineResponse` :
+    - `attention` — `ConflictReport.is_resolved_by_lifecycle=False` (vraie contradiction)
+    - `evolution` — conflict résolu par lifecycle + `LIFECYCLE_RELATION` (SUPERSEDES/EVOLVES_FROM/REAFFIRMS) sortantes des docs cités + anchor RANGE avec evolution_points
+    - `cross_doc` — ≥2 `authoritative_doc_ids`
+  - `src/knowbase/runtime_v2/models.py` — `PipelineResponse.insight_hints: list[dict]` ajouté
+  - `src/knowbase/api/routers/runtime_v2.py` — appel `build_insight_hints()` post-pipeline (non-bloquant) + log `n_insight_hints` ajouté
+- **Validation** : Python compile OK. Activation runtime nécessite restart app (à faire après bench actuel).
+
+#### CH-06.2 — Frontend cards visuelles
+- **Statut** : DONE (2026-05-03)
+- **Livré** :
+  - `frontend/src/components/runtime/InsightCards.tsx` (nouveau, ~140 lignes) — composant React avec 3 styles distincts (rouge/violet/teal), icônes (alert/calendar/link), priorités, tri auto attention > evolution > cross_doc
+  - Type `InsightHint` exporté pour réutilisation
+  - `frontend/src/app/chat/runtime-v2/page.tsx` — type `PipelineResponse.insight_hints` ajouté + `<InsightCards />` rendu juste sous la synthèse
+- **Validation** : tsc sans nouvelle erreur (les erreurs TS visibles sur `LifecycleGraphMini` sont préexistantes — `reactflow/dagre` pas indexés).
+
+#### CH-06.3 — Mode Audit auto
+- **Statut** : DONE (2026-05-03, intégré dans CH-06.2)
+- **Livré** : badge "🔍 Mode Audit · Contradiction(s) détectée(s)" en rouge auto-affiché si ≥1 card `attention` présente, en tête du bloc cards.
+
+#### CH-06.4 — Test sur 10 questions T2
+- **Statut** : EN ATTENTE — nécessite restart app + bench T2 réel sur le KG actuel.
+- **Sera fait après le restart à la fin du bench actuel (CH-30.7)**.
 
 ### CH-07 — Verify V1 — refacto via pipeline search
 - **Statut** : TODO
@@ -187,12 +243,24 @@
 - **Acceptation** : upload d'un règlement test → `.docx` retourné avec ≥1 commentaire par paragraphe, ouvrable dans Word natif.
 
 ### CH-09 — RAGAS faithfulness — double scoring
-- **Statut** : TODO
-- **Effort** : 6-9h
-- **Fichiers** : `ragas_runner.py`, formatter de contexts
-- **Quoi** : Scorer en parallèle `faith_chunks` (chunks seulement) + `faith_total` (chunks + graph context concaténé). Aujourd'hui la régression apparente vient du fait que le KG enrichit la réponse mais n'est pas vu par le juge.
-- **Pourquoi** : `-13.6 pts` faithfulness vs RAG pur — biais structurel à corriger pour benchmarker honnêtement.
-- **Acceptation** : sur 100 questions, `faith_total` ≥ baseline RAG pur, `faith_chunks` documenté à part.
+- **Statut** : DONE (code, 2026-05-03 — validation au prochain run RAGAS)
+- **Effort réel** : ~45 min (vs 6-9h estimé — la piste 2 `faithfulness_total` existait déjà à 80%, restait à brancher DeepInfra + runtime V2)
+- **Diagnostic état avant** : la piste 2 (chunks + graph_context_text) était déjà implémentée dans `ragas_diagnostic.py:381-431`, mais 3 bloquants :
+  - Juge RAGAS = OpenAI gpt-4o-mini par défaut (viole politique "pas OpenAI/Anthropic")
+  - Embeddings RAGAS = OpenAI text-embedding-3-small (idem)
+  - API utilisée = `/api/search` V1.1 (pas runtime V2 anchor-driven)
+- **Livré** :
+  - `_get_ragas_providers()` refondu — **provider défaut = `deepinfra`** (Qwen2.5-72B-Instruct via API OpenAI-compat), fail-fast si `DEEPINFRA_API_KEY` manque. Mode `openai` reste disponible mais explicite (legacy).
+  - **Embeddings défaut = e5-large local** (multilingual-e5-large via langchain HF) — fallback OpenAI uniquement si `RAGAS_JUDGE_PROVIDER=openai`. Le mode deepinfra REFUSE le fallback OpenAI.
+  - `_build_v2_graph_context_text(response)` (nouveau) — synthétise le `graph_context_text` à partir de la réponse runtime V2 (claims + conflicts + lifecycle resolution + insight_hints) pour que `faithfulness_total` reflète bien la qualité KG V2.
+  - `_call_runtime_v2_api()` (nouveau) — appelle `/api/runtime_v2/answer`, retourne format compatible RAGAS pipeline (contexts = claims top-K, answer = synthesized_answer, graph_context_text synthétique).
+  - `_collect_one()` étendu — toggle env `RAGAS_USE_RUNTIME_V2=true` pour basculer V1.1 → V2.
+  - La piste 2 `faithfulness_total` (chunks + KG) était déjà là — maintenant activable depuis runtime V2.
+- **Validation** : `python -m py_compile` OK. À tester au prochain run RAGAS via :
+  ```
+  RAGAS_USE_RUNTIME_V2=true RAGAS_JUDGE_PROVIDER=deepinfra docker-compose exec app python -m benchmark.evaluators.ragas_diagnostic --profile quick
+  ```
+- **Acceptation à valider** : `faith_total` ≥ baseline RAG pur sur 100q ; `faith_chunks` documenté séparément (déjà visible dans frontend `/admin/benchmarks` onglet RAGAS — page.tsx:437-439).
 
 ---
 
@@ -213,34 +281,81 @@
 - **Acceptation** : ajustement d'un seuil via UI → import suivant utilise la nouvelle valeur sans restart.
 
 ### CH-12 — Externaliser listes hardcodées non-critiques
-- **Statut** : TODO
-- **Effort** : 0.5j
-- **Quoi** : 55 listes/20 fichiers (`AUDIT_HARDCODED_WORD_LISTS.md`). Critiques (stopwords) déjà migrées vers IDF dynamique. Reste les listes "détection" (TENSION_KEYWORDS, ANNOUNCEMENT_PATTERNS) dans `benchmark/`. Migration vers `config/detection_keywords.yaml`.
-- **Pourquoi** : Multilingue/multi-domaine = ces listes EN/FR cassent dès qu'on charge un corpus ES/IT/DE.
-- **Acceptation** : `grep -rn "TENSION_KEYWORDS\s*=" src/` ne retourne plus que des `from config import...`.
+- **Statut** : DONE (2026-05-03)
+- **Effort réel** : ~25 min (vs 0.5j estimé)
+- **Périmètre** : 6 listes "détection linguistique" (priorité HAUTE de l'audit) externalisées
+- **Livré** :
+  - `config/detection_keywords.yaml` (nouveau) — 6 listes avec section `tenant_overrides` :
+    - `tension_keywords` (23) — divergen, contradict, however, en revanche, …
+    - `ignorance_keywords` (21) — pas d'information, je ne sais pas, not found, …
+    - `correction_keywords` (21) — en realite, contrairement, actually, …
+    - `temporal_keywords` (19) — années 2021-2025, evolution, version, mise a jour, …
+    - `contradiction_keywords` (8) — sous-ensemble de tension, focus pour T2 scoring
+    - `idk_phrases` (13) — fusion des `idk_phrases` (primary_metrics) + `idk_patterns` (rule_based_judge)
+  - `src/knowbase/config/detection_keywords.py` (nouveau) — loader Pydantic-style, dataclass `DetectionKeywords` immuable, singleton process-level avec cache par tenant + `reload_detection_keywords()` pour les tests
+  - **4 fichiers refactorés** :
+    - `benchmark/evaluators/t2t5_diagnostic.py` — `TENSION_KEYWORDS` désormais alias depuis le loader
+    - `benchmark/evaluators/robustness_diagnostic.py` — `IGNORANCE_KEYWORDS`, `CORRECTION_KEYWORDS`, `TEMPORAL_KEYWORDS` aliases
+    - `benchmark/evaluators/primary_metrics.py` — `contradiction_keywords` + `idk_phrases` lazy-load
+    - `benchmark/evaluators/rule_based_judge.py` — `idk_patterns` lazy-load (alias sur `idk_phrases`)
+- **Validation** :
+  - Tous les modules compilent
+  - Smoke test loader : 23/21/21/19/8/13 items chargés correctement (rétrocompat 100%)
+  - Acceptance criteria respectée : `grep "^TENSION_KEYWORDS\s*=" benchmark src` retourne uniquement `TENSION_KEYWORDS = list(_get_dk()...)` (alias, pas hardcode)
+- **Reste hors scope** (audit complet 55 listes) : 49 listes restantes, dont :
+  - **Critiques** (4) — stopwords/BM25/ENTITY_STOPLIST déjà migrés vers IDF dynamique (CH antérieur)
+  - **Moyennes** (7) — relations KG `SEMANTIC_RELATION_TYPES`, `EXCLUDED_RELATION_TYPES`, `CANONICAL_PREDICATES` (avec **3 doublons** à dédup) — chantier dédié si refonte schéma
+  - **Basses** (~38) — patterns spécifiques entity_extractor, discursive, etc. — laissés hardcodés (faible impact multilingue, plus stables).
 
 ### CH-13 — Answer Gap Detector
-- **Statut** : TODO
-- **Effort** : 1j
-- **Fichiers** : nouveau composant `answer_gap_detector.py`, `search.py`
-- **Quoi** : TF-IDF inverse pour extraire les termes spécifiques de la question (mots dans <5% des chunks), vérifier leur présence dans top-K chunks. `gap_score = 1 - (termes_trouvés / total)`. Décision déterministe ANSWERABLE/UNCERTAIN/UNANSWERABLE pré-LLM.
-- **Pourquoi** : 5/8 questions unanswerable du benchmark sont syntaxiquement OPEN (ne peuvent pas être détectées par classification de question). Le vrai signal est le gap question↔chunks.
-- **Acceptation** : sur les 25 questions unanswerable du benchmark, ≥18 détectées (≥72%) sans dégrader les ANSWERABLE.
+- **Statut** : DONE (code, 2026-05-03 — validation acceptance après restart + analyse run T6)
+- **Effort réel** : ~30 min (vs 1j estimé — réutilise corpus_stats IDF déjà en prod)
+- **Livré** :
+  - `src/knowbase/runtime_v2/answer_gap_detector.py` (nouveau) :
+    - `extract_specific_terms(question)` → tokens IDF ≥ 2.5 OU hors-corpus ≥ 4 chars
+    - `compute_gap_score(specific_terms, retrieved_text)` → (gap, found, missing)
+    - `classify(gap_score)` → ANSWERABLE (<0.25) / UNCERTAIN (0.25-0.50) / UNANSWERABLE (≥0.50)
+    - `detect_answer_gap(question, retrieved_text)` API publique
+  - `src/knowbase/runtime_v2/models.py` — `PipelineResponse.answer_gap_score`, `answer_gap_classification`, `answer_gap_missing_terms`
+  - `src/knowbase/runtime_v2/pipeline.py` — branchement post-retrieval, avant synthèse
+  - `src/knowbase/runtime_v2/insight_hints.py` — bonus card "Information potentiellement absente" / "Couverture incertaine" (priority=1)
+  - `src/knowbase/api/routers/runtime_v2.py` — log structuré `answer_gap_score` + `answer_gap_classification`
+- **Réutilise** : `knowbase/common/corpus_stats.py` (IDF dynamique mutualisé existant)
+- **Validation** : tous les modules compilent. Activation runtime nécessite restart app.
+- **Acceptation à valider après restart** : sur 25 questions unanswerable T6 (catégorie `unanswerable` du benchmark `aero_t6_robustness.json`), mesurer le recall UNANSWERABLE classification ≥ 72% sans dégrader les ANSWERABLE des autres tasks.
 
 ### CH-14 — HALT/EPR Logprob Entropy Detection
-- **Statut** : TODO
-- **Effort** : 1-2h
-- **Fichiers** : `synthesis.py`, nouveau signal entropy
-- **Quoi** : Activer `logprobs=true, top_logprobs=5` dans l'appel de synthèse. Calculer entropie moyenne des top-5 tokens. Si > seuil (à calibrer sur 25 questions unanswerable) → flag "réponse potentiellement non fondée".
-- **Pourquoi** : Le RAG paradoxalement REDUIT la capacité d'abstention du LLM (Google Research). Signal post-hoc cross-lingue, gratuit, multilingue natif.
-- **Acceptation** : entropie corrélée (Pearson ≥ 0.5) avec hallucinations détectées par juge LLM sur 100 questions.
+- **Statut** : DONE (code, 2026-05-03 — calibration empirique du seuil différée à un run dédié)
+- **Effort réel** : ~30 min (vs 1-2h estimé)
+- **Livré** :
+  - `src/knowbase/runtime_v2/entropy.py` (nouveau) — `compute_avg_entropy(logprobs_content)` (Shannon sur top_logprobs re-normalisés) + `is_low_confidence(entropy, threshold=1.5)` + constante `LOW_CONFIDENCE_ENTROPY_THRESHOLD=1.5` (à calibrer)
+  - `src/knowbase/runtime_v2/llm_client.py` — méthode `chat_completion_with_meta(logprobs=True, top_logprobs=5)` ; `chat_completion()` reste rétrocompatible (délègue à _with_meta)
+  - `src/knowbase/runtime_v2/synthesis.py` — `ResponseSynthesizer.capture_logprobs=True` par défaut, stocke `last_metrics = {entropy, n_tokens_with_logprobs, provider, model}` après chaque synthèse
+  - `src/knowbase/runtime_v2/models.py` — `PipelineResponse.synthesis_entropy: Optional[float]` + `synthesis_low_confidence: bool`
+  - `src/knowbase/runtime_v2/pipeline.py` — propage `synthesizer.last_metrics["entropy"]` dans la réponse
+  - `src/knowbase/runtime_v2/insight_hints.py` — bonus card "🔍 Confiance faible" auto si `synthesis_low_confidence=True` (priority=1)
+  - `src/knowbase/api/routers/runtime_v2.py` — log structuré ajoute `synthesis_entropy` + `synthesis_low_confidence`
+- **Validation** : tous les modules compilent. Activation runtime nécessite restart app.
+- **Calibration** : le seuil 1.5 est une estimation. Calibration empirique = run sur 25 questions unanswerable (T6), mesure entropy + comparaison avec verdict juge → ajuster seuil pour Pearson ≥ 0.5. À faire en CH-14b séparé après le run benchmark complet.
 
 ### CH-15 — Health Toolbox scripts
-- **Statut** : TODO
-- **Effort** : 0.5j
-- **Quoi** : Tri des ~80 scripts dans `app/scripts/` en 4 catégories (Diagnostic / Correctif / Rebuild / Infra). Déplacement obsolètes vers `archive/`, POC vers `poc/`, tests vers `tests/`. READMEs catégoriels.
-- **Pourquoi** : Personne ne sait quoi lancer quand. La revue 02/04 avait identifié `generate_atlas.py` (POC) comme étant à la racine alors qu'il est obsolète vs `build_narrative_topics.py + generate_atlas_content.py`.
-- **Acceptation** : `app/scripts/README.md` liste 4 catégories avec les scripts actifs uniquement.
+- **Statut** : DONE (README catégoriel livré, 2026-05-03 — déplacement physique différé pour validation user)
+- **Effort réel** : ~25 min (vs 0.5j estimé — approche conservatrice : visibilité sans déplacement)
+- **Livré** :
+  - `app/scripts/README.md` étendu (~250 lignes, vs 177 avant) — couvre les **117 scripts** Python avec catégorisation systématique :
+    - 🩺 **Diagnostic** (13 scripts) — audit lecture seule
+    - 📊 **Benchmark** (5)
+    - 🔧 **Correctif** (12) — fix/cleanup/archive (modifient KG)
+    - ♻️ **Backfill / Rebuild** (22) — recalcul propriété sans réingestion
+    - 🔄 **Migration** (8) — one-shot post-refonte
+    - 🛠️ **Setup / Infra** (9)
+    - 🧱 **Build / Compute** (30) — pipelines enrichissement
+    - 🧪 **Tests dev** (15) — smokes ad-hoc
+    - 🚀 **POC / Demo** (3)
+  - **Section "Candidats archive"** explicite : 12 scripts identifiés comme legacy/redondant (ex: `generate_atlas.py` POC, `extract_question_signatures.py` v1, `backfill_relations_c4/c6.py` legacy V1.1, migrations one-shot exécutées)
+  - Workflows typiques documentés : reset Proto-KG / backup / audit quotidien / backfill post-CH-02 / build atlas
+- **Approche conservatrice** : pas de déplacement physique pour ne pas casser de références (Docker, kw.ps1, doc, post_import worker). Le déplacement vers `_archive_done/`, `_dev_tests/`, `poc/` se fera après validation user de la liste candidate.
+- **Reste optionnel** (CH-15b, ~30 min) : déplacer physiquement les 12 candidats archive après validation user.
 
 ### CH-16 — Exact Answer Gate V1
 - **Statut** : TODO
@@ -348,6 +463,72 @@
 
 ---
 
+## 🧪 Benchmarks
+
+### CH-30 — Refonte benchmarks V2 (RAGAS, T1/T2/T5/T6/T7, Robustesse)
+- **Statut** : IN_PROGRESS (démarré 2026-05-03)
+- **Effort total** : ~5-6j (généralisation phase par phase, validation user à chaque livraison)
+- **Contexte** : architecture anchor-driven V2 + lifecycle relations + classifier 12-types + response modes externalisés ont profondément modifié le pipeline de réponse. Les questions historiques (SAP, regulatory) ne reflètent plus le périmètre/comportement actuel.
+- **Corpus** : aerospace seul (corpus actuellement ingéré, 17 docs : 11 CS-25 + 6 dual-use EU). Le regulatory (71 docs) n'est plus ingéré — le bench se fait sur ce qui est en prod.
+- **Méthode** : Claude lit les docs (PDF + KG claims pré-extraits) et rédige les questions. Pas de génération LLM aveugle.
+- **Volumétrie cible** : 250-300 questions au total
+- **Tasks** :
+  - **T1** Provenance (~50q) — citation directe, 1 doc
+  - **T2** Contradictions (~40q) — vrais conflits + tensions cross-doc
+  - **T5** Cross-doc (~30q) — chains nécessitant ≥2 docs
+  - **T6** Robustness (~120q) — 10 catégories
+  - **T7** V2 anchor-driven (~50q) — **NOUVEAU** : lifecycle queries, anchor applicability, distinction LIFECYCLE vs CONFLICT
+
+#### CH-30.0 — Inventaire KG + cadrage format
+- **Statut** : IN_PROGRESS (2026-05-03)
+- **Effort** : 0.5j
+- **Quoi** : extraire les claims clés par doc, lifecycle relations, top entities, anchors. Vérifier format JSON attendu par les runners (`run_osmosis_v2.py`). Output : doc inventaire = source de vérité pour la génération.
+
+#### CH-30.1 — Génération T1 Provenance (~50q)
+- **Statut** : TODO
+- **Effort** : 1j
+
+#### CH-30.2 — Génération T2 Contradictions (~40q)
+- **Statut** : TODO
+- **Effort** : 0.75j
+
+#### CH-30.3 — Génération T5 Cross-doc (~30q)
+- **Statut** : TODO
+- **Effort** : 0.75j
+
+#### CH-30.4 — Génération T6 Robustness (~120q)
+- **Statut** : TODO
+- **Effort** : 1.5j
+
+#### CH-30.5 — Génération T7 V2 anchor-driven (~50q) **NOUVEAU**
+- **Statut** : TODO
+- **Effort** : 1j
+- **Quoi** : task spécifique post-V2 — lifecycle queries (SUPERSEDES/EVOLVES_FROM/REAFFIRMS), anchor-based applicability ("règles applicables à un avion certifié en 2024"), distinction LIFECYCLE vs CONFLICT, validity dates héritées.
+
+#### CH-30.6 — Validation runs + intégration runners
+- **Statut** : TODO
+- **Effort** : 0.5j
+
+#### CH-30.7 — Re-run benchmarks complets
+- **Statut** : IN_PROGRESS (lancé 2026-05-03 10:44 — 290q sans burst, ETA ~4-5h)
+- **Effort** : 0.5j (compute) + analyse résultats
+
+#### CH-30.8 — Intégration frontend admin/benchmarks pour T1 + T7 (NOUVEAU)
+- **Statut** : DONE (code, 2026-05-03 — en attente restart app pour activation runtime)
+- **Effort réel** : ~1.5h (vs 1.5-2j estimé — choix simplificateur d'un tab unique "Aerospace V2" au lieu de 2 tabs T1/T7 séparés)
+- **Approche pragmatique** : un seul tab "Aerospace V2" qui couvre les 5 tasks (T1/T2/T5/T6/T7) avec sélecteur de task au lancement, plutôt que 2 tabs T1/T7 dédiés. Les onglets RAGAS/Contradictions/Robustesse historiques sont conservés inchangés.
+- **Livré** :
+  - **Backend** : `benchmark/evaluators/aero_v2_diagnostic.py` (job RQ qui orchestre `run_osmosis_v2.py` + `judge_v2.py` en sub-process, suit la progression via Redis `osmose:benchmark:aero_v2:state`).
+  - **Backend** : `src/knowbase/api/routers/benchmarks_aero_v2.py` (4 endpoints : POST `/run`, GET `/progress`, GET `` (liste), GET `/{filename}`, DELETE `/{filename}`). Préfixe `/api/benchmarks/aero_v2`.
+  - **Backend** : `src/knowbase/api/main.py` modifié — `include_router(benchmarks_aero_v2.router)`.
+  - **Frontend** : `page.tsx` étendu avec 1 tab "Aerospace V2" (icône FiCompass, accent teal `#14b8a6`), composant `AeroV2Tab`, type `AeroV2Report`, intégration polling/launch via le `LaunchPanel` partagé. Le `selectedProfile` est mappé en `task` pour l'API aero_v2.
+  - **Frontend** : `LaunchPanel.tsx` corrigé (couleurs hardcodées au lieu de `var(--xxx)` qui était overridé par le thème actif → titre "Lancer un benchmark" + bouton "Lancer tout" redeviennent lisibles).
+- **Validation** : Python compile OK ; TS sans nouvelle erreur (les erreurs TS pré-existantes lignes 324-326 et 899 sont conservées hors scope).
+- **Activation runtime** : nécessite `docker restart knowbase-app` une fois le bench actuel terminé (CH-30.7), puis tester un run via le tab.
+- **Reste** (déféré, hors scope CH-30.8) : adapter `OverviewTab` pour afficher 5 cards (ajout d'une card Aerospace V2 récap) — utile mais non bloquant.
+
+---
+
 ## ⚙️ Dette technique
 
 ### CH-29 — TODOs critiques code (consolidés)
@@ -374,6 +555,7 @@
 |---|---|---|
 | 2026-05-02 | Création | Tracking initial 29 chantiers, descriptions étoffées issues du backlog 2026-05-01 |
 | 2026-05-02 | CH-01 livré | Recovery au boot worker : `_recover_interrupted_jobs()` dans `worker.py:warm_clients()`, validé end-to-end (8/8 tests + dry-run injection + restart prod log "No interrupted jobs to recover") |
+| 2026-05-03 | CH-05.4/5 ajoutés | Traçabilité footnotes Wikipedia-style + deep-link PDF `#page=N` (livrés post-compaction 2026-05-02 en réaction au feedback UX "indigeste") |
 
 ---
 
