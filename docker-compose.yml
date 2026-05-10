@@ -128,7 +128,8 @@ services:
       OSMOSIS_API_URL: http://app:8000
       # CH-39 — runtime version (v3 = refonte minimaliste, v2 = ancien)
       # CH-43 — bascule v4 Facts-First (Tranches 1-5 + leviers latence) — 2026-05-07
-      RUNTIME_VERSION: v4
+      # CH-49 — bascule v4_2 Tiered Pipeline (Layer 0+1+2 + 5 operators + verifier veto) — 2026-05-10
+      RUNTIME_VERSION: v4_2
       # Judges centralises — switch d'Ollama vers llama.cpp self-hosted
       # (container prometheus-judge, GPU, stable vs Ollama timeout 14B)
       # CH-34 (04/05/2026) — bascule de Prometheus (sous-évaluait 90% des cas, +0.687 delta)
@@ -217,7 +218,8 @@ services:
       OSMOSIS_API_URL: http://app:8000
       # CH-39 — runtime version (v3 = refonte minimaliste, v2 = ancien)
       # CH-43 — bascule v4 Facts-First (Tranches 1-5 + leviers latence) — 2026-05-07
-      RUNTIME_VERSION: v4
+      # CH-49 — bascule v4_2 Tiered Pipeline (Layer 0+1+2 + 5 operators + verifier veto) — 2026-05-10
+      RUNTIME_VERSION: v4_2
       # CH-34 (04/05/2026) — bascule de Prometheus (sous-évaluait 90% des cas, +0.687 delta)
       # vers Llama-3.3-70B-Instruct sur DeepInfra (calibration honnête, distingue
       # abstention correcte vs hallucination). Audit benchmark/audit_judge_calibration_llama70b.json

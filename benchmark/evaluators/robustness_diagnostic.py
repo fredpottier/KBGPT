@@ -618,18 +618,19 @@ EVALUATORS = KEYWORD_EVALUATORS  # Kept for backward compat
 # ═══════════════════════════════════════════════════════════════════════
 
 def _call_osmosis_api(question: str, api_base: str, token: str = "") -> dict:
-    """CH-30.14 — V2 par défaut. CH-39 — V3 si env RUNTIME_VERSION=v3."""
+    """CH-30.14 — V2 par défaut. CH-39 — V3. CH-43 — V4. CH-49 — V4.2 (Tiered Pipeline)."""
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
     runtime_version = os.getenv("RUNTIME_VERSION", "v2").lower()
-    if runtime_version in ("v3", "v4"):
-        endpoint = f"/api/runtime_{runtime_version}/answer"
+    if runtime_version in ("v3", "v4", "v4_2"):
+        endpoint_seg = "v4_2" if runtime_version == "v4_2" else runtime_version
+        endpoint = f"/api/runtime_{endpoint_seg}/answer"
         # CH-46 L4 — top_k_claims V4 : 20→12 (réduit context Structurer ~40% tokens).
         # Override : V4_TOP_K_CLAIMS=20 pour rollback.
         top_k_v4 = int(os.getenv("V4_TOP_K_CLAIMS", "12"))
-        top_k = top_k_v4 if runtime_version == "v4" else 10
+        top_k = top_k_v4 if runtime_version in ("v4", "v4_2") else 10
         resp = requests.post(
             f"{api_base}{endpoint}",
             json={"question": question, "top_k_claims": top_k},
@@ -652,6 +653,12 @@ def _call_osmosis_api(question: str, api_base: str, token: str = "") -> dict:
                 "primary_type": data.get("primary_type"),  # V4-only
                 "routing_decision": data.get("routing_decision"),  # V4-only
                 "rerouter_promoted": data.get("rerouter_promoted"),  # V4-only
+                # V4.2 only fields
+                "layer": data.get("layer"),
+                "abstention_reason": data.get("abstention_reason"),
+                "abstain_category": data.get("abstain_category"),
+                "qa_alignment": data.get("qa_alignment"),
+                "escalation_reason": data.get("escalation_reason"),
             },
         }
 

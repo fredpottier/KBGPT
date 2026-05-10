@@ -1089,12 +1089,13 @@ def _call_runtime_v2_api(
         "Content-Type": "application/json",
     }
 
-    if runtime_version in ("v3", "v4"):
-        # V3 / V4 endpoints partagent le même schéma de réponse (V4 V3-compatible)
-        endpoint_path = f"/api/runtime_{runtime_version}/answer"
+    if runtime_version in ("v3", "v4", "v4_2"):
+        # V3 / V4 / V4.2 endpoints partagent le même schéma de réponse (rétro-compatible V3)
+        endpoint_seg = "v4_2" if runtime_version == "v4_2" else runtime_version
+        endpoint_path = f"/api/runtime_{endpoint_seg}/answer"
         # CH-46 L4 — top_k V4 : 20→12 par défaut, override V4_TOP_K_CLAIMS
         top_k_v4 = int(os.getenv("V4_TOP_K_CLAIMS", "12"))
-        payload_top_k = top_k_v4 if runtime_version == "v4" else 10
+        payload_top_k = top_k_v4 if runtime_version in ("v4", "v4_2") else 10
         payload = {"question": question, "top_k_claims": payload_top_k}
         resp = requests.post(
             f"{api_base}{endpoint_path}",
@@ -1105,13 +1106,14 @@ def _call_runtime_v2_api(
         answer = data.get("answer") or ""
         doc_ids = data.get("doc_ids_cited") or []
         # V3/V4 exposent chunks_used (= claims top-K post-rerank, source pour RAGAS contexts)
+        # V4.2 retourne chunks_used vide → fallback : pas de contexts pour RAGAS
         chunks_used = data.get("chunks_used") or []
         contexts = [(c.get("text") or "")[:1500] for c in chunks_used[:10] if c.get("text")]
         return {
             "question": question,
             "contexts": contexts,
             "answer": answer,
-            "graph_context_text": "",  # V3/V4 pas de KG context séparé
+            "graph_context_text": "",  # V3/V4/V4.2 pas de KG context séparé
             "response_mode": data.get("decision", "ANSWER"),
             "metadata": {
                 "doc_ids": doc_ids,
@@ -1123,11 +1125,17 @@ def _call_runtime_v2_api(
                 "regenerated": data.get("regenerated"),
                 "use_kg": True,
                 "runtime": runtime_version,
-                # V4-specific extras (présents seulement si runtime=v4)
+                # V4-specific extras
                 "primary_type": data.get("primary_type"),
                 "routing_decision": data.get("routing_decision"),
                 "rerouter_promoted": data.get("rerouter_promoted"),
                 "rerouter_promoted_to": data.get("rerouter_promoted_to"),
+                # V4.2-specific extras
+                "layer": data.get("layer"),
+                "abstention_reason": data.get("abstention_reason"),
+                "abstain_category": data.get("abstain_category"),
+                "qa_alignment": data.get("qa_alignment"),
+                "escalation_reason": data.get("escalation_reason"),
             },
         }
 
@@ -1282,7 +1290,11 @@ def _collect_api_samples(
     use_runtime_v2 = os.getenv("RAGAS_USE_RUNTIME_V2", "true").lower() == "true"
     runtime_version = os.getenv("RUNTIME_VERSION", "v2").lower()
     if use_runtime_v2 and use_kg:
-        if runtime_version == "v3":
+        if runtime_version == "v4_2":
+            logger.info("[RAGAS:BENCH] Using runtime V4.2 API (/api/runtime_v4_2/answer)")
+        elif runtime_version == "v4":
+            logger.info("[RAGAS:BENCH] Using runtime V4 API (/api/runtime_v4/answer)")
+        elif runtime_version == "v3":
             logger.info("[RAGAS:BENCH] Using runtime V3 API (/api/runtime_v3/answer)")
         else:
             logger.info("[RAGAS:BENCH] Using runtime V2 API (/api/runtime_v2/answer)")
