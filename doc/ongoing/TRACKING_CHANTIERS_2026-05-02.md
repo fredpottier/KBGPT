@@ -1,9 +1,23 @@
-# Tracking chantiers OSMOSIS — actif au 2026-05-02
+# Tracking chantiers OSMOSIS — actif au 2026-05-02 (rafraîchi 2026-05-06)
 
 > **But** : fichier de pilotage unique pour adresser les chantiers restants un à un.
-> **Source** : audit `BACKLOG_DEV_2026-05-01.md` + descriptions détaillées rédigées 02/05.
-> **Statut** : `TODO` / `IN_PROGRESS` / `DONE` / `BLOCKED` / `DEFERRED`.
+> **Source** : audit `BACKLOG_DEV_2026-05-01.md` + descriptions détaillées rédigées 02/05 + ajouts incrémentaux.
+> **Statut** : `TODO` / `IN_PROGRESS` / `DONE` / `BLOCKED` / `DEFERRED` / `SUPERSEDED`.
 > **Convention** : à chaque démarrage, mettre `IN_PROGRESS` + date. À chaque clôture, `DONE` + commit hash.
+> **Rafraîchissement 2026-05-06** : ajout des sections CH-30.9-18, CH-31, CH-32, CH-33, CH-34, CH-35, CH-36/37/38 (SUPERSEDED), CH-39 (Refonte V3 livrée), CH-40 (Sprint S0 V4 Calibration & Gold-set complet), CH-41 (V4 Facts-First Tranche 1 list — en cours, **CH-41.M BLOCKING avant tout code**). Pivot architectural V4 facts-first acté à 3 voix (Fred + Claude + ChatGPT) — ADR `chantiers/2026-05-06_CH-41_ADR_FACTS_FIRST.md` ratifié.
+
+---
+
+## 🚨 Direction architecturale courante (06/05/2026)
+
+**Pivot V4 facts-first** post-Sprint S0 :
+- V3 LLM-centric (chunks → LLM résume → réponse) abandonné comme cible — diagnostiqué « compression sémantique destructive » (factual_correctness 0.368, item_recall 0.07, 31.7% judge_overscored)
+- Cible V4 : Retrieval → Question Type Detection → Type-Adaptive Fact Extraction → Composition (LLM = formatage uniquement) → Verifier final
+- Déploiement par **tranches verticales** (pas MVP) : list → factual → temporal/comparison → causal → unanswerable/false_premise → verifier cascade
+- ADR maître : `doc/ongoing/chantiers/2026-05-06_CH-41_ADR_FACTS_FIRST.md` (intègre design ChatGPT 06/05 + 8 ajustements C1-C8 + réserve forte verrouillage contrats avant code)
+- Doc état des lieux S0 : `doc/ongoing/chantiers/2026-05-05_CH-40_S0_BASELINE.md` (504 lignes, self-contained, partage externe)
+- Design réf. : `doc/ongoing/chantiers/2026-05-06_CH-41_STRUCTURER_V1_DESIGN_REFERENCE.md`
+- **CH-41.M = bloquant pour tout le reste** : verrouiller contrats Structured Evidence Package commun + Domain Pack extension AVANT de coder.
 
 ---
 
@@ -23,7 +37,7 @@
 ## 🚧 Engagés mais non finalisés
 
 ### CH-02 — Modèle V3.3 résiduel post-V2 anchor-driven
-- **Statut** : IN_PROGRESS — Phase 1 cadrage livrée 2026-05-02 (`CADRAGE_CH02_V33_VS_V2_2026-05-02.md`), périmètre réduit à 4 sous-chantiers
+- **Statut** : IN_PROGRESS — Phase 1 cadrage livrée 2026-05-02 (`chantiers/2026-05-02_CH-02_CADRAGE_V33_VS_V2.md`), périmètre réduit à 4 sous-chantiers
 - **Effort total** : ~4j (au lieu des 2-3 sprints initiaux — V2 a absorbé l'essentiel de V3.3)
 - **Ordre validé** : CH-02.1 → CH-02.4 → CH-02.3 → CH-02.2
 
@@ -60,7 +74,7 @@
 #### CH-02.2 — Audit qualité 4 862 LOGICAL_RELATION existantes
 - **Statut** : DONE (2026-05-02, audit livré, en attente validation user pour exécution purge)
 - **Effort réel** : ~1h (47 paires auditées par Claude expert)
-- **Livrable** : `doc/ongoing/AUDIT_LOGICAL_RELATION_CH02_2_2026-05-02.md`
+- **Livrable** : `doc/ongoing/chantiers/2026-05-02_CH-02.2_AUDIT_LOGICAL_RELATION.md`
 - **Résultats** :
   - **EQUIVALENT** 12/12 = 100% factuel (mais ~90% verbatim copies — utilité faible)
   - **OVERLAP** 0/6 = 0% — fallback générique cassé (en réalité = SUPERSET/SUBSET/DISJOINT)
@@ -429,7 +443,7 @@
 ### CH-24 — UI Raisonnement étendu
 - **Statut** : TODO
 - **Effort** : 2j frontend
-- **Quoi** : Couvrir DIRECT/AUGMENTED, silences (le système n'a rien dit), tensions cross-doc dans la trace de raisonnement. ADR existe (`ADR_RAISONNEMENT_UI.md`).
+- **Quoi** : Couvrir DIRECT/AUGMENTED, silences (le système n'a rien dit), tensions cross-doc dans la trace de raisonnement. ADR existe (`chantiers/2026-04-29_CH-24_ADR_RAISONNEMENT_UI.md`).
 - **Pourquoi** : Aujourd'hui la trace ne montre que CROSS_DOC. Le compliance officer doit voir POURQUOI le système n'a rien dit sur un aspect.
 - **Acceptation** : sur 10 questions variées, la trace explique le mode choisi + les signaux écartés.
 
@@ -527,6 +541,251 @@
 - **Activation runtime** : nécessite `docker restart knowbase-app` une fois le bench actuel terminé (CH-30.7), puis tester un run via le tab.
 - **Reste** (déféré, hors scope CH-30.8) : adapter `OverviewTab` pour afficher 5 cards (ajout d'une card Aerospace V2 récap) — utile mais non bloquant.
 
+#### CH-30.9 — Brancher bench V2 sur les 3 onglets existants
+- **Statut** : DONE (2026-05-03)
+- **Quoi** : RAGAS / Contradictions / Robustesse interrogent désormais directement `runtime_v2/answer` au lieu de l'ancien `/api/search` V1.1.
+
+#### CH-30.10 — Robustness fallback LLM-juge pour catégories T7
+- **Statut** : DONE (2026-05-03)
+- **Quoi** : Mapping T7 → T6 keyword fallback ajouté pour les catégories anchor lifecycle.
+
+#### CH-30.11 — Diagnostics t2t5 + robustness → runtime_v2/answer
+- **Statut** : DONE (2026-05-03)
+
+#### CH-30.12 — RAGAS_USE_RUNTIME_V2 par défaut
+- **Statut** : DONE (2026-05-03) — env activé en prod.
+
+#### CH-30.13 — Frontend score N/A si proactive_count=0
+- **Statut** : DONE (2026-05-03)
+
+#### CH-30.14 — Supprimer fallback V1.1 dans diagnostics
+- **Statut** : DONE (2026-05-03)
+
+#### CH-30.15 — T2/T5 scorer V2 via LLM-juge Prometheus
+- **Statut** : DONE (2026-05-04)
+- **Note** : remplacé par Llama-3.3-70B en CH-34 suite audit underjudging Prometheus.
+
+#### CH-30.16 — Robustness scorers V2 (Prometheus puis Llama-3.3-70B)
+- **Statut** : DONE (2026-05-04)
+
+#### CH-30.17 — Adoucir prompt synthèse V2 (prompt-induced hallucination)
+- **Statut** : DONE (2026-05-04)
+
+#### CH-30.18 — Fix RAGAS NaN propagation moyennes
+- **Statut** : DONE (2026-05-04)
+- **Quoi** : `math.isnan` filter sur les scores RAGAS pour éviter pollution moyennes par valeurs manquantes.
+
+### CH-31 — Retrieval V2 enrichi (decomposer + HyDE + LLM-filter)
+- **Statut** : DONE (2026-05-04)
+- **Sous-chantiers** : CH-31.A query_decomposer branché, CH-31.B enrichi (answer_shape + HyDE + KG subject + term_lookup), CH-31.C LLM-filter post-retrieval, CH-31.D validation cross-domain.
+
+### CH-32 — Verification post-synth (premise + NLI judge)
+- **Statut** : DONE (2026-05-04)
+- **Sous-chantiers** : CH-32.A premise validator (logical-form + KG check), CH-32.B faithfulness NLI judge post-synthesis (mDeBERTa-v3-xnli-multilingual).
+
+### CH-33 — Optimisation latence pipeline V2 (model routing + max_tokens)
+- **Statut** : DONE (2026-05-04)
+
+### CH-34 — Audit retrieval failures + judge calibration (post-bench 04/05)
+- **Statut** : DONE (2026-05-04)
+- **Quoi** : Identifié Prometheus underjudging 70% des cas. Migré juge bench → Llama-3.3-70B-Instruct via DeepInfra.
+
+### CH-35 — Sprint A : Retrieval overhaul (Hybrid + filter + re-rank)
+- **Statut** : DONE (2026-05-04/05)
+- **Sous-chantiers** : CH-35.A1 hybrid BM25+vector RRF, CH-35.A2 LLM-filter min_keep adaptatif + bypass factuel, CH-35.A3 Subject Resolver tie-breaker par anchor, CH-35.A4 cross-encoder re-rank top-K (BGE-reranker-v2-m3).
+- **CH-35.A5** Query decomposer aggressive mode (multi_hop / conditional) : SUPERSEDED par V4 facts-first.
+
+### CH-36 — Sprint B : Synthèse anti-hallucination
+- **Statut** : SUPERSEDED par CH-39 puis CH-41 (V4 facts-first)
+
+### CH-37 — Sprint C : Régulatoire guardrails
+- **Statut** : SUPERSEDED par CH-41 (verifier cascade reporté en tranche 6 V4)
+
+### CH-38 — Sprint D : Calibration finale + Domain Pack
+- **Statut** : SUPERSEDED par CH-40 (Sprint S0 V4 calibration) + CH-41.M (contrat Domain Pack extension)
+
+### CH-39 — Refonte runtime_v3 minimaliste (5 stages)
+- **Statut** : DONE (2026-05-05)
+- **Effort réel** : ~1 jour
+- **Quoi** : Pipeline V3 minimaliste 5 stages, 250 lignes vs 951 V2. Hybrid retrieve + cross-encoder rerank GPU + agentic synthesis 1-LLM-call + NLI mDeBERTa multilingue + regen conditionnel. 0 listing métier hardcodé.
+- **Sous-chantiers** :
+  - CH-39.1 Setup mDeBERTa-v3-xnli multilingue (HHEM-2.1 incompatible transformers 5.x)
+  - CH-39.2 Agentic synthesis prompt v4 + output JSON
+  - CH-39.3 runtime_v3/pipeline.py
+  - CH-39.4 API endpoint `/api/runtime_v3/answer`
+  - CH-39.5 Validation bench v2 vs v3 (Robust V3_FINAL3 0.545 vs V2 ABC1 0.495 = +5pp)
+- **Pipeline V3 livré 2026-05-05 matin**, sert de baseline V3 pour Sprint S0 V4.
+
+### CH-40 — Sprint S0 V4 : Calibration & Gold-set
+- **Statut** : DONE (2026-05-05/06)
+- **Effort réel** : 1 jour (vs 1 semaine estimé — gold-set bootstrap auto + structured metrics + scripts d'analyse)
+- **Source** : `doc/ongoing/chantiers/2026-05-05_CH-40_S0_BASELINE.md` (504 lignes, self-contained), `doc/ongoing/chantiers/2026-05-05_CH-40_S0_DISAGREEMENT_ANALYSIS.md`, `doc/ongoing/chantiers/2026-05-05_CH-40_S0_SANITY_CHECK.md`
+- **Sous-chantiers** :
+  - CH-40.0 Construction gold-set v4 (97q brownfield stratifiées + criterion-level annotations bootstrap Qwen-72B + review Claude)
+  - CH-40.1 Activation RAGAS FactualCorrectness (extract_reference étendu pour gold-set v4 + signature `ascore` corrigée + profile `gold_v4` + 3e MetricBar UI)
+  - CH-40.2 Métriques structurées par type (item_level_recall, exact_match_identifiers, citation_presence_rate, coverage_state_accuracy) — CRITIQUE garde-fou anti-overfit
+  - CH-40.3 Dépose keyword scorer fallback + retry juge LLM exponential backoff
+  - CH-40.4 Calibration Pearson juge (verdict FAIL : global 0.46, false_premise -0.94, unanswerable -0.79 = bug schéma gold-set, pas du juge)
+  - CH-40.5 Bench baseline V3 (V3_S0_BASELINE Robust 0.531 / V3_S0_GOLD4 RAGAS faith 0.536 / ctx 0.688 / factual 0.368) + doc `chantiers/2026-05-05_CH-40_S0_BASELINE.md`
+  - CH-40.6 Logging désaccords judge vs structured (31.7% judge_overscored documentés top-20)
+  - CH-40.7 Sanity check externe Fred (9q FR pour verdict ternaire OK/KO/bizarre)
+- **Bilan** : H1 réfutée (factual_correctness < faithfulness), gate Pearson en attente de correction schéma gold-set false_premise/unanswerable. Pivot architectural V4 facts-first décidé post-S0.
+
+---
+
+## 🚀 V4 Facts-First (NEW post-pivot 06/05/2026)
+
+### CH-41 — V4 Facts-First : Tranches 1-5 + couches transverses + leviers latence
+- **Statut** : DONE (2026-05-07, pipeline V4 stabilisé pour 5 types structurels + leviers 1+2+3 retenus)
+- **Effort réel** : 1 jour livraison Tranches + 1 jour leviers latence (vs estimation initiale 4-5 sem)
+- **ADR** : `doc/ongoing/chantiers/2026-05-06_CH-41_ADR_FACTS_FIRST.md` (validé 3 voix Fred + Claude + ChatGPT)
+- **Cible atteinte** : pipeline facts-first complet sur les 5 types structurels (list / factual / temporal / comparison / causal) + 2 spéciaux (unanswerable / false_premise via routing)
+- **Bilan** : routing 82% sur 5 types (LLM zero-shot Qwen-72B), verifier déterministe 100%, 0 hallucination rejetée. p50 list 44s, factual 26.5s. Leviers latence livrés (workers=4 default, timeouts 120s, mode=single list). Llama-Turbo Structurer et HHEM-2.1 Channel 2 abandonnés après tests live (résultats catastrophiques abstention systématique / régression latence-qualité).
+- **Doc bilan** : `doc/ongoing/chantiers/2026-05-07_BENCH_GLOBAL_V4_FINAL_ANALYSIS.md` + `2026-05-07_BENCH_POST_LEVIERS_LATENCE.md`
+
+#### CH-41.M — Verrouillage contrats Facts-First (BLOQUANT, NEW review ChatGPT)
+- **Statut** : IN_PROGRESS (2026-05-06)
+- **Effort** : 2-3 jours
+- **Pourquoi BLOQUANT** : réserve forte ChatGPT — « verrouiller contrats Structured Evidence Package commun + Domain Pack extension AVANT de coder, sinon refaire les fondations à tranche 3 (temporal/comparison) ».
+- **Livrables** :
+  1. `schemas/facts_first_v1_common.json` — socle commun figé (champs partagés tous types : `schema_version`, `primary_type`, `answerability`, `coverage_state`, `source`, `confidence`, `language`, `extracted_at`, `extraction_model`)
+  2. `domain_packs/_template/facts_first_extensions.yaml` — format YAML extension Domain Pack avec règle invariante `maps_to` core minimal universel
+  3. Doc mode EAV abstention structurée (D-FF11) avec disclaimer explicite, **pas chemin généraliste** (alerte si > 10% trafic EAV)
+  4. Cadrage panel stress-test 100q (D-FF12) = couverture typologique seulement, pas qualité
+- **Validation** : Fred + relecture LLM tiers (Claude web, ChatGPT) avant unlock CH-41.0
+
+#### CH-41.0 — Pré-requis Tranche 1 (gold-sets + panel stress-test)
+- **Statut** : DONE (2026-05-06, tous livrables A+B+C+D+E livrés en 1 jour)
+- **Effort** : 1 jour réel (vs 1 semaine estimée)
+- **Livrables** :
+  - **A+B** ✅ DONE (2026-05-06) : `gold_set_v4.json` enrichi de 20 → **55 list questions** / **251 items annotés** (cibles 50/250 atteintes). Méthode : formulation manuelle Claude depuis claims Neo4j (Cypher direct), PAS de LLM bootstrap (rejet feedback Fred « usine à gaz »). IDs `GOLD_v4_LIST_NEW_098` à `132`. Couverture : EU 2021/821 (autorisations, scope, exemptions, annexes, transit, obligations EM, definitions Article 2), CS-25 amdt 28 (take-off, landing, ice protection, AMC, icing exclusions, weight/balance), Annex I dual-use 2024/2547 (categories, machine tools 2B001, entry codes, exclusion notes).
+  - **C** ✅ DONE (2026-05-06) : `scripts/build_panel_stress_test_100q.py` exécuté + hotfix `_fix_panel_hr_and_lang.py`. **124 questions** (médical 20, legal 22, software 20, hr 20, product 22, edge 20). Distribution : factual 25, list 21, temporal 17, comparison 16, causal 15, unanswerable 11, false_premise 4, edge non-typés 15. Langs : 73 fr / 51 en. Cible HFF5 ≥ 95% : à mesurer en CH-41.1.
+  - **D** ✅ DONE (2026-05-06) : `scripts/fix_gold_set_v4_false_premise_unanswerable.py` exécuté. 10/10 questions (5 false_premise + 5 unanswerable) annotées avec signaux sémantiques multilingues domain-agnostic. Champs ajoutés : `correct_premise_rejection_signals[]` / `unanswerable_explicit_signals[]` + `expected_response_summary` + `_phase_d_metadata`.
+  - **E** ✅ DONE (2026-05-06) : baseline factual mesuré sur 25q factual du gold-set v4. **factual_correctness mean = 0.361** (min 0.0, max 1.0, n=25/25 valides). Cohérent V3_S0_GOLD2 (0.368, delta -0.007 = variance). Gate D-FF13 = ≥ 0.361 (variance ±0.05 → plancher 0.311). Persisté `data/benchmark/calibration/rag_baseline_factual.json`. Doc : `doc/ongoing/chantiers/2026-05-06_CH-41_RAG_BASELINE_FACTUAL.md`.
+
+#### CH-41.1 — QuestionAnalyzer (composant [A])
+- **Statut** : DONE (2026-05-06, scope ré-cadré 5 types structurels — voir doc résultats)
+- **Module** : `src/knowbase/facts_first/question_analyzer.py`
+- **Eval** : `scripts/eval_question_analyzer.py` + `data/benchmark/calibration/question_analyzer_eval.json`
+- **Doc résultats** : `doc/ongoing/chantiers/2026-05-06_CH-41.1_QUESTION_ANALYZER_RESULTS.md`
+- **Résultats** : top-1 = 0.735 (7 types) / 0.795 (5 types structurels) ; HFF5 coverage = **1.000** (gate ≥ 0.95 ✓)
+- **Décision scope** : `unanswerable` et `false_premise` retirés du périmètre QuestionAnalyzer (verdicts d'answerabilité non détectables sans corpus). Promotion vers ces 2 types se fait en aval :
+  - EvidenceCollector (CH-41.2) → promotion `unanswerable` si 0 evidence
+  - Structurer/Verifier (CH-41.3) → promotion `false_premise` si contradiction prémisse vs evidence
+- **Charte anti-V2 respectée** : prompt sémantique pur (pas de regex, pas de listing métier), multilingue par construction, < 50 lignes
+- **Quoi** : Multi-label top-2 avec confidence threshold (≥0.7 single / 0.5-0.7 combined / <0.5 EAV fallback). Démarrer list detection, étendre aux autres types au fur et à mesure des tranches.
+- **Gate** : accuracy ≥ 90% top-1 ET ≥ 95% top-2 sur 100q humainement annotées par type. **Reste à atteindre 0.90 top-1 sur 5 types après cleanup ground truth temporal/comparison ambiguous (différé post-CH-41.4).**
+
+#### CH-41.2 — EvidenceCollector (composant [B])
+- **Statut** : DONE (2026-05-06)
+- **Module** : `src/knowbase/facts_first/evidence_collector.py`
+- **Tests** : 9 tests pytest avec mocks (Neo4j + ClaimRetriever) — all PASS
+- **Wraps** : `ClaimRetriever` runtime_v3 existant (CH-35 hybrid + rerank GPU multilingue) ; enrichit chaque hit via Neo4j Cypher pour `verbatim_quote`, `publication_date`, `chunk_id` — fallback chunk-only si pas de claim_id ou Neo4j down (résilience prouvée)
+- **Quoi** : Source primaire = Claims atomiques Neo4j (40 196 claims médiane 113 chars). Source secondaire = chunks Qdrant. Flux : Qdrant top chunks → claim_ids via chunk_ids → enrichir Neo4j → DocumentContext + LOGICAL_RELATION → fallback chunks-only si claims insuffisantes.
+- **Documenter** : fallback tenant sans Claims indexés (Domain Pack neuf, dégradation contrôlée).
+
+#### CH-41.3 — ListStructurer + ListComposer + Channel 1 Verifier (composants [C][D][E1])
+- **Statut** : DONE (2026-05-06)
+- **Modules** : `src/knowbase/facts_first/list_structurer.py`, `list_composer.py`, `list_verifier.py`, `pipeline.py` (orchestrator)
+- **Tests** : 6+5+13 = 24 tests pytest (mocks LLM + déterministe) — all PASS
+- **ListStructurer** : prompt extractive D-FF1 (every item cites verbatim quote) + validation déterministe (quote substring/overlap match in pool + dedup normalized_label + max_items cap). Sur bench live : 1/180 items rejetés en hallucination = 0.5% taux propre.
+- **ListComposer** : LLM cantonné formatage (D-FF4) — labels verbatim + sentence_support[support_ids]. Fallback déterministe si LLM échoue (intro + bullet list).
+- **Channel1Verifier** : 5 checks déterministes (schema common+list, item integrity quote≥10 chars + doc_id, composer mapping support_ids existants, coverage coherence, identifier exact-match heuristique). Sur bench live : verifier_passed_rate = **100%**.
+- **Quoi** : Schéma JSON list (items[] + enumeration_quality), Composer borné JSON → prose avec sentence_support[support_ids[]], Verifier Channel 1 déterministe avec repair policy (identifier mismatch → retry, missing item → retry, 2 fails → deterministic fallback). Stockage Neo4j : `(:StructuredList)-[:HAS_ITEM]->(:StructuredListItem)-[:DERIVED_FROM]->(:Claim)` runtime-only par défaut.
+
+#### CH-41.4 — Bench dédié list + ablation tranche 1
+- **Statut** : DONE (2026-05-06, verdict partiel)
+- **Bench** : `scripts/bench_list_tranche1.py` — 35 questions handcrafted GOLD_v4_LIST_NEW_*
+- **Doc résultats** : `doc/ongoing/chantiers/2026-05-06_CH-41.4_BENCH_LIST_TRANCHE1_RESULTS.md`
+- **Résultats finaux post-optimisations (matcher sémantique e5 cosine ≥ 0.85)** : item_f1 = **0.827** ✓ | item_recall = **0.679** ✓ (vs V3 0.07 = **+61pp** ≈ gate ADR +58pp) | item_precision = 0.683 | verifier_passed_rate = **1.000** ✓ | **source_acc = 0.427** ✓→amélioré +10pp (gate 0.80 encore non atteint) | p95 = 86s mesuré / **~66s estimé avec Composer Gemma-3-12b-it** ✗
+- **Résultats (matcher strict)** : item_f1 = 0.627 | item_recall = 0.203 (×3 sous-estimation — paraphrases LLM + cross-lingual FR↔EN)
+- **Optimisations appliquées (2026-05-06 PM)** :
+  1. ✅ Cleanup gold-set : 169/169 items annotés `normalized_label_en` (49 via LLM, 120 direct EN) via `scripts/cleanup_gold_set_v4_normalized_labels.py`
+  2. ✅ Source accuracy fix : doc_id matcher tolérant (préfixe ≥ 12 chars) → +10pp (0.33 → 0.43)
+  3. ✅ Latency Composer : routage Gemma-3-12b-it (8.9s mean vs 18.9s Qwen72B = **2.8× plus rapide**, verifier 100%). Bench micro `scripts/bench_composer_models.py` × 4 modèles. Gain estimé p50 49s→39s, p95 86s→66s. Tests pytest 41/41 OK.
+- **Rescoring sémantique** : `scripts/rescore_bench_list_semantic.py` + `data/benchmark/calibration/{bench_list_tranche1, bench_list_tranche1_semantic, bench_composer_models}.json`
+- **Latence** : Structurer + Composer = 2 appels séquentiels Qwen2.5-72B DeepInfra (~30-40s chacun). Optimisable via vLLM EC2 (Qwen2.5-14B AWQ 5-10× plus rapide) ou Composer modèle plus petit.
+- **Quoi** : Bench item_f1 / item_recall / item_precision / source_accuracy / coverage_state_accuracy / latence p50-p95 sur les 50q list du gold-set v4 enrichi. Comparaison V3 LLM-libre vs V4 facts-first list. Ablation par composant (sans QuestionAnalyzer / sans EvidenceCollector Claims / sans Channel 1 verifier).
+- **Gate** : item_f1 ≥ 0.70 ✓, item_recall ≥ 0.65 ✗ (mais 2.5× V3), source_accuracy ≥ 0.80 ✗, p95 ≤ 35s ✗.
+
+#### CH-41.5 — Chunk-extractive fallback factual simple (D-FF13)
+- **Statut** : DONE (2026-05-06, intégré dans FactualStructurer Tranche 2)
+- **Module** : `src/knowbase/facts_first/factual_structurer.py` (méthodes `_should_trigger_d_ff13`, `_chunk_extractive_fallback`, `_detect_conflict`)
+- **Modèle fallback** : `google/gemma-3-12b-it` (extract-only, prompt court ≤30 lignes)
+- **Tests** : 4 tests dédiés (D-FF13 trigger, désactivation analyzer/chunk score bas, kind=text rejected, conflict detection)
+- **Bench live (n=21 valid)** : activation rate **19%** (4/21), tous en mode `factual_simple_chunk_extractive` (0 conflit détecté)
+- **Gate vs V3 RAG baseline** : factual_correctness 0.312 vs 0.361 = delta -0.049 → DANS variance LLM-judge ±0.05 (gate tangent)
+- **Doc résultats** : `doc/ongoing/chantiers/2026-05-06_CH-41_TRANCHE2_FACTUAL_RESULTS.md`
+- **Pourquoi** : préserver le bénéfice du mécanisme V1.1 historique « si KG silencieux → RAG pur » (mode `DIRECT` du `signal_policy.py`) dans l'architecture facts-first. Décision validée 3 voix (Fred + Claude + ChatGPT, 2026-05-06) après constat de la perte de ce mécanisme dans le pipeline V3 actuel et risque de régression sur questions factuelles simples.
+- **Quoi** : fallback déterministe activé quand `primary_type=factual` ET `FactualStructurer` faible confiance ET top chunk Qdrant fiable ET `object.kind` court (date/number/identifier/name/currency/duration/boolean) ET aucune `LOGICAL_RELATION` critique ET pas de désaccord chunk vs fact. Sortie au format `facts_first_v1` valide avec `diagnostic.fallback_mode = "factual_simple_chunk_extractive"`. Reste un Structured Evidence Package, pas un retour V3 caché.
+- **Cas désaccord** : si fact faible diverge du chunk → `coverage_state=unknown` + `fallback_mode="factual_simple_conflict_suspected"` + `answerability=partial`. Pas de tranchage arbitraire.
+- **Seuil** : `initial_threshold = 0.7`, recalibration obligatoire post-tranche 2 sur gold-set factual simple.
+- **Gate ship tranche 2 (factual)** : `factual_correctness(facts-first avec D-FF13) ≥ factual_correctness(RAG baseline pur)` sur ≥30q factual simples. Sinon factual ne ship pas, V3 reste actif sur ce type.
+- **Implication CH-41.0** : ajouter mesure RAG baseline pur (retrieval + LLM extract sans Structurer) dans le bench préparation, en parallèle de Facts-First.
+
+### Tranches futures V4 (non démarrées)
+
+- **Tranche 6 — verifier cascade complet** : Channel 2 NLI ciblé multilingue + bake-off A/B/C juges si Pearson encore < 0.7 après correction schéma. Gate faithfulness +5pp + regen rate -50% + delta FR-EN ≤ 5pp. Effort 2 sem. **NOTE 2026-05-07** : Channel 2 mDeBERTa-v3-base maintenu en prod (HHEM-2.1 testé et abandonné). Cascade C2+C3 différée tant que Pearson juge non recalibré (cf CH-40).
+
+**Tranches 1-5 livrées en CH-41 (2026-05-07)** : list / factual / temporal / comparison / causal opérationnels.
+
+---
+
+### CH-42 — Sprint S2 V4 : Question Router fine-tuné + Adaptive Retrieval
+- **Statut** : IN_PROGRESS (2026-05-07, en pause user-decision après Phase 4 cascade)
+- **ADR** : `doc/ongoing/chantiers/2026-05-05_CH-40_ADR_V4_ARCHITECTURE.md` §9 (addendum 2026-05-07 — pivot routing distribué, gate amendé)
+- **Doc challenge externe** : `doc/ongoing/chantiers/2026-05-07_S2_ROUTER_CHALLENGE_EXTERNE.md` (290 lignes self-contained)
+- **Doc Phase 0 audit** : `doc/ongoing/chantiers/2026-05-07_PHASE0_AUDIT_TAXONOMY.md`
+- **Cible amendée §9.4** : `answer_shape` top-1 ≥ 90% pré-retrieval + routing final effective ≥ 90% (post-retrieval inclus)
+- **Plafond mécanique mesuré** : 86% (17/132 fails corpus_dependent → non décidables pré-retrieval). Gate 90% top-1 strict pré-retrieval **mathématiquement non atteignable** sur taxonomie originale → pivot architecture en 2 axes.
+
+#### CH-42.1 — Phase 0 Audit taxonomique (54 fails)
+- **Statut** : DONE (2026-05-07)
+- **Résultats** : 33% linguistic_pattern, 35% intrinsically_ambiguous, **31% corpus_dependent**
+- **Implication** : confirmation empirique du pivot taxonomie distribuée
+
+#### CH-42.2 — Phase 1 Re-tag gold_set_v4 (3 nouveaux champs)
+- **Statut** : DONE (2026-05-07, `gold_set_v4_retagged.json`)
+- **Champs ajoutés** : `gold_answer_shape` (5 classes), `gold_epistemic_status` (3 classes), `gold_corpus_signal_required` (6 classes)
+- **47/132 questions (36%)** nécessitent un signal corpus (contradiction 14, supersession 13, kg_meta 10, missing_info 6, premise_check 4)
+
+#### CH-42.3 — Phase 2 Re-train sur answer_shape (5 classes)
+- **Statut** : DONE (2026-05-07, `data/router/v3/model/`)
+- **Dataset** : 14767q multi-source (Mintaka 3990 + SQuAD2 unans 1500 + SQuAD2 causal 1297 + HotpotQA 884 + FalseQA 1867 + 490 manuel + 3900 traductions FR Qwen-72B), re-taggué via patterns
+- **Modèle** : XLM-RoBERTa-base (278M, 5 epochs bf16 GPU L4, train_loss 0.22)
+- **Résultats** :
+  - Val (notre split) : top-1 **97.6%**, top-2 **99.7%**, F1 0.97
+  - gold_set_v4 retagged : top-1 **73.5%**, top-2 **86.4%** (vs 58% sur ancienne taxonomie, +15.5pp)
+  - panel_stress (multi-domain) : top-1 **79.8%**, top-2 **91.5%** (vs 55% avant, +24.8pp)
+  - Per-shape gold : causal 100% ✅, list 94% ✅, comparison_explicit 25% (n=4 faible), scalar_factual 58%, temporal 50%
+- **Validation empirique du pivot** : +24.8pp panel multi-domaines confirme que le pivot taxonomie EST la bonne direction.
+
+#### CH-42.4 — Phase 4 Cascade calibrée DeBERTa + LLM fallback
+- **Statut** : DONE (2026-05-07, `data/router/v3/cascade_calibration.json`)
+- **Calibration** : Temperature scaling sur val (T=1.666)
+- **Résultats** :
+  - gold_set_v4 effective @ thr=0.9 : **80.3%** (DeBERTa pour 79.5% des cas, LLM fallback 20.5%)
+  - panel effective @ thr=0.95 : **84.7%** (DeBERTa pour 83%, LLM 17%)
+- **Diagnostic** : la cascade plafonne à 80-85% car même les cas confident (proba >0.9) ne dépassent pas 79% accuracy. Gate strict 90% non atteint.
+- **Décision user 2026-05-07** : **arrêt momentané du chantier S2** — plafond gain marginal vs effort restant. Reprendre après priorités produit prioritaires (cf "À faire" ci-dessous).
+
+#### CH-42.5 — Phase 3 Active learning ciblé + Phase 5 EvidenceRerouter étendu (NON DÉMARRÉS)
+- **Statut** : DEFERRED (2026-05-07, suspendu sur décision Fred)
+- **Pourquoi DEFERRED** : audit Phase 0 + run cascade montrent qu'on plafonne à ~85% effective. Pour atteindre gate 90%, options Phase 3 (active learning sur 35 fails) + Phase 5 (rerouter étendu) — gain estimé +5-10pp mais effort 3-5 sessions. Fred priorise d'autres chantiers business critiques.
+- **Reprise possible** : 2-3 sessions effort si gate strict redevient critique
+- **Livrables si repris** :
+  - Phase 3 : génération 300 questions régulatoires ciblées sur fail patterns scalar_factual/temporal + re-train v4
+  - Phase 5 : EvidenceRerouter étendu avec promotions corpus-aware déclaratives (`scalar_factual → comparison` si CONTRADICTS ≥ 2, `* → temporal` si SUPERSEDES chain ≥ 2 hops, `* → unanswerable` si answerability_hint, `* → false_premise` si premise_validator)
+  - Bench séparé du rerouter sur les 47 cas corpus_dependent
+
+#### CH-42.B — Adaptive Retrieval modes (NON DÉMARRÉ, hors scope priorités actuelles)
+- **Statut** : DEFERRED (2026-05-07)
+- **Effort estimé** : 2-3 sessions
+- **Livrables prévus** :
+  - Mode `list` doc-scoped scroll Qdrant K=30-50 (cible exact_id list 0.199 → ≥0.50)
+  - Mode `versioning` Neo4j 2-hop sur LIFECYCLE_RELATION + LOGICAL_RELATION pour temporal/comparison/causal (cible T7 lifecycle +8pp)
+- **Note** : moins prioritaire que les chantiers business car les modes actuels (single retrieval + EvidenceRerouter post-retrieval CH-42.3) atteignent déjà des résultats acceptables.
+
 ---
 
 ## ⚙️ Dette technique
@@ -556,6 +815,21 @@
 | 2026-05-02 | Création | Tracking initial 29 chantiers, descriptions étoffées issues du backlog 2026-05-01 |
 | 2026-05-02 | CH-01 livré | Recovery au boot worker : `_recover_interrupted_jobs()` dans `worker.py:warm_clients()`, validé end-to-end (8/8 tests + dry-run injection + restart prod log "No interrupted jobs to recover") |
 | 2026-05-03 | CH-05.4/5 ajoutés | Traçabilité footnotes Wikipedia-style + deep-link PDF `#page=N` (livrés post-compaction 2026-05-02 en réaction au feedback UX "indigeste") |
+| 2026-05-03 | CH-30.9-14 livrés | Diagnostics V2 branchés sur `runtime_v2/answer`, RAGAS_USE_RUNTIME_V2 par défaut, fallback V1.1 supprimé, frontend score N/A |
+| 2026-05-04 | CH-30.15-18 + CH-31/32/33/34/35 livrés | Sprint A retrieval overhaul (hybrid+filter+rerank), retrieval enrichi (decomposer+HyDE+LLM-filter), verification post-synth (premise+NLI), audit juge migré Prometheus → Llama-3.3-70B |
+| 2026-05-05 | CH-39 livré (Refonte V3) | Pipeline V3 minimaliste 5 stages 250 lignes, 0 hardcoded list, livré matin. Bench Robust V3_FINAL3 0.545 vs V2 ABC1 0.495 = +5pp |
+| 2026-05-05/06 | CH-40 livré (Sprint S0 V4) | Calibration & gold-set : 97q stratifié + structured metrics anti-overfit + Pearson juge (FAIL global 0.46) + disagreement summary (31.7% overscored) + `chantiers/2026-05-05_CH-40_S0_BASELINE.md` 504 lignes self-contained |
+| 2026-05-06 | Pivot V4 facts-first | Décision architecturale 3 voix (Fred + Claude + ChatGPT) — abandon V3 LLM-centric, cible facts-first par tranches verticales. ADR `chantiers/2026-05-06_CH-41_ADR_FACTS_FIRST.md` ratifié. CH-36/37/38 SUPERSEDED |
+| 2026-05-06 | CH-41 créé | V4 Facts-First Tranche 1 list. **CH-41.M BLOQUANT** (verrouillage contrats) avant CH-41.0 pré-requis. Réserve forte ChatGPT review intégrée |
+| 2026-05-06 | Tracking rafraîchi | Mise à jour exhaustive : ajout CH-30.9-18, CH-31/32/33/34/35, CH-36/37/38 (SUPERSEDED), CH-39 (DONE), CH-40 (DONE), CH-41 (IN_PROGRESS) |
+| 2026-05-06 | CH-41.M livré | Verrouillage contrats Facts-First : 8 schémas JSON figés + 2 YAML Domain Pack (template + aerospace) + doc EAV abstention + cadrage stress-test 100q |
+| 2026-05-06 | Réorg `chantiers/` | 25 docs liés au tracking centralisés dans `doc/ongoing/chantiers/` avec préfixe date `YYYY-MM-DD_CH-XX_*.md`. 6 douteux laissés à racine pour validation |
+| 2026-05-06 | D-FF13 + CH-41.5 ajoutés | Garde-fou chunk-extractive fallback pour factual simple (préserve mécanisme V1.1 « KG silencieux → RAG pur »). Validé 3 voix Fred + Claude + ChatGPT |
+| 2026-05-07 | CH-41 livré + bench global V4 | Tranches 1-5 V4 livrées (5 types structurels + 2 spéciaux). Bench global 132q : routing 82%, verifier 100%, 0 hallucination. p50 list 44s, factual 26.5s. |
+| 2026-05-07 | Leviers latence 1-5 testés | Levier 1 (mode=single list), 2 (workers=4), 3 (timeouts 120s) RETENUS. Levier 4 (Llama-Turbo) ABANDONNÉ (129/132 abstentions piège). Levier 5 (HHEM-2.1) ABANDONNÉ (latence +25%, verifier régresse). Worst-case factual 794s éliminé. Mistral-Small-22B candidat optionnel via env (-25% p50). |
+| 2026-05-07 | Audit triangulé S2 | Trois LLM externes (ChatGPT, Claude Web) + audit Phase 0 (54 fails) convergent : 31% corpus_dependent → gate 90% strict pré-retrieval mathématiquement non atteignable. Pivot architecture en 2 axes (answer_shape pré-retrieval + epistemic_status partiellement post-retrieval). |
+| 2026-05-07 | ADR §9 amendement | Addendum §9 ADR V4 : taxonomie distribuée acté. Gate révisé : 90% answer_shape + 90%+ effective. Garde-fous (rerouter explicable + re-tag gold). |
+| 2026-05-07 | CH-42 partiel + DEFERRED | Phase 0/1/2/4 livrées (audit, re-tag gold, re-train, cascade). Gain mesuré +24.8pp panel top-1 vs run précédent. Phase 3 (active learning) + Phase 5 (rerouter étendu) + S2.B (adaptive retrieval) DEFERRED sur décision Fred — plafond gain marginal vs priorités business. |
 
 ---
 
@@ -566,3 +840,4 @@
 - **DONE** : terminé, indiquer le commit hash
 - **BLOCKED** : bloqué par une dépendance externe (corpus, etc.)
 - **DEFERRED** : repoussé sciemment (ex: attendre refactor profond)
+- **SUPERSEDED** : remplacé par un chantier plus récent qui en absorbe le scope (ex: CH-36/37/38 par CH-39 puis CH-41 V4 facts-first)

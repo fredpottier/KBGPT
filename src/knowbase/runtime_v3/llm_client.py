@@ -35,6 +35,11 @@ DEEPINFRA_BASE_URL = "https://api.deepinfra.com/v1/openai"
 DEEPINFRA_DEFAULT_MODEL = "Qwen/Qwen2.5-72B-Instruct"
 VLLM_DEFAULT_MODEL = "Qwen/Qwen2.5-14B-Instruct-AWQ"
 
+# CH-48 — Together AI serverless (alternative à DeepInfra public, x5-10 plus rapide)
+# Activé si TOGETHER_API_KEY est défini dans l'env. Priorité : Together > vLLM EC2 > DeepInfra.
+TOGETHER_BASE_URL = "https://api.together.xyz/v1"
+TOGETHER_DEFAULT_MODEL = "Qwen/Qwen2.5-72B-Instruct-Turbo"
+
 
 class LLMBackendUnavailable(Exception):
     """Raised when no LLM backend is available."""
@@ -96,7 +101,8 @@ class RuntimeLLMClient:
     def _resolve_endpoint(self) -> dict:
         """Résout l'endpoint actif avec cache court (re-check toutes les `endpoint_cache_seconds`).
 
-        Politique :
+        Politique (CH-48 amendée) :
+        0. Tente Together AI serverless (TOGETHER_API_KEY) → si défini, priorité (latence x5-10)
         1. Tente vLLM EC2 (Redis burst state) avec health check rapide → si OK, vLLM
         2. Tente env VLLM_URL avec health check → si OK, vLLM
         3. Sinon DeepInfra (DEEPINFRA_API_KEY)
@@ -110,6 +116,22 @@ class RuntimeLLMClient:
             self._endpoint is not None
             and now - self._endpoint_resolved_at < self.endpoint_cache_seconds
         ):
+            return self._endpoint
+
+        # 0. Together AI serverless (CH-48) — priorité si TOGETHER_API_KEY défini
+        # Pas de health check (API publique stable)
+        together_key = os.getenv("TOGETHER_API_KEY")
+        if together_key:
+            self._endpoint = {
+                "url": TOGETHER_BASE_URL,
+                "model": os.getenv("TOGETHER_RUNTIME_MODEL", TOGETHER_DEFAULT_MODEL),
+                "headers": {"Authorization": f"Bearer {together_key}"},
+                "provider": "together",
+            }
+            self._endpoint_resolved_at = now
+            logger.info(
+                f"RuntimeLLMClient → Together AI serverless (model={self._endpoint['model']})"
+            )
             return self._endpoint
 
         # 1. Tenter vLLM EC2 via Redis burst state (priorité — déjà payé/actif)
@@ -157,7 +179,7 @@ class RuntimeLLMClient:
         self._endpoint = None
         self._endpoint_resolved_at = now
         raise LLMBackendUnavailable(
-            "No LLM backend available: vLLM EC2 unhealthy + VLLM_URL unhealthy + DEEPINFRA_API_KEY missing"
+            "No LLM backend available: TOGETHER_API_KEY/vLLM EC2/VLLM_URL/DEEPINFRA_API_KEY missing"
         )
 
     def chat_completion(
@@ -214,10 +236,12 @@ class RuntimeLLMClient:
         if endpoint is None:
             raise LLMBackendUnavailable("No backend resolved")
 
-        # CH-33 — model_override (DeepInfra only). Pour vLLM EC2, on garde le
-        # modèle local (override ignoré, le 14B AWQ est déjà rapide).
+        # CH-33/CH-48 — model_override accepté pour DeepInfra ET Together AI.
+        # Pour vLLM EC2, on garde le modèle local (override ignoré, le 14B AWQ
+        # est déjà rapide).
         eff_model = endpoint["model"]
-        if model_override and endpoint.get("provider") == "deepinfra":
+        provider = endpoint.get("provider")
+        if model_override and provider in ("deepinfra", "together"):
             eff_model = model_override
         payload: dict[str, Any] = {
             "model": eff_model,
@@ -232,32 +256,52 @@ class RuntimeLLMClient:
             payload["top_logprobs"] = top_logprobs
 
         eff_timeout = timeout if timeout is not None else self.timeout
-        try:
-            with httpx.Client(timeout=eff_timeout) as client:
-                resp = client.post(
-                    f"{endpoint['url']}/chat/completions",
-                    json=payload,
-                    headers=endpoint["headers"],
+        # CH-48 — retry ciblé 429 (rate-limit Together AI) avec backoff Retry-After.
+        # Garde la protection retry-storm sur les autres erreurs (transport retries=0).
+        max_429_retries = 3
+        for attempt in range(max_429_retries + 1):
+            try:
+                with httpx.Client(
+                    timeout=eff_timeout,
+                    transport=httpx.HTTPTransport(retries=0),
+                ) as client:
+                    resp = client.post(
+                        f"{endpoint['url']}/chat/completions",
+                        json=payload,
+                        headers=endpoint["headers"],
+                    )
+                    if resp.status_code == 429 and attempt < max_429_retries:
+                        retry_after = float(resp.headers.get("Retry-After", "2"))
+                        remaining_tokens = resp.headers.get("x-ratelimit-remaining-tokens", "?")
+                        logger.warning(
+                            f"Rate-limited ({endpoint['provider']}, attempt {attempt + 1}/{max_429_retries}). "
+                            f"Retry-After={retry_after}s, remaining_tokens={remaining_tokens}"
+                        )
+                        import time as _time
+                        _time.sleep(retry_after)
+                        continue
+                    resp.raise_for_status()
+                    data = resp.json()
+                    choice = data["choices"][0]
+                    out = {
+                        "content": choice["message"]["content"],
+                        "logprobs": None,
+                        "provider": endpoint["provider"],
+                        "model": eff_model,
+                    }
+                    if logprobs:
+                        lp = choice.get("logprobs") or {}
+                        out["logprobs"] = lp.get("content")
+                    return out
+            except (httpx.HTTPError, KeyError, IndexError) as exc:
+                logger.error(
+                    f"LLM call failed via {endpoint['provider']}: {exc}"
                 )
-                resp.raise_for_status()
-                data = resp.json()
-                choice = data["choices"][0]
-                out = {
-                    "content": choice["message"]["content"],
-                    "logprobs": None,
-                    "provider": endpoint["provider"],
-                    "model": eff_model,
-                }
-                if logprobs:
-                    lp = choice.get("logprobs") or {}
-                    # Format OpenAI : choice.logprobs.content = [{token, logprob, top_logprobs[]}]
-                    out["logprobs"] = lp.get("content")
-                return out
-        except (httpx.HTTPError, KeyError, IndexError) as exc:
-            logger.error(
-                f"LLM call failed via {endpoint['provider']}: {exc}"
-            )
-            raise
+                raise
+        # Cas où max_429_retries dépassé sans success
+        raise httpx.HTTPStatusError(
+            "Rate-limit exhausted after retries", request=resp.request, response=resp
+        )
 
     @property
     def model(self) -> str:

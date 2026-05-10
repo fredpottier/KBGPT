@@ -657,15 +657,47 @@ def _call_osmosis_api(
     token_mgr,
     use_kg: bool = True,  # legacy param kept for callsite compat (ignored, V2 always)
 ) -> dict:
-    """CH-30.14 — V2 only. Plus de fallback /api/search V1.1.
+    """CH-30.14 — V2 par défaut. CH-39 — V3 si RUNTIME_VERSION=v3. CH-43 — V4 si RUNTIME_VERSION=v4.
 
-    Appelle exclusivement /api/runtime_v2/answer (pipeline anchor-driven avec
-    insight_hints + entropy + answer_gap actifs).
+    Appelle /api/runtime_{v2|v3|v4}/answer selon env RUNTIME_VERSION.
     """
     headers = {
         "Authorization": f"Bearer {token_mgr.get()}",
         "Content-Type": "application/json",
     }
+    runtime_version = os.getenv("RUNTIME_VERSION", "v2").lower()
+
+    if runtime_version in ("v3", "v4"):
+        endpoint = f"/api/runtime_{runtime_version}/answer"
+        # CH-46 L4 — top_k V4 : 20→12 par défaut, override V4_TOP_K_CLAIMS
+        top_k_v4 = int(os.getenv("V4_TOP_K_CLAIMS", "12"))
+        top_k = top_k_v4 if runtime_version == "v4" else 10
+        resp = requests.post(
+            f"{api_base}{endpoint}",
+            json={"question": question, "top_k_claims": top_k},
+            headers=headers, timeout=300,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "answer": data.get("answer") or "",
+            "sources_used": data.get("doc_ids_cited") or [],
+            "chunks_retrieved": data.get("n_chunks_retrieved", 0),
+            "latency_ms": (data.get("latency_breakdown_ms") or {}).get("total_ms", 0),
+            f"_{runtime_version}_meta": {
+                "decision": data.get("decision"),
+                "confidence": data.get("confidence"),
+                "false_premise_detected": data.get("false_premise_detected"),
+                "faithfulness_score": data.get("faithfulness_score"),
+                "faithfulness_verdict": data.get("faithfulness_verdict"),
+                "regenerated": data.get("regenerated"),
+                "primary_type": data.get("primary_type"),  # V4-only
+                "routing_decision": data.get("routing_decision"),  # V4-only
+                "rerouter_promoted": data.get("rerouter_promoted"),  # V4-only
+            },
+        }
+
+    # Default V2
     resp = requests.post(
         f"{api_base}/api/runtime_v2/answer",
         json={"question": question, "audit_mode": False, "top_k_claims": 10},
