@@ -22,6 +22,7 @@ import time
 from typing import Any, Optional
 
 from knowbase.runtime_v4_2 import telemetry
+from knowbase.runtime_v4_2.intent_router import UnifiedIntentRouter, RouterDecision
 from knowbase.runtime_v4_2.layer2_orchestrator import Layer2Orchestrator
 from knowbase.runtime_v4_2.models import (
     AbstainCategory,
@@ -90,6 +91,7 @@ class Layer0Pipeline:
         kg_query_op: Optional[Any] = None,
         set_reasoning_op: Optional[Any] = None,
         layer2_orchestrator: Optional[Layer2Orchestrator] = None,
+        intent_router: Optional[UnifiedIntentRouter] = None,
         enable_telemetry: bool = True,
         unified_extractor: Optional[UnifiedExtractor] = None,
     ) -> None:
@@ -101,6 +103,7 @@ class Layer0Pipeline:
         self.kg_query_op = kg_query_op
         self.set_reasoning_op = set_reasoning_op
         self.layer2_orchestrator = layer2_orchestrator
+        self.intent_router = intent_router
         self.enable_telemetry = enable_telemetry
         self.unified_prompt_enabled = (
             os.getenv("RUNTIME_V4_2_UNIFIED_PROMPT", "false").lower() == "true"
@@ -125,9 +128,43 @@ class Layer0Pipeline:
         )
 
         # --------------------------------------------------------------- #
+        # 0.0 Unified Intent Router (Optim Phase 4) — 1 LLM call dispatche
+        # vers les operators applicables au lieu de cascade séquentielle.
+        # --------------------------------------------------------------- #
+        applicable_ops: set[str] = {"temporal_active", "lifecycle_resolution",
+                                     "kg_query", "set_reasoning"}  # default : tous
+        if self.intent_router is not None:
+            t0 = time.time()
+            try:
+                router_decision = self.intent_router.dispatch(question)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[router] dispatch raised: {exc} — fallback all operators")
+                router_decision = None
+            timings["router_ms"] = int((time.time() - t0) * 1000)
+
+            if router_decision is not None and not router_decision.error:
+                applicable_ops = set(router_decision.applicable_operators)
+                trace.intent_scores = {
+                    "router_confidence": router_decision.confidence,
+                    "router_skip_layer1": 1.0 if router_decision.skip_layer1 else 0.0,
+                }
+                if router_decision.skip_layer1:
+                    logger.info(
+                        f"[router] skip Layer 1 for q='{question[:80]}' "
+                        f"(reason: {router_decision.reason[:80]})"
+                    )
+                    # On va direct Layer 0 — pas d'operator essayé
+                    applicable_ops = set()
+                else:
+                    logger.info(
+                        f"[router] dispatch operators={list(applicable_ops)} "
+                        f"conf={router_decision.confidence:.2f}"
+                    )
+
+        # --------------------------------------------------------------- #
         # 0.A Escalation : temporal_active_version operator (Cap2.A)
         # --------------------------------------------------------------- #
-        if self.temporal_active_op is not None:
+        if self.temporal_active_op is not None and "temporal_active" in applicable_ops:
             t0 = time.time()
             try:
                 top_result = self.temporal_active_op.execute(question)
@@ -195,7 +232,7 @@ class Layer0Pipeline:
         # --------------------------------------------------------------- #
         # 0.B Escalation : lifecycle_resolution operator (Cap2.B)
         # --------------------------------------------------------------- #
-        if self.lifecycle_resolution_op is not None:
+        if self.lifecycle_resolution_op is not None and "lifecycle_resolution" in applicable_ops:
             t0 = time.time()
             try:
                 lcr_result = self.lifecycle_resolution_op.execute(question)
@@ -263,7 +300,7 @@ class Layer0Pipeline:
         # --------------------------------------------------------------- #
         # 0.C Escalation : kg_query operator (Cap2.C)
         # --------------------------------------------------------------- #
-        if self.kg_query_op is not None:
+        if self.kg_query_op is not None and "kg_query" in applicable_ops:
             t0 = time.time()
             try:
                 kgq_result = self.kg_query_op.execute(question)
@@ -330,7 +367,7 @@ class Layer0Pipeline:
         # --------------------------------------------------------------- #
         # 0.D Escalation : set_reasoning operator (Cap2.D)
         # --------------------------------------------------------------- #
-        if self.set_reasoning_op is not None:
+        if self.set_reasoning_op is not None and "set_reasoning" in applicable_ops:
             t0 = time.time()
             try:
                 sr_result = self.set_reasoning_op.execute(question)

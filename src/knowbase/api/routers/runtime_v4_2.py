@@ -29,6 +29,7 @@ from knowbase.facts_first import EvidenceCollector
 from knowbase.runtime_v3.llm_client import get_runtime_llm_client
 from knowbase.runtime_v3.retriever import ClaimRetriever
 from knowbase.runtime_v4_2 import telemetry
+from knowbase.runtime_v4_2.intent_router import UnifiedIntentRouter
 from knowbase.runtime_v4_2.layer2_orchestrator import Layer2Orchestrator
 from knowbase.runtime_v4_2.operators import (
     KGQueryOperator,
@@ -120,6 +121,11 @@ def _get_pipeline() -> Layer0Pipeline:
         llm_client=llm_client,
     )
 
+    # Unified Intent Router (Optim Phase 4) — opt-in via env, default ON
+    intent_router = None
+    if os.getenv("RUNTIME_V4_2_INTENT_ROUTER", "true").lower() == "true":
+        intent_router = UnifiedIntentRouter()
+
     # Layer 2 orchestrator (Cap3) — opt-in via env (peut être lourd en latence)
     layer2_orchestrator = None
     if os.getenv("RUNTIME_V4_2_LAYER2", "true").lower() == "true":
@@ -142,13 +148,15 @@ def _get_pipeline() -> Layer0Pipeline:
         kg_query_op=kg_query_op,
         set_reasoning_op=set_reasoning_op,
         layer2_orchestrator=layer2_orchestrator,
+        intent_router=intent_router,
         enable_telemetry=os.getenv("RUNTIME_V4_2_TELEMETRY", "true").lower() == "true",
     )
     logger.info(
         "Runtime V4.2 pipeline initialized "
-        "(verifier=%s, temporal_op=on, lifecycle_op=on, kg_query_op=on, set_reasoning_op=on, "
+        "(verifier=%s, intent_router=%s, temporal_op=on, lifecycle_op=on, kg_query_op=on, set_reasoning_op=on, "
         "layer2=%s, unified_prompt=%s, telemetry=%s)",
         qa_verifier.model,
+        intent_router is not None,
         layer2_orchestrator is not None,
         _pipeline.unified_prompt_enabled,
         _pipeline.enable_telemetry,
