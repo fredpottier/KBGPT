@@ -32,6 +32,7 @@ from knowbase.runtime_v4_2 import telemetry
 from knowbase.runtime_v4_2.intent_router import UnifiedIntentRouter
 from knowbase.runtime_v4_2.layer2_orchestrator import Layer2Orchestrator
 from knowbase.runtime_v4_2.operators import (
+    ComparisonContradictionOperator,
     KGQueryOperator,
     LifecycleResolutionOperator,
     SetReasoningOperator,
@@ -120,6 +121,9 @@ def _get_pipeline() -> Layer0Pipeline:
         evidence_collector=evidence_collector,
         llm_client=llm_client,
     )
+    comparison_contradiction_op = ComparisonContradictionOperator(
+        evidence_collector=evidence_collector,
+    )
 
     # Unified Intent Router (Optim Phase 4) — opt-in via env, default ON
     intent_router = None
@@ -147,14 +151,15 @@ def _get_pipeline() -> Layer0Pipeline:
         lifecycle_resolution_op=lifecycle_op,
         kg_query_op=kg_query_op,
         set_reasoning_op=set_reasoning_op,
+        comparison_contradiction_op=comparison_contradiction_op,
         layer2_orchestrator=layer2_orchestrator,
         intent_router=intent_router,
         enable_telemetry=os.getenv("RUNTIME_V4_2_TELEMETRY", "true").lower() == "true",
     )
     logger.info(
         "Runtime V4.2 pipeline initialized "
-        "(verifier=%s, intent_router=%s, temporal_op=on, lifecycle_op=on, kg_query_op=on, set_reasoning_op=on, "
-        "layer2=%s, unified_prompt=%s, telemetry=%s)",
+        "(verifier=%s, intent_router=%s, temporal_op=on, lifecycle_op=on, kg_query_op=on, "
+        "set_reasoning_op=on, comparison_op=on, layer2=%s, unified_prompt=%s, telemetry=%s)",
         qa_verifier.model,
         intent_router is not None,
         layer2_orchestrator is not None,
@@ -179,6 +184,7 @@ def health() -> dict:
                 "lifecycle_resolution (Cap2.B)",
                 "kg_query (Cap2.C)",
                 "set_reasoning (Cap2.D)",
+                "comparison_contradiction (Cap2.E)",
             ],
             "layer2": (
                 "adaptive_orchestrator DeepSeek-V3.1 (Cap3)"

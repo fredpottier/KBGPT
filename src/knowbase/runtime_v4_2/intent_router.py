@@ -38,6 +38,7 @@ You will dispatch the question to a subset of these operators :
 - "lifecycle_resolution" : "what replaced X" / "what does X supersede" / lineage
 - "kg_query" : structural queries — "how many <STATUS>", "list all <STATUS>", "supersession chain"
 - "set_reasoning" : "what is NOT in X" / "what is exempted from X" / exclusions
+- "comparison_contradiction" : "compare <X> and <Y>" / "are <X> and <Y> aligned?" / contradiction detection
 
 Return JSON only :
 {
@@ -60,6 +61,9 @@ Examples (abstract — placeholders <DOC_X>, <STATUS>, <DATE>):
 - "What replaced <DOC_X>?" → ["lifecycle_resolution"], skip_layer1=false
 - "How many <STATUS> documents exist?" → ["kg_query"], skip_layer1=false
 - "What is excluded from <DOC_X>'s scope?" → ["set_reasoning"], skip_layer1=false
+- "Compare <DOC_X> and <DOC_Y> on <ASPECT>" → ["comparison_contradiction"], skip_layer1=false
+- "Are <DOC_X> and <DOC_Y> aligned regarding <ASPECT>?" → ["comparison_contradiction"], skip_layer1=false
+- "Is there a contradiction between <DOC_X> and <DOC_Y>?" → ["comparison_contradiction"], skip_layer1=false
 - "Show the supersession chain of <DOC_X>" → ["kg_query", "lifecycle_resolution"], skip_layer1=false
 - "What is the maximum value of <PROPERTY> in <DOC_X>?" → [], skip_layer1=true (factual)
 - "Why was <DOC_X> repealed?" → [], skip_layer1=true (causal, not structural)
@@ -69,7 +73,13 @@ Examples (abstract — placeholders <DOC_X>, <STATUS>, <DATE>):
 
 
 # Opérateurs valides retournés par le router
-VALID_OPERATORS = {"temporal_active", "lifecycle_resolution", "kg_query", "set_reasoning"}
+VALID_OPERATORS = {
+    "temporal_active",
+    "lifecycle_resolution",
+    "kg_query",
+    "set_reasoning",
+    "comparison_contradiction",
+}
 
 
 @dataclass

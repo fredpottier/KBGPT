@@ -90,6 +90,7 @@ class Layer0Pipeline:
         lifecycle_resolution_op: Optional[Any] = None,
         kg_query_op: Optional[Any] = None,
         set_reasoning_op: Optional[Any] = None,
+        comparison_contradiction_op: Optional[Any] = None,
         layer2_orchestrator: Optional[Layer2Orchestrator] = None,
         intent_router: Optional[UnifiedIntentRouter] = None,
         enable_telemetry: bool = True,
@@ -102,6 +103,7 @@ class Layer0Pipeline:
         self.lifecycle_resolution_op = lifecycle_resolution_op
         self.kg_query_op = kg_query_op
         self.set_reasoning_op = set_reasoning_op
+        self.comparison_contradiction_op = comparison_contradiction_op
         self.layer2_orchestrator = layer2_orchestrator
         self.intent_router = intent_router
         self.enable_telemetry = enable_telemetry
@@ -132,7 +134,8 @@ class Layer0Pipeline:
         # vers les operators applicables au lieu de cascade séquentielle.
         # --------------------------------------------------------------- #
         applicable_ops: set[str] = {"temporal_active", "lifecycle_resolution",
-                                     "kg_query", "set_reasoning"}  # default : tous
+                                     "kg_query", "set_reasoning",
+                                     "comparison_contradiction"}  # default : tous
         if self.intent_router is not None:
             t0 = time.time()
             try:
@@ -428,7 +431,79 @@ class Layer0Pipeline:
             if sr_result is not None and sr_result.triggered and sr_result.decision == "ABSTAIN":
                 logger.info(
                     f"[L1.set_reasoning] triggered but ABSTAIN "
-                    f"(reason={sr_result.abstention_reason}). Falling back to Layer 0."
+                    f"(reason={sr_result.abstention_reason}). Falling back to next operator."
+                )
+
+        # --------------------------------------------------------------- #
+        # 0.E Escalation : comparison_contradiction operator (Cap2.E)
+        # --------------------------------------------------------------- #
+        if (
+            self.comparison_contradiction_op is not None
+            and "comparison_contradiction" in applicable_ops
+        ):
+            t0 = time.time()
+            try:
+                cc_result = self.comparison_contradiction_op.execute(question)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"Cap2.E operator raised: {exc} — falling back to Layer 0")
+                cc_result = None
+            timings["operator_comparison_ms"] = int((time.time() - t0) * 1000)
+
+            if cc_result is not None and cc_result.triggered and cc_result.decision == "ANSWER":
+                t0 = time.time()
+                align = self.qa_verifier.verify(question, cc_result.answer)
+                timings["qa_align_ms"] = int((time.time() - t0) * 1000)
+
+                if align.decision == "MISALIGNED":
+                    logger.info(
+                        f"[L1.comparison_contradiction] verifier MISALIGNED "
+                        f"(reason={align.reason[:80]}), falling back to Layer 0"
+                    )
+                else:
+                    logger.info(
+                        f"[L1.comparison_contradiction] q='{question[:80]}' "
+                        f"clusters={cc_result.n_clusters_analyzed} "
+                        f"genuine_conflicts={cc_result.n_genuine_conflicts} "
+                        f"verifier={align.decision}"
+                    )
+                    merged = dict(cc_result.latency_breakdown_ms)
+                    merged.update(timings)
+                    merged["total_ms"] = int((time.time() - t_total) * 1000)
+                    doc_ids = self._extract_doc_ids(cc_result.answer)
+
+                    response = Layer0Response(
+                        question=question,
+                        decision="ANSWER",
+                        answer=cc_result.answer,
+                        layer="layer1_comparison_contradiction",
+                        qa_alignment=align.decision,
+                        qa_reason=align.reason,
+                        qa_confidence=align.confidence,
+                        n_chunks_used=cc_result.n_clusters_analyzed,
+                        doc_ids_cited=doc_ids,
+                        latency_breakdown_ms=merged,
+                        escalation_reason=EscalationReason.OPERATOR_TRIGGERED,
+                        abstain_category=AbstainCategory.ALIGNED,
+                    )
+                    self._record_trace(
+                        trace=trace,
+                        response=response,
+                        layer1_op="comparison_contradiction",
+                        layer1_output={
+                            "expected_outcome": cc_result.expected_outcome,
+                            "n_clusters": cc_result.n_clusters_analyzed,
+                            "n_genuine_conflicts": cc_result.n_genuine_conflicts,
+                            "divergences": cc_result.divergences,
+                        },
+                        fallback_path=cc_result.fallback_path,
+                        verifier=align,
+                    )
+                    return response
+
+            if cc_result is not None and cc_result.triggered and cc_result.decision == "ABSTAIN":
+                logger.info(
+                    f"[L1.comparison_contradiction] triggered but ABSTAIN "
+                    f"(reason={cc_result.abstention_reason}). Falling back to Layer 0."
                 )
 
         # --------------------------------------------------------------- #

@@ -28,6 +28,10 @@ from knowbase.runtime_v4_2.operators.set_reasoning import (
     SetReasoningOperator,
     SetReasoningResult,
 )
+from knowbase.runtime_v4_2.operators.comparison_contradiction import (
+    ComparisonContradictionOperator,
+    ComparisonContradictionResult,
+)
 
 __all__ = [
     "TemporalActiveVersionOperator",
@@ -38,4 +42,6 @@ __all__ = [
     "KGQueryResult",
     "SetReasoningOperator",
     "SetReasoningResult",
+    "ComparisonContradictionOperator",
+    "ComparisonContradictionResult",
 ]
