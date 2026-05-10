@@ -1,10 +1,12 @@
-# Tracking chantiers OSMOSIS — actif au 2026-05-02 (rafraîchi 2026-05-06)
+# Tracking chantiers OSMOSIS — actif au 2026-05-02 (rafraîchi 2026-05-10)
 
 > **But** : fichier de pilotage unique pour adresser les chantiers restants un à un.
 > **Source** : audit `BACKLOG_DEV_2026-05-01.md` + descriptions détaillées rédigées 02/05 + ajouts incrémentaux.
 > **Statut** : `TODO` / `IN_PROGRESS` / `DONE` / `BLOCKED` / `DEFERRED` / `SUPERSEDED`.
 > **Convention** : à chaque démarrage, mettre `IN_PROGRESS` + date. À chaque clôture, `DONE` + commit hash.
 > **Rafraîchissement 2026-05-06** : ajout des sections CH-30.9-18, CH-31, CH-32, CH-33, CH-34, CH-35, CH-36/37/38 (SUPERSEDED), CH-39 (Refonte V3 livrée), CH-40 (Sprint S0 V4 Calibration & Gold-set complet), CH-41 (V4 Facts-First Tranche 1 list — en cours, **CH-41.M BLOCKING avant tout code**). Pivot architectural V4 facts-first acté à 3 voix (Fred + Claude + ChatGPT) — ADR `chantiers/2026-05-06_CH-41_ADR_FACTS_FIRST.md` ratifié.
+>
+> **Rafraîchissement 2026-05-10** : ajout section **CH-49 OSMOSIS V4.2 Tiered Pipeline** — runtime_v4_2/ livré complet (Phase 1+2+3+4). Architecture cible Layer 0+1+2 avec 5 operators Cap2.A/B/C/D/E + UnifiedIntentRouter + verifier veto critique. ADR v1.1 LOCKED post 2 rounds critique LLMs externes. 4 commits poussés `c96fe01..c0b4863`. **Charte respectée** : 0 référence corpus dans runtime, modèles open-source uniquement (Sonnet/GPT-4o exclus). Endpoint `/api/runtime_v4_2/answer` live en parallèle de V4.1 (pas de promotion principal).
 
 ---
 
@@ -788,6 +790,32 @@
 
 ---
 
+### CH-49 — OSMOSIS V4.2 Tiered Pipeline (runtime_v4_2)
+- **Statut** : DONE Phase 1+2+3+4 (2026-05-10, 4 commits poussés `c96fe01..c0b4863`)
+- **ADR maître** : `doc/ongoing/chantiers/2026-05-10_CH-49_ADR_PIPELINE_V4_2_ARCHITECTURE_CIBLE_v1.md` (v1.1 LOCKED, 2 rounds critique LLMs externes)
+- **Doc livraison** : `doc/ongoing/chantiers/2026-05-10_CH-49_PHASE1_LIVRAISON.md` + `_PHASE2_LIVRAISON.md` + `_P1_BENCH_RESULTS.md` + `_P1_MULTI_VIEW_SCORER_CALIBRATION.md`
+- **Décision archi** : Nouveau module `runtime_v4_2/` parallèle à V4.1. Endpoint `POST /api/runtime_v4_2/answer`. Pas de promotion endpoint principal.
+- **Architecture livrée** : Tiered Pipeline Layer 0+1+2 avec verifier veto critique anti-Goodhart
+  - Layer 0 : Cheap Certainty + Q↔A Verifier DeepSeek-V3.1 (anti-biais vs Composer Llama-Turbo) + abstain reward
+  - Layer 1 : 5 operators Cap2.A/B/C/D/E (temporal_active, lifecycle_resolution, kg_query, set_reasoning, comparison_contradiction)
+  - Layer 2 : Adaptive Orchestrator agentic DeepSeek-V3.1 tool use (5 iters max, timeout 45s)
+  - UnifiedIntentRouter : 1 LLM call dispatche vers operators applicables (gain p50 -18%)
+  - Multi-view scorer (exact + fuzzy + semantic + abstain reward) + telemetry QuestionTrace JSONL
+- **Charte respectée** (audit grep confirmé) :
+  - Domain-agnostic strict : 0 référence corpus dans `runtime_v4_2/`. Prompts INTENT avec placeholders abstraits `<DOC_X>`, `<STATUS>`, `<X>`, `<Y>`
+  - Pas de modèles propriétaires (Sonnet/GPT-4o exclus pour coût) — open-source only via Together AI
+  - Anti-biais auto-juge : Verifier DeepSeek ≠ Composer Llama-Turbo
+  - LLM ≠ operator : raisonnement structurel (Cypher, set ops, clustering) en Python déterministe
+  - Lifecycle evidence-locked (vision recentrée 30/04) : LIFECYCLE_RELATION uniquement sur déclaration textuelle explicite
+- **Découvertes critiques** :
+  - **Verifier veto manquant** initialement : Cap2.X consultaient le verifier mais retournaient ANSWER toujours → 5 misroutes. Refactor `if MISALIGNED → fallback` élimine 100% des misroutes.
+  - **Faute charte Cap2.B** corrigée immédiatement post-audit Fred (4 exemples corpus-spécifiques 428/2009, 2021/821, etc. → placeholders abstraits)
+  - **KG sous-équipé en LIFECYCLE_RELATION** (4 seulement) : conforme à charte stricte (déclarations explicites uniquement). Limite Cap2.B/C bench mais comportement attendu.
+- **Métriques Robust 120q** : V4.1 baseline 0.403 → P1 0.867 → P2 full+veto 0.859 → P4 router smoke 30q 0.905. Latence p95 hausse cumulative (cascades verifier veto + Layer 2). Bench complet 120q final en cours.
+- **Limites reconnues** : (a) latence p95 ~50s avec Layer 2 actif sur abstains, optim future via couplage router-operator params ; (b) KG diversité claims limite Cap2.E.
+
+---
+
 ## ⚙️ Dette technique
 
 ### CH-29 — TODOs critiques code (consolidés)
@@ -830,6 +858,14 @@
 | 2026-05-07 | Audit triangulé S2 | Trois LLM externes (ChatGPT, Claude Web) + audit Phase 0 (54 fails) convergent : 31% corpus_dependent → gate 90% strict pré-retrieval mathématiquement non atteignable. Pivot architecture en 2 axes (answer_shape pré-retrieval + epistemic_status partiellement post-retrieval). |
 | 2026-05-07 | ADR §9 amendement | Addendum §9 ADR V4 : taxonomie distribuée acté. Gate révisé : 90% answer_shape + 90%+ effective. Garde-fous (rerouter explicable + re-tag gold). |
 | 2026-05-07 | CH-42 partiel + DEFERRED | Phase 0/1/2/4 livrées (audit, re-tag gold, re-train, cascade). Gain mesuré +24.8pp panel top-1 vs run précédent. Phase 3 (active learning) + Phase 5 (rerouter étendu) + S2.B (adaptive retrieval) DEFERRED sur décision Fred — plafond gain marginal vs priorités business. |
+| 2026-05-09 | CH-49 ADR v0.7 | 32 décisions atomiques par type (audit corrections pipeline V4.1) — déprécié au profit ADR v1.0/v1.1 |
+| 2026-05-10 | CH-49 ADR v1.1 LOCKED | Refonte 5 capabilities + 9 amendments post 2 rounds critique LLMs externes (ChatGPT-5 ×3 + Claude Web Opus ×2). Reasoning is an escalation, not a default. |
+| 2026-05-10 | CH-49 Phase 1 livré | runtime_v4_2/ Layer 0 production-grade : Q↔A Verifier DeepSeek + multi-view scorer + abstain reward + telemetry QuestionTrace. Endpoint /api/runtime_v4_2/answer live. Score Robust 0.867 (+47% vs V4.1). |
+| 2026-05-10 | CH-49 Phase 2 livré + verifier veto | 3 operators Cap2.B/C/D + correction critique : verifier veto (refactor `MISALIGNED → fallback`) élimine 100% des misroutes. Faute charte Cap2.B (4 exemples corpus-spécifiques) corrigée immédiatement post-audit Fred. |
+| 2026-05-10 | CH-49 Phase 3 livré | Layer 2 Adaptive Orchestrator agentic DeepSeek-V3.1 tool use (5 iters max, timeout 45s). Tool registry (vector_search + 4 operators Cap2 + extract_answer). Trigger sur Layer 0 ABSTAIN/MISALIGNED. |
+| 2026-05-10 | CH-49 Phase 4 Optim | UnifiedIntentRouter — 1 LLM call dispatche vers operators applicables au lieu de cascade séquentielle. Gain p50 -18% sur smoke 30q. |
+| 2026-05-10 | CH-49 Phase 4 Cap2.E | comparison_contradiction_op evidence-first cluster + LLM qualifier (Amendment 9 ADR). 5/5 operators Cap2 livrés. 1er Layer 2 ANSWER réussi observé (causal_why). |
+| 2026-05-10 | CH-49 commits poussés | 4 commits poussés sur feat/contradiction-detection : c96fe01 (Phase 1+2+3), fb72858 (snapshot historique), f278577 (router unifié), c0b4863 (Cap2.E). Audit charte grep : 0 référence corpus dans runtime_v4_2/. |
 
 ---
 
