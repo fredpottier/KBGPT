@@ -7,16 +7,32 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Charge .env du projet AVANT toute lecture os.getenv ci-dessous.
-# Sans ce chargement, le cockpit lancé via streamdeck (ou Start-Process sans
-# shell parent) n'a pas REDIS_PASSWORD → toutes les lectures Redis échouent en
-# AuthenticationError, attrapée en logger.debug et silencieuse → widget
-# "OSMOSIS PIPELINE" vide. Fix post-incident sécurisation Redis (27/04).
+# Charge SEULEMENT les secrets du .env (passwords, API keys).
+# Pas les hostnames/URLs : le .env contient des noms de containers Docker
+# (qdrant, neo4j, redis) inadaptés au cockpit qui tourne sur l'hôte.
+# Les defaults os.getenv(..., "localhost") ci-dessous fournissent la bonne
+# connectivité depuis l'hôte ; on ne complète que les secrets manquants.
+#
+# Contexte : le cockpit lancé via streamdeck (Start-Process Hidden) n'hérite
+# pas du shell parent → REDIS_PASSWORD absent → lectures Redis échouent en
+# AuthenticationError silencieuse → widget "OSMOSIS PIPELINE" vide.
+# Fix post-incident sécurisation Redis (27/04).
 try:
-    from dotenv import load_dotenv
+    from dotenv import dotenv_values
     _env_path = Path(__file__).resolve().parent.parent / ".env"
     if _env_path.exists():
-        load_dotenv(_env_path)
+        _env_vars = dotenv_values(_env_path)
+        _SECRETS_TO_LOAD = (
+            "REDIS_PASSWORD",
+            "NEO4J_PASSWORD",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "DEEPINFRA_API_KEY",
+            "TOGETHER_API_KEY",
+        )
+        for _key in _SECRETS_TO_LOAD:
+            if _env_vars.get(_key) and _key not in os.environ:
+                os.environ[_key] = _env_vars[_key]
 except ImportError:
     pass  # python-dotenv non installé : env doit être fourni par le caller
 
