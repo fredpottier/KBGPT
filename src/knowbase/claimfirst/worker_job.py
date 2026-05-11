@@ -110,6 +110,11 @@ def claimfirst_process_job(
 
     job_started_at = time.time()
 
+    # Reset complet de l'état Redis pour éviter le leak inter-jobs (errors,
+    # current_filename, phase_elapsed_s, etc. d'un job précédent restaient dans
+    # le hash car _update_state fait un HSET incrémental, jamais un wipe).
+    redis_client.delete(CLAIMFIRST_STATE_KEY)
+
     _update_state(
         redis_client,
         status="STARTING",
@@ -124,6 +129,7 @@ def claimfirst_process_job(
         current_filename="",
         phase="INIT",
         started_at=job_started_at,
+        errors="[]",
     )
     _emit_phase(redis_client, "INIT", "started")
 
