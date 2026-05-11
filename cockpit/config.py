@@ -7,6 +7,19 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# Charge .env du projet AVANT toute lecture os.getenv ci-dessous.
+# Sans ce chargement, le cockpit lancé via streamdeck (ou Start-Process sans
+# shell parent) n'a pas REDIS_PASSWORD → toutes les lectures Redis échouent en
+# AuthenticationError, attrapée en logger.debug et silencieuse → widget
+# "OSMOSIS PIPELINE" vide. Fix post-incident sécurisation Redis (27/04).
+try:
+    from dotenv import load_dotenv
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+    if _env_path.exists():
+        load_dotenv(_env_path)
+except ImportError:
+    pass  # python-dotenv non installé : env doit être fourni par le caller
+
 # Réseau
 COCKPIT_HOST = os.getenv("COCKPIT_HOST", "0.0.0.0")
 COCKPIT_PORT = int(os.getenv("COCKPIT_PORT", "9090"))
