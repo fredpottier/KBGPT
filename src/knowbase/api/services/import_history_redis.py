@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import redis
 from datetime import datetime
 from typing import Any, List, Dict, Optional
@@ -13,10 +15,15 @@ class RedisImportHistoryService:
 
     def __init__(self):
         self.settings = get_settings()
-        # Utiliser la même URL Redis que pour les jobs
+        # Reprend REDIS_URL (avec password) et force DB=1 pour l'historique
+        # (DB 0 = jobs RQ, DB 1 = historique imports)
+        # Fix : précédemment URL hardcodée "redis://redis:6379/1" sans password,
+        # causait AuthenticationError post-sécurisation Redis (incident 27/04).
+        base_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+        history_url = re.sub(r"/\d+$", "/1", base_url)
         self.redis_client = redis.Redis.from_url(
-            "redis://redis:6379/1",  # DB 1 pour l'historique (DB 0 pour les jobs)
-            decode_responses=True
+            history_url,
+            decode_responses=True,
         )
 
     def _get_import_key(self, uid: str) -> str:
