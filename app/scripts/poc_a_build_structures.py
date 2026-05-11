@@ -37,12 +37,26 @@ OUT_DIR = Path("/app/data/poc_a/structures")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Mapping doc_id (KG) → fichier PDF
+# Étendu à TOUS les PDFs aerospace pour bench Robustness 170q complet
+# doc_id construit comme: <stem>_<hash> où hash est le suffixe du hash Qdrant existant
 TARGET_DOCS = {
     "dualuse_reg_2021_821_original_65eef5dc": "/data/docs_done/dualuse_reg_2021_821_original.pdf",
     "cs25_amdt_22_8e69026c": "/data/docs_done/cs25_amdt_22.pdf",
     "cs25_amdt_23_0869bab2": "/data/docs_done/cs25_amdt_23.pdf",
+    "cs25_amdt_24_86b11545": "/data/docs_done/cs25_amdt_24.pdf",
+    "cs25_amdt_25_a41bdc85": "/data/docs_done/cs25_amdt_25.pdf",
+    "cs25_amdt_26_6450b31e": "/data/docs_done/cs25_amdt_26.pdf",
+    "cs25_amdt_27_992260a7": "/data/docs_done/cs25_amdt_27.pdf",
     "cs25_amdt_28_32f1a9ac": "/data/docs_done/cs25_amdt_28.pdf",
+    "cs25_change_amdt_23_28f2c375": "/data/docs_done/cs25_change_amdt_23.pdf",
+    "cs25_change_amdt_24_69cf602f": "/data/docs_done/cs25_change_amdt_24.pdf",
+    "cs25_change_amdt_26_2e2b5e95": "/data/docs_done/cs25_change_amdt_26.pdf",
+    "cs25_change_amdt_28_cdd7474b": "/data/docs_done/cs25_change_amdt_28.pdf",
+    "dualuse_reg_428_2009_original_372b7ac3": "/data/docs_done/dualuse_reg_428_2009_original.pdf",
+    "dualuse_del_2023_66_cdc2b691": "/data/docs_done/dualuse_del_2023_66.pdf",
     "dualuse_del_2023_996_3616a044": "/data/docs_done/dualuse_del_2023_996.pdf",
+    "dualuse_del_2024_2025_908a03cf": "/data/docs_done/dualuse_del_2024_2025.pdf",
+    "dualuse_del_2024_2547_cb08f84b": "/data/docs_done/dualuse_del_2024_2547.pdf",
 }
 
 

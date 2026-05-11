@@ -22,9 +22,16 @@ from knowbase.runtime_v5.reading_tools import (
 
 
 DEEPINFRA_KEY = os.getenv("DEEPINFRA_API_KEY", "").strip()
+TOGETHER_KEY = os.getenv("TOGETHER_API_KEY", "").strip()
 
 # Modèle agent par défaut (charte open-source respectée)
 DEFAULT_MODEL = "deepseek-ai/DeepSeek-V3.1"
+
+# Provider priority: Together AI (rapide ×6) > DeepInfra (fallback)
+def _llm_endpoint_and_key():
+    if TOGETHER_KEY:
+        return "https://api.together.xyz/v1/chat/completions", TOGETHER_KEY, "together"
+    return "https://api.deepinfra.com/v1/openai/chat/completions", DEEPINFRA_KEY, "deepinfra"
 
 # Schémas OpenAI tool format pour les 7 reading tools
 TOOL_SCHEMAS = [
@@ -161,7 +168,8 @@ Your approach:
   4. Read specific sections (full text) rather than guessing — never assume content you haven't read.
   5. Resolve any cross-references you encounter ("see X", "cf Y").
   6. Maintain awareness of what you've collected vs what's still missing.
-  7. When you have enough evidence, write a final answer with citations.
+  7. After 3-5 productive tool calls, you SHOULD conclude with a final answer based on what you've gathered.
+  8. When you have enough evidence, write a final answer with citations.
 
 Citations format: [doc=DOC_ID/SECTION_PATH] after each factual claim.
 
@@ -180,26 +188,31 @@ When ready, produce a final answer in plain text. Do not call any tool in your f
 
 def call_llm(messages: list[dict], tools: list[dict], model: str = DEFAULT_MODEL,
              max_tokens: int = 1500, max_retries: int = 3) -> dict:
-    """Appel DeepInfra avec tools."""
+    """Appel LLM avec tools. Priorité Together AI > DeepInfra (cf charte CH-48)."""
+    endpoint, key, provider = _llm_endpoint_and_key()
     payload = {
         "model": model,
         "messages": messages,
-        "tools": tools,
-        "tool_choice": "auto",
         "max_tokens": max_tokens,
         "temperature": 0.0,
     }
+    # Fix Together AI : ne pas passer tool_choice avec tools=[] (400 error)
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
     last_err = None
     for attempt in range(max_retries):
         try:
             r = requests.post(
-                "https://api.deepinfra.com/v1/openai/chat/completions",
-                headers={"Authorization": f"Bearer {DEEPINFRA_KEY}", "Content-Type": "application/json"},
+                endpoint,
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                 json=payload,
                 timeout=300,
             )
             r.raise_for_status()
-            return r.json()
+            data = r.json()
+            data["_provider"] = provider
+            return data
         except Exception as e:
             last_err = e
             if attempt < max_retries - 1:
@@ -346,17 +359,42 @@ Plan your approach, use the reading tools to gather evidence, and produce a fina
     else:
         # Loop exhausted without break
         stopped_reason = "max_iter"
-        # Force a final synthesis call without tools
         if verbose:
             print(f"[MAX_ITER] Forcing final synthesis...")
-        synth_messages = messages + [
-            {"role": "user", "content": "You've reached max iterations. Now produce your final answer based on what you've collected. Do not call any tool."}
+        # Strip dangling tool_calls (assistant messages with tool_calls but no corresponding tool response)
+        # Together AI may reject conversations ending mid-tool-call
+        synth_messages = list(messages) + [
+            {"role": "user", "content": (
+                "You've gathered evidence through your tool calls. "
+                "Now produce your FINAL ANSWER to the original question, with citations [doc=ID]. "
+                "Even if your evidence is partial, give your best synthesis. "
+                "Output plain text only — do not call any more tools."
+            )}
         ]
-        final_resp = call_llm(synth_messages, [], model=model)
+        final_resp = call_llm(synth_messages, [], model=model, max_tokens=2000)
+        synth_content = ""
         if "error" not in final_resp:
             final_msg = final_resp["choices"][0]["message"]
-            workspace["final_answer"] = final_msg.get("content", "")
+            synth_content = final_msg.get("content", "") or ""
             tokens_total += final_resp.get("usage", {}).get("total_tokens", 0)
+        # Fallback : si forced synthesis retourne vide, prendre le dernier assistant content non-vide
+        if not synth_content.strip():
+            for m in reversed(messages):
+                if m.get("role") == "assistant" and (m.get("content") or "").strip():
+                    synth_content = m["content"]
+                    if verbose:
+                        print(f"[FALLBACK] Using last assistant content ({len(synth_content)} chars)")
+                    break
+        # Dernier recours : produire un message d'abstention factuel basé sur le workspace
+        if not synth_content.strip():
+            n_tools = len(workspace.get("tool_calls_log", []))
+            synth_content = (
+                f"Après {n_tools} appels d'outils sur les documents disponibles, "
+                "je n'ai pas pu rassembler suffisamment d'évidence pour fournir une réponse précise et sourcée."
+            )
+            if verbose:
+                print(f"[LAST RESORT] Using abstention message")
+        workspace["final_answer"] = synth_content
 
     return {
         "question": question,
