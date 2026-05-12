@@ -366,6 +366,18 @@ class EmbeddingModelManager:
                     break
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     last_error = e
+                    # Spot eviction recovery : ConnectionError peut indiquer que
+                    # l'ancienne EC2 burst est morte. Re-lire osmose:burst:state
+                    # Redis pour voir si une nouvelle IP est disponible (le
+                    # provider_switch / re-attach manuel peut avoir update Redis
+                    # entre temps). Si oui : switch endpoint + retry immédiat.
+                    if isinstance(e, requests.exceptions.ConnectionError):
+                        if self._refresh_burst_endpoint_from_redis():
+                            logger.info(
+                                f"[EMBEDDINGS:BURST] Batch {batch_idx+1} retrying on "
+                                f"recovered endpoint (Spot eviction handled)"
+                            )
+                            continue  # retry immédiat sur nouveau endpoint
                     if attempt < max_retries - 1:
                         wait_time = (attempt + 1) * 2  # Backoff: 2s, 4s, 6s
                         logger.warning(
@@ -585,6 +597,44 @@ class EmbeddingModelManager:
     # =========================================================================
     # Mode Burst - Basculement vers EC2 Spot
     # =========================================================================
+
+    def _refresh_burst_endpoint_from_redis(self) -> bool:
+        """Recovery sur Spot eviction : re-lit osmose:burst:state pour détecter
+        un changement d'IP du burst endpoint.
+
+        Appelé depuis encode_batch_with_retry quand un ConnectionError survient.
+        Différent de _check_burst_from_redis (qui est pour ACTIVER le burst
+        quand non-actif) : ici on est DÉJÀ en burst mode mais l'endpoint cache
+        est obsolète après eviction.
+
+        Returns True si l'endpoint a été mis à jour vers une nouvelle IP joignable.
+        """
+        try:
+            from knowbase.ingestion.burst.provider_switch import get_burst_state_from_redis
+            state = get_burst_state_from_redis()
+            if not (state and state.get("active") and state.get("embeddings_url")):
+                return False
+            new_endpoint = state["embeddings_url"].rstrip("/")
+            if new_endpoint == self._burst_endpoint:
+                return False  # Pas de changement, retry normal
+            # Vérifier que le nouveau endpoint est joignable avant de switcher
+            try:
+                resp = requests.get(f"{new_endpoint}/health", timeout=5)
+                if resp.status_code == 200:
+                    old = self._burst_endpoint
+                    self._burst_endpoint = new_endpoint
+                    logger.warning(
+                        f"[EMBEDDINGS:BURST:RECOVERY] Endpoint switched: "
+                        f"{old} → {new_endpoint} (Spot eviction handled)"
+                    )
+                    return True
+            except Exception as e:
+                logger.warning(
+                    f"[EMBEDDINGS:BURST:RECOVERY] New endpoint {new_endpoint} unreachable: {e}"
+                )
+        except Exception as e:
+            logger.warning(f"[EMBEDDINGS:BURST:RECOVERY] Redis refresh failed: {e}")
+        return False
 
     def _check_burst_from_redis(self):
         """
