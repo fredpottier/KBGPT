@@ -23,6 +23,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import { useState, useRef } from 'react'
 import { SearchChunk } from '@/types/api'
 import { FiImage } from 'react-icons/fi'
+import { formatDocumentName } from '@/lib/formatDocumentName'
 
 interface ThumbnailCarouselProps {
   chunks: SearchChunk[]
@@ -98,10 +99,6 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
 
   if (chunksWithImages.length === 0) {
     return null
-  }
-
-  const getDocumentName = (sourceFile: string) => {
-    return sourceFile.split('/').pop() || sourceFile
   }
 
   return (
@@ -280,7 +277,7 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
                     Slide {selectedImage.slide_index}
                   </Text>
                   <Text fontSize="sm" color="text.secondary" textAlign="center">
-                    {getDocumentName(selectedImage.source_file)}
+                    {formatDocumentName(selectedImage.source_file)}
                   </Text>
                 </VStack>
               </VStack>

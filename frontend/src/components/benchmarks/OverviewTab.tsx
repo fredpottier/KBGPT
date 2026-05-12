@@ -51,14 +51,15 @@ interface OverviewTabProps {
 
 // ── Design tokens ──────────────────────────────────────────────────────
 
+// Aligné sur preset-vars.css du thème actif
 const tokens = {
-  bgBase: '#0a0a1a',
-  bgCard: '#12122a',
-  bgElevated: '#1a1a35',
-  borderSubtle: '#1e1e3a',
-  textPrimary: '#f8fafc',
-  textSecondary: '#94a3b8',
-  textMuted: '#475569',
+  bgBase: 'var(--bg-canvas)',
+  bgCard: 'var(--bg-surface)',
+  bgElevated: 'var(--bg-surface-alt)',
+  borderSubtle: 'var(--border-default)',
+  textPrimary: 'var(--fg-primary)',
+  textSecondary: 'var(--fg-secondary)',
+  textMuted: 'var(--fg-muted)',
   accentBlue: '#5B7FFF',
   accentPurple: '#7C3AED',
   accentOrange: '#f97316',
@@ -438,11 +439,14 @@ export function OverviewTab({
   // Utiliser faith_total si disponible (mesure correcte incluant le KG)
   const ragasFaithfulness = ragasFaithTotal ?? ragasFaithChunks
   const ragasContextRelevance = extractScore(ragasReport, ['systems', 'osmosis', 'scores', 'context_relevance'])
+  // CH-40.1 — FactualCorrectness : score reference-based (vs ground_truth_answer)
+  // null si pas de gold-set utilisé. À traiter comme N/A dans la moyenne.
+  const ragasFactualCorrectness = extractScore(ragasReport, ['systems', 'osmosis', 'scores', 'factual_correctness'])
   const ragasSampleCount = ragasReport?.systems?.osmosis?.sample_count
   const ragasDiagnostic = ragasReport?.systems?.osmosis?.diagnostic
 
-  // Score global RAGAS = moyenne faithfulness (total si dispo) + context_relevance
-  const ragasAllMetrics = [ragasFaithfulness, ragasContextRelevance].filter(v => v != null) as number[]
+  // Score global RAGAS = moyenne faithfulness + context_relevance + factual_correctness (si dispo)
+  const ragasAllMetrics = [ragasFaithfulness, ragasContextRelevance, ragasFactualCorrectness].filter(v => v != null) as number[]
   const ragasGlobalScore = ragasAllMetrics.length > 0 ? ragasAllMetrics.reduce((a, b) => a + b, 0) / ragasAllMetrics.length : null
 
   const t2BothSides = extractScore(t2t5Report, ['scores', 'both_sides_surfaced'])
@@ -522,6 +526,11 @@ export function OverviewTab({
             {
               label: 'Ctx relevance',
               value: ragasContextRelevance != null ? `${(ragasContextRelevance * 100).toFixed(1)}%` : '--',
+            },
+            {
+              // CH-40.1 — FactualCorrectness vs ground_truth_answer (gold-set v4)
+              label: 'Factual correct.',
+              value: ragasFactualCorrectness != null ? `${(ragasFactualCorrectness * 100).toFixed(1)}%` : 'N/A',
             },
           ]}
         />

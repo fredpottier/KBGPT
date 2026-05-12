@@ -1196,7 +1196,7 @@ def get_neo4j_client(
             settings = get_settings()
             redis_client = redis.Redis(
                 host=settings.redis_host,
-                port=settings.redis_port,
+                port=settings.redis_port, password=getattr(settings, "redis_password", None) or os.getenv("REDIS_PASSWORD") or None,
                 db=0,
                 decode_responses=True
             )

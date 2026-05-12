@@ -1,0 +1,27 @@
+[
+  {
+    "id": "SMOKE_T1_001",
+    "task": "T1_provenance",
+    "question": "Under Regulation (EU) 2021/821, what is required for the export of dual-use items listed in Annex I?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "An authorisation is required from the competent authority.",
+    "verbatim_quote": "An authorisation shall be required for the export of dual-use items listed in Annex I.",
+    "category": "key_obligation_dualuse"
+  },
+  {
+    "id": "SMOKE_T7_001",
+    "task": "T7_v2_anchor",
+    "question": "Quel règlement a remplacé le règlement (CE) n° 428/2009 du Conseil ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Le règlement (UE) 2021/821 a remplacé le règlement (CE) 428/2009.",
+    "category": "lifecycle_supersedes"
+  },
+  {
+    "id": "SMOKE_T2_001",
+    "task": "T2_contradictions",
+    "question": "Quelle est l'énergie d'impact spécifiée par CS-25 pour l'essai d'impact unique sur un grand item en verre ?",
+    "ground_truth_doc_id": null,
+    "ground_truth_answer": "Selon CS-25 Amendment 28 (2023), 21 J. L'amendment 26 (2020) prescrivait 3.5 J — évolution réglementaire (lifecycle), non contradiction.",
+    "category": "numeric_evolution"
+  }
+]

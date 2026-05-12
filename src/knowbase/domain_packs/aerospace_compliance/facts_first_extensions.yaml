@@ -1,0 +1,240 @@
+# Domain Pack aerospace_compliance — Facts-First Extensions
+#
+# Status   : Created 2026-05-06 (CH-41.M, exemple d'instanciation)
+# Référence: src/knowbase/domain_packs/_template/facts_first_extensions.yaml
+# Décision : ADR_V4_FACTS_FIRST.md D-FF10
+#
+# Domaine : EASA CS-25 (Certification Specifications) + EU dual-use export control
+# (Regulation 2021/821, predecessor 428/2009, delegated acts amending Annex I).
+
+schema_version: facts_first_v1
+domain_pack: aerospace_compliance
+
+# ─────────────────────────────────────────────────────────────────────────
+# COMPARISON
+# ─────────────────────────────────────────────────────────────────────────
+comparison:
+  relation_types:
+    - name: SUPERSESSION
+      description: "A later active regulation replaces an older deprecated one (explicit repeal clause)."
+      maps_to: different
+      examples:
+        - "EU 2021/821 supersedes EU 428/2009 (repeal clause Article 41)"
+        - "CS-25 Amendment 28 supersedes CS-25 Amendment 27 for impact energy requirement"
+
+    - name: SUBSET
+      description: "Side A applies to a narrower scope than Side B (e.g. amendment vs base regulation)."
+      maps_to: related
+      examples:
+        - "Delegated act 2024/2547 modifies Annex I of base regulation 2021/821 (subset relation)"
+
+    - name: SUPERSET
+      description: "Side A applies to a broader scope than Side B."
+      maps_to: related
+
+    - name: COMPLEMENTARY
+      description: "Sides address different aspects of the same regulatory framework without conflict (e.g. CS specifications vs AMC means of compliance)."
+      maps_to: related
+      examples:
+        - "CS 25.1309 normative requirement complements AMC 25.1309 acceptable means"
+
+    - name: CONFLICT
+      description: "Genuinely contradictory rules within the same scope and time. Rare in regulatory texts — usually misclassification of evolution as conflict."
+      maps_to: different
+      cautions:
+        - "Numeric evolution between amendments (3.5J → 21J) is SUPERSESSION, not CONFLICT"
+        - "Different categorical entries in graduated schemes (minor/major/hazardous) are DISJOINT, not CONFLICT"
+
+    - name: DISJOINT
+      description: "Sides address completely independent items (different entries in a graduated scheme or list)."
+      maps_to: different
+      examples:
+        - "Control list entries 6A005.a.1 and 6A005.a.6 — different items, not in conflict"
+        - "ETOPS time categories 60min and 120min — independent thresholds"
+
+  relation_basis:
+    - name: scope
+      description: "Difference attributable to scope of applicability (territorial, sectoral, temporal scope)."
+      maps_to: value
+
+    - name: regulatory_framework
+      description: "Difference between regulatory framework levels (CS vs AMC, base regulation vs delegated act)."
+      maps_to: value
+
+    - name: amendment_evolution
+      description: "Difference attributable to amendment-to-amendment evolution within the same framework."
+      maps_to: time
+
+# ─────────────────────────────────────────────────────────────────────────
+# TEMPORAL
+# ─────────────────────────────────────────────────────────────────────────
+temporal:
+  change_types:
+    - name: replaced
+      description: "Older provision fully replaced by newer one (explicit repeal)."
+      maps_to: changed
+
+    - name: amended
+      description: "Provision modified by a delegated act or amendment (substance preserved, wording refined)."
+      maps_to: changed
+
+    - name: superseded
+      description: "Provision rendered obsolete by a successor regulation."
+      maps_to: changed
+
+    - name: introduced
+      description: "New provision added without prior equivalent."
+      maps_to: added
+
+    - name: deprecated
+      description: "Provision marked obsolete but not yet removed."
+      maps_to: changed
+
+  time_anchor_kinds:
+    - name: amendment
+      description: "Anchored to a specific CS-25 Amendment number (e.g. 'CS-25 Amendment 28')."
+      maps_to: version
+      examples:
+        - "CS-25 Amendment 26"
+        - "CS-25 Amendment 28"
+
+    - name: regulation_number
+      description: "Anchored to a specific EU regulation identifier (e.g. '2021/821')."
+      maps_to: version
+      examples:
+        - "Regulation (EU) 2021/821"
+        - "Regulation (EC) 428/2009"
+
+    - name: ed_decision
+      description: "Anchored to an EASA ED Decision identifier."
+      maps_to: version
+      examples:
+        - "ED Decision 2023/021/R"
+
+    - name: effective_date
+      description: "Date when rules become enforceable."
+      maps_to: date
+
+    - name: publication_date
+      description: "Date of official publication (Official Journal for EU acts)."
+      maps_to: date
+
+    - name: applicable_from
+      description: "Date from which rules apply to new certification cases."
+      maps_to: date
+
+# ─────────────────────────────────────────────────────────────────────────
+# CAUSAL
+# ─────────────────────────────────────────────────────────────────────────
+causal:
+  step_roles:
+    - name: mechanism
+      description: "How a regulatory requirement produces its safety/control effect (intermediate step)."
+      maps_to: condition
+
+    - name: exception
+      description: "Conditions under which a rule does NOT apply (exemption, derogation)."
+      maps_to: condition
+
+    - name: legislative_intent
+      description: "Underlying motivation/purpose stated in recitals or NPA preamble."
+      maps_to: cause
+
+    - name: international_obligation
+      description: "International commitment driving the rule (Wassenaar, MTCR, ICAO)."
+      maps_to: cause
+
+    - name: safety_rationale
+      description: "Safety justification for an aerospace certification requirement."
+      maps_to: cause
+
+# ─────────────────────────────────────────────────────────────────────────
+# FACTUAL
+# ─────────────────────────────────────────────────────────────────────────
+factual:
+  lifecycle_statuses:
+    - name: WITHDRAWN
+      description: "Provision officially withdrawn (e.g. 428/2009 explicitly repealed)."
+      maps_to: DEPRECATED
+
+    - name: SUPERSEDED
+      description: "Provision rendered obsolete by a successor."
+      maps_to: DEPRECATED
+
+    - name: APPLICABLE
+      description: "Currently enforceable provision."
+      maps_to: ACTIVE
+
+  object_kinds: []
+
+# ─────────────────────────────────────────────────────────────────────────
+# LIST
+# ─────────────────────────────────────────────────────────────────────────
+list:
+  item_types:
+    - name: control_list_entry
+      description: "An entry in EU dual-use Annex I (e.g. 3A001, 6A005, 9A610)."
+      maps_to: rule
+
+    - name: certification_specification
+      description: "A CS clause from CS-25 (e.g. CS 25.1309, CS 25.788)."
+      maps_to: rule
+
+    - name: amendment
+      description: "An identified amendment of a regulation or CS."
+      maps_to: regulation
+
+    - name: delegated_act
+      description: "An EU delegated act amending a base regulation."
+      maps_to: regulation
+
+    - name: amc_clause
+      description: "An Acceptable Means of Compliance clause."
+      maps_to: rule
+
+# ─────────────────────────────────────────────────────────────────────────
+# DOMAIN HINTS — guidance sémantique pour Structurer prompts
+# ─────────────────────────────────────────────────────────────────────────
+domain_hints:
+  list_extraction: |
+    EU dual-use Annex I entries are individually-numbered control items
+    (3A001, 6A005, 9A610...). When listing, preserve the exact numbering.
+    CS-25 specifications use a hierarchical numbering (CS 25.1309(c)).
+    Distinguish CS clauses (normative) from AMC clauses (acceptable means).
+
+  factual_extraction: |
+    EU regulatory texts use precise legal identifiers — preserve them
+    verbatim ("Regulation (EU) 2021/821" not "Regulation 2021/821").
+    CS-25 amendments are identified as "Amendment N" or "Amdt N".
+    Dates appear in multiple formats — keep raw form, normalize only when safe.
+
+  temporal_extraction: |
+    Distinguish: publication_date (date of official publication) vs
+    effective_date (date of enforcement) vs applicable_from (date for new
+    cases). EASA CS-25 amendments are issued via ED Decisions — capture both
+    the amendment number AND the ED Decision when present.
+
+  comparison_extraction: |
+    Numeric evolution between CS-25 amendments (e.g. impact energy 3.5J →
+    21J between Amdt 26 and Amdt 28) is SUPERSESSION via amendment_evolution
+    basis, NOT a CONFLICT. EU dual-use 2021/821 → 428/2009 is SUPERSESSION
+    with explicit repeal clause, NOT CONFLICT. Different control list
+    entries are DISJOINT, not CONFLICT.
+
+  causal_extraction: |
+    Regulatory rationales typically appear in recitals (preamble) for EU
+    acts and in Notices of Proposed Amendment (NPA) for EASA CS. Recitals
+    state legislative intent; final dispositions carry binding effect.
+    Prefer final-disposition language for legal_basis steps.
+
+  answerability_extraction: |
+    Common false_premise patterns in this domain :
+    - Asserting an old regulation as currently applicable (e.g. "428/2009"
+      for a transaction in 2024) → contradicted by repeal clause
+    - Asserting CS-25 applicability to non-applicable aircraft types
+      (e.g. helicopters, which are CS-27/CS-29) → contradicted by scope
+    - Asserting a value from a deprecated amendment as current
+    Common unanswerable patterns :
+    - National enforcement statistics (not in EU regulation corpus)
+    - Internal policy of specific manufacturers (out of corpus scope)
+    - Future amendments (e.g. CS-25 Amendment 30 — does not exist yet)

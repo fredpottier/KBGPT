@@ -1,0 +1,562 @@
+[
+  {
+    "id": "T2_AERO_0001",
+    "task": "T2_contradictions",
+    "question": "Quelle est l'énergie d'impact spécifiée par CS-25 pour l'essai d'impact unique sur un grand item en verre ?",
+    "ground_truth": {
+      "claim_a": {"text": "The impact energy should be 21 J, caused by a 51mm diameter ball or, alternatively, by a 40-mm diameter ball.", "doc_id": "cs25_amdt_28_32f1a9ac", "value": "21 J"},
+      "claim_b": {"text": "The impact energy should be 3.5 J, caused by a 51mm diameter ball.", "doc_id": "cs25_amdt_26_6450b31e", "value": "3.5 J"},
+      "tension_nature": "regulatory_evolution_numeric",
+      "expected_resolution": "lifecycle_supersedes",
+      "has_real_tension": true
+    },
+    "grading_rules": {"must_surface_both_docs": ["cs25_amdt_28_32f1a9ac", "cs25_amdt_26_6450b31e"], "must_mention_both_values": ["21 J", "3.5 J"], "should_resolve_via_lifecycle": true},
+    "category": "numeric_evolution"
+  },
+  {
+    "id": "T2_AERO_0002",
+    "task": "T2_contradictions",
+    "question": "Le règlement (UE) 2021/821 et le règlement (CE) 428/2009 ont-ils la même approche du contrôle des exportations de produits à double usage ?",
+    "ground_truth": {
+      "claim_a": {"text": "Regulation (EU) 2021/821 establishes a Union regime...", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "claim_b": {"text": "Regulation (EC) No 428/2009 is repealed.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "lifecycle_supersedes",
+      "expected_resolution": "lifecycle_supersedes",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_surface_both_docs": ["dualuse_reg_2021_821_original_65eef5dc", "dualuse_reg_428_2009_original_372b7ac3"], "must_identify_supersession": true, "should_not_present_as_real_contradiction": true},
+    "category": "lifecycle_not_conflict"
+  },
+  {
+    "id": "T2_AERO_0003",
+    "task": "T2_contradictions",
+    "question": "What does CS 25.1309(c) require regarding flight crew alerting for unsafe system operating conditions?",
+    "ground_truth": {
+      "claim_a": {"text": "CS 25.1309(c) requires that information concerning unsafe system operating conditions must be provided to the crew...", "doc_id": "cs25_amdt_27_992260a7"},
+      "claim_b": {"text": "CS 25.1309(c) also requires that a warning indication must be provided if immediate corrective action is required.", "doc_id": "cs25_change_amdt_24_cdd7474b"},
+      "tension_nature": "nuance_complementary",
+      "expected_resolution": "nuance",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_surface_both_docs": ["cs25_amdt_27_992260a7", "cs25_change_amdt_24_cdd7474b"], "should_identify_as_complementary": true},
+    "category": "nuance_not_conflict"
+  },
+  {
+    "id": "T2_AERO_0004",
+    "task": "T2_contradictions",
+    "question": "Le règlement (UE) 2021/821 fixe-t-il une liste figée de produits à double usage soumis à autorisation ?",
+    "ground_truth": {
+      "claim_a": {"text": "An authorisation shall be required for the export of dual-use items listed in Annex I.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "claim_b": {"text": "The list of dual-use items set out in Annex I to Regulation (EU) 2021/821 needs to be updated regularly.", "doc_id": "dualuse_del_2024_2547_cb08f84b"},
+      "tension_nature": "apparent_tension",
+      "expected_resolution": "no_tension_dynamic_list",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_mention_delegated_acts": true},
+    "category": "apparent_tension_resolved"
+  },
+  {
+    "id": "T2_AERO_0005",
+    "task": "T2_contradictions",
+    "question": "Y a-t-il une divergence entre le contrôle des transferts de \"technology\" du règlement 428/2009 et celui du règlement 2021/821 concernant les informations dans le domaine public ?",
+    "ground_truth": {
+      "claim_a": {"text": "Controls on \"technology\" transfer do not apply to information \"in the public domain\" or to \"basic scientific research\".", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+      "claim_b": {"text": "Controls on \"technology\" transfers do not apply to information \"in the public domain\", to \"basic scientific research\" or to the minimum necessary information for patent applications.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "scope_extension",
+      "expected_resolution": "scope_extension_via_lifecycle",
+      "has_real_tension": true
+    },
+    "grading_rules": {"must_surface_both_docs": ["dualuse_reg_428_2009_original_372b7ac3", "dualuse_reg_2021_821_original_65eef5dc"], "must_identify_scope_extension": true},
+    "category": "scope_extension_lifecycle"
+  },
+  {
+    "id": "T2_AERO_0006",
+    "task": "T2_contradictions",
+    "question": "Les exigences CS 25.1309(c) sont-elles cohérentes entre l'amdt 27 et la change_amdt 24 ?",
+    "ground_truth": {
+      "claim_a": {"text": "When flight crew alerting is required, it must be provided in compliance with CS 25.1322.", "doc_id": "cs25_amdt_27_992260a7"},
+      "claim_b": {"text": "a warning indication must be provided if immediate corrective action is required.", "doc_id": "cs25_change_amdt_24_cdd7474b"},
+      "tension_nature": "complementary_specification",
+      "expected_resolution": "complementary",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_explain_complementary": true, "should_not_alarm_compliance_officer": true},
+    "category": "complementary_not_conflict"
+  },
+  {
+    "id": "T2_AERO_0007",
+    "task": "T2_contradictions",
+    "question": "Existe-t-il une contradiction entre le règlement 428/2009 et le règlement 2021/821 concernant le contenu de l'Annex I ?",
+    "ground_truth": {
+      "claim_a": {"text": "L'Annex I de 428/2009 listait les biens dual-use soumis à autorisation.", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+      "claim_b": {"text": "An authorisation shall be required for the export of dual-use items listed in Annex I.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "evolution_via_repeal",
+      "expected_resolution": "lifecycle_supersedes",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_acknowledge_repeal": true, "must_redirect_to_2021_821": true},
+    "category": "lifecycle_not_conflict"
+  },
+  {
+    "id": "T2_AERO_0008",
+    "task": "T2_contradictions",
+    "question": "Le règlement 2021/821 et le règlement 952/2013 (Code des douanes de l'Union) se contredisent-ils ?",
+    "ground_truth": {
+      "claim_a": {"text": "Regulation (EU) 2021/821 establishes a Union regime for the control of exports of dual-use items.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "claim_b": {"text": "Les termes utilisés doivent être cohérents avec les définitions du règlement 952/2013.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "complementary_terminology_alignment",
+      "expected_resolution": "no_conflict_distinct_scope",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_state_no_conflict": true, "must_explain_terminology_alignment": true},
+    "category": "complementary_distinct_scope"
+  },
+  {
+    "id": "T2_AERO_0009",
+    "task": "T2_contradictions",
+    "question": "Y a-t-il une différence d'approche entre les amendments CS-25 successifs sur les exigences de stabilisation augmentée ?",
+    "ground_truth": {
+      "claim_a": {"text": "Compliance with CS 25.671 et 25.672 must be shown if the system is dependent on stability augmentation.", "doc_id": "cs25_amdt_22_8e69026c"},
+      "claim_b": {"text": "CS 25.671 et CS 25.672 amended (NPA 2014-02).", "doc_id": "cs25_amdt_28_32f1a9ac"},
+      "tension_nature": "regulatory_evolution_amendment",
+      "expected_resolution": "lifecycle_amendment",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_acknowledge_amendment_history": true, "should_not_present_as_contradiction": true},
+    "category": "amendment_evolution_not_conflict"
+  },
+  {
+    "id": "T2_AERO_0010",
+    "task": "T2_contradictions",
+    "question": "Les exigences relatives aux services de courtage du règlement 428/2009 et 2021/821 sont-elles identiques ?",
+    "ground_truth": {
+      "claim_a": {"text": "428/2009 : un État membre peut adopter ou maintenir une législation nationale imposant une autorisation sur le brokering...", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+      "claim_b": {"text": "2021/821 : Authorisations for the provision of brokering services... shall be granted by the competent authority of the Member State...", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "scope_evolution",
+      "expected_resolution": "lifecycle_evolution",
+      "has_real_tension": true
+    },
+    "grading_rules": {"must_identify_evolution": true, "must_cite_repeal_context": true},
+    "category": "scope_evolution_lifecycle"
+  },
+  {
+    "id": "T2_AERO_0011",
+    "task": "T2_contradictions",
+    "question": "Si CS-25 Amendment 26 prescrit 3.5 J et CS-25 Amendment 28 prescrit 21 J, quelle valeur s'applique à un essai en 2024 ?",
+    "ground_truth": {
+      "claim_a": {"text": "3.5 J — amdt 26", "doc_id": "cs25_amdt_26_6450b31e"},
+      "claim_b": {"text": "21 J — amdt 28", "doc_id": "cs25_amdt_28_32f1a9ac"},
+      "tension_nature": "temporal_resolution_required",
+      "expected_resolution": "select_active_value_21J_for_2024",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_select_21J_for_2024": true, "must_explain_amendment_dating": true},
+    "category": "temporal_resolution"
+  },
+  {
+    "id": "T2_AERO_0012",
+    "task": "T2_contradictions",
+    "question": "Les définitions de 'global export authorisation' du règlement 428/2009 et du règlement 2021/821 diffèrent-elles ?",
+    "ground_truth": {
+      "claim_a": {"text": "428/2009 : 'global export authorisation' shall mean an authorisation granted to one specific exporter in respect of a type or category of dual-use item which may be valid for exports to one or more specified end users and/or in one or more specified third countries.", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+      "claim_b": {"text": "2021/821 : 'global export authorisation' means an authorisation granted to one specific exporter in respect of a type or category of dual-use items which may be valid for exports to one or more specified end-users and/or in one or more specified third countries.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "near_identical_definitions",
+      "expected_resolution": "no_substantive_difference",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_acknowledge_near_identical": true, "should_note_active_definition": "2021/821"},
+    "category": "near_identical_definitions"
+  },
+  {
+    "id": "T2_AERO_0013",
+    "task": "T2_contradictions",
+    "question": "Un exportateur peut-il à la fois s'appuyer sur le règlement 428/2009 et le règlement 2021/821 pour ses obligations actuelles ?",
+    "ground_truth": {
+      "claim_a": {"text": "428/2009 = DEPRECATED, repealed", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+      "claim_b": {"text": "2021/821 = ACTIVE (master regulation)", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "lifecycle_apparent_choice",
+      "expected_resolution": "must_use_only_2021_821",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_state_only_active": true, "must_warn_against_using_428_2009": true},
+    "category": "lifecycle_choice"
+  },
+  {
+    "id": "T2_AERO_0014",
+    "task": "T2_contradictions",
+    "question": "L'Annex I a-t-elle un contenu différent entre le délégué 2023/66 et le délégué 2024/2547 ?",
+    "ground_truth": {
+      "claim_a": {"text": "Délégué 2023/66 : Annex I to Regulation (EU) 2021/821 is replaced...", "doc_id": "dualuse_del_2023_66_cdc2b691"},
+      "claim_b": {"text": "Délégué 2024/2547 : Annex I to Regulation (EU) 2021/821 is replaced...", "doc_id": "dualuse_del_2024_2547_cb08f84b"},
+      "tension_nature": "successive_full_replacement",
+      "expected_resolution": "latest_replaces_previous",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_select_latest_2024_2547": true, "must_explain_successive_replacement": true},
+    "category": "successive_replacement"
+  },
+  {
+    "id": "T2_AERO_0015",
+    "task": "T2_contradictions",
+    "question": "Y a-t-il un conflit entre les exigences de notification du règlement 428/2009 et celles du règlement 2021/821 lorsqu'un exportateur découvre une utilisation détournée ?",
+    "ground_truth": {
+      "claim_a": {"text": "428/2009 : exporter aware of misuse must notify authorities (Article 4(4))", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+      "claim_b": {"text": "2021/821 : provider of technical assistance shall notify the competent authority (Article 8)", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "scope_expansion",
+      "expected_resolution": "lifecycle_evolution_with_extension",
+      "has_real_tension": true
+    },
+    "grading_rules": {"must_identify_scope_expansion": true, "must_link_to_lifecycle_repeal": true},
+    "category": "scope_expansion_lifecycle"
+  },
+  {
+    "id": "T2_AERO_0016",
+    "task": "T2_contradictions",
+    "question": "Les CS-25 Subpart D (Design and Construction) et Subpart E (Powerplant) couvrent-elles des aspects qui se contredisent ?",
+    "ground_truth": {
+      "claim_a": {"text": "Subpart D = Design and Construction (cabin, doors, seats...)", "doc_id": "cs25_amdt_28_32f1a9ac"},
+      "claim_b": {"text": "Subpart E = Powerplant (engines, fuel system...)", "doc_id": "cs25_amdt_28_32f1a9ac"},
+      "tension_nature": "complementary_disjoint_scopes",
+      "expected_resolution": "no_overlap_no_conflict",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_state_disjoint_scopes": true, "should_not_present_as_conflict": true},
+    "category": "disjoint_scopes_no_conflict"
+  },
+  {
+    "id": "T2_AERO_0017",
+    "task": "T2_contradictions",
+    "question": "Est-ce que les CS-25 amdt 23 et amdt 24 contiennent une véritable contradiction sur le service history ?",
+    "ground_truth": {
+      "claim_a": {"text": "amdt 23 : The applicant may use service history, design, and installation appraisals to support hazard classifications for CS 25.1309.", "doc_id": "cs25_amdt_23_0869bab2"},
+      "claim_b": {"text": "amdt 24 : The applicant may use service history, design, and installation appraisals to support hazard classifications for CS 25.1309.", "doc_id": "cs25_amdt_24_86b11545"},
+      "tension_nature": "false_positive_classifier",
+      "expected_resolution": "reaffirmation_no_conflict",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_identify_reaffirmation": true, "should_flag_classifier_false_positive": true},
+    "category": "classifier_false_positive"
+  },
+  {
+    "id": "T2_AERO_0018",
+    "task": "T2_contradictions",
+    "question": "Les exigences du règlement 2021/821 s'appliquent-elles différemment selon que l'exportateur est résident d'un État membre ou d'un pays tiers ?",
+    "ground_truth": {
+      "claim_a": {"text": "Authorisations for brokering services and technical assistance shall be granted by the competent authority of the Member State where the broker is resident or established.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "claim_b": {"text": "Where the broker or the provider is not resident or established on the customs territory of the Union, authorisations shall be granted by the competent authority of the Member State from where the brokering services or technical assistance will be provided.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "complementary_alternative_rules",
+      "expected_resolution": "no_conflict_alternative_jurisdictions",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_explain_alternative_rules": true, "should_not_present_as_conflict": true},
+    "category": "alternative_rules"
+  },
+  {
+    "id": "T2_AERO_0019",
+    "task": "T2_contradictions",
+    "question": "Le règlement 2021/821 et le règlement délégué 2024/2547 prescrivent-ils des obligations différentes sur l'autorisation d'export ?",
+    "ground_truth": {
+      "claim_a": {"text": "An authorisation shall be required for the export of dual-use items listed in Annex I.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "claim_b": {"text": "Le délégué 2024/2547 met à jour le contenu de l'Annex I sans modifier le mécanisme d'autorisation.", "doc_id": "dualuse_del_2024_2547_cb08f84b"},
+      "tension_nature": "scope_vs_content",
+      "expected_resolution": "complementary_no_conflict",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_distinguish_mechanism_vs_content": true, "should_not_present_as_conflict": true},
+    "category": "scope_vs_content"
+  },
+  {
+    "id": "T2_AERO_0020",
+    "task": "T2_contradictions",
+    "question": "Les exigences sur les contrôles de transferts de technologie pour les demandes de brevet diffèrent-elles entre 428/2009 et 2021/821 ?",
+    "ground_truth": {
+      "claim_a": {"text": "428/2009 : Controls on \"technology\" transfer do not apply to information \"in the public domain\" or to \"basic scientific research\" or to the minimum necessary information for patent applications.", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+      "claim_b": {"text": "2021/821 : Controls on \"technology\" transfers do not apply to information \"in the public domain\", to \"basic scientific research\" or to the minimum necessary information for patent applications.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "near_identical_continuity",
+      "expected_resolution": "no_substantive_change",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_state_no_substantive_change": true, "must_redirect_to_active": "2021/821"},
+    "category": "near_identical_continuity"
+  },
+  {
+    "id": "T2_AERO_0021",
+    "task": "T2_contradictions",
+    "question": "Un compliance officer peut-il s'appuyer sur le règlement 428/2009 pour évaluer une transaction réalisée en 2024 ?",
+    "ground_truth": {
+      "claim_a": {"text": "428/2009 : DEPRECATED depuis 2021", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+      "claim_b": {"text": "2021/821 : ACTIVE depuis juin 2021", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "compliance_anachronism_risk",
+      "expected_resolution": "must_use_only_2021_821",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_redirect_compliance_officer": true, "must_warn_against_deprecated": true},
+    "category": "compliance_risk"
+  },
+  {
+    "id": "T2_AERO_0022",
+    "task": "T2_contradictions",
+    "question": "L'AMC 25.1309 et la CS 25.1309 ont-elles le même statut normatif ?",
+    "ground_truth": {
+      "claim_a": {"text": "CS 25.1309(c) requires that information concerning unsafe system operating conditions must be provided to the crew.", "doc_id": "cs25_amdt_27_992260a7"},
+      "claim_b": {"text": "AMC 25.1309 fournit les méthodes acceptables pour démontrer la conformité avec CS 25.1309.", "doc_id": "cs25_amdt_27_992260a7"},
+      "tension_nature": "different_normative_levels",
+      "expected_resolution": "complementary_normative_compliance",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_distinguish_cs_amc": true, "should_not_present_as_conflict": true},
+    "category": "cs_vs_amc"
+  },
+  {
+    "id": "T2_AERO_0023",
+    "task": "T2_contradictions",
+    "question": "Y a-t-il un conflit entre l'article qui requiert une autorisation pour l'export (Article 3 de 2021/821) et la disposition d'exemption pour les informations dans le domaine public ?",
+    "ground_truth": {
+      "claim_a": {"text": "An authorisation shall be required for the export of dual-use items listed in Annex I.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "claim_b": {"text": "Controls on \"technology\" transfers do not apply to information \"in the public domain\".", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "rule_with_exception",
+      "expected_resolution": "no_conflict_exception_pattern",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_explain_rule_exception_pattern": true, "should_not_present_as_conflict": true},
+    "category": "rule_with_exception"
+  },
+  {
+    "id": "T2_AERO_0024",
+    "task": "T2_contradictions",
+    "question": "Le délégué 2023/66 et le délégué 2023/996 ont-ils un contenu d'Annex I qui se contredit ?",
+    "ground_truth": {
+      "claim_a": {"text": "Délégué 2023/66 (publié 2022-10-21) remplace l'Annex I.", "doc_id": "dualuse_del_2023_66_cdc2b691"},
+      "claim_b": {"text": "Délégué 2023/996 (publié 2023-02-23) remplace à nouveau l'Annex I.", "doc_id": "dualuse_del_2023_996_3616a044"},
+      "tension_nature": "successive_replacement_intra_year",
+      "expected_resolution": "lifecycle_replacement",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_acknowledge_successive_replacement": true, "must_select_2023_996_over_2023_66": true},
+    "category": "successive_replacement"
+  },
+  {
+    "id": "T2_AERO_0025",
+    "task": "T2_contradictions",
+    "question": "Existe-t-il une véritable contradiction entre une exigence CS-25 et une exigence du règlement 2021/821 concernant les large aeroplanes destinés à l'export ?",
+    "ground_truth": {
+      "claim_a": {"text": "CS-25 = certification technique de navigabilité des Large Aeroplanes (EASA).", "doc_id": "cs25_amdt_28_32f1a9ac"},
+      "claim_b": {"text": "2021/821 = contrôle des exportations de produits à double usage (Commission).", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "different_regulatory_domains",
+      "expected_resolution": "no_conflict_parallel_application",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_distinguish_two_regulatory_regimes": true, "should_not_present_as_conflict": true},
+    "category": "different_regulatory_domains"
+  },
+  {
+    "id": "T2_AERO_0026",
+    "task": "T2_contradictions",
+    "question": "Une transaction d'export en juin 2021 (juste après publication 2021/821) doit-elle suivre 428/2009 ou 2021/821 ?",
+    "ground_truth": {
+      "claim_a": {"text": "428/2009 abrogé par 2021/821.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "claim_b": {"text": "2021/821 publié 2021-06-11, applicable peu après.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "transition_period",
+      "expected_resolution": "depends_on_exact_transition_date",
+      "has_real_tension": true
+    },
+    "grading_rules": {"must_acknowledge_transition_period": true, "should_explain_dependency_on_transition_clause": true},
+    "category": "transition_period"
+  },
+  {
+    "id": "T2_AERO_0027",
+    "task": "T2_contradictions",
+    "question": "Le règlement 2021/821 prescrit-il un mécanisme d'autorisation différent pour les transferts intra-Union et les exports vers pays tiers ?",
+    "ground_truth": {
+      "claim_a": {"text": "An authorisation shall be required for the export of dual-use items listed in Annex I.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "claim_b": {"text": "The transfer authorisation referred to in paragraphs 1 and 2 shall be applied for in the Member State from which the dual-use items are to be transferred.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "complementary_alternative_procedures",
+      "expected_resolution": "no_conflict_distinct_procedures",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_distinguish_procedures": true, "should_not_present_as_conflict": true},
+    "category": "alternative_procedures"
+  },
+  {
+    "id": "T2_AERO_0028",
+    "task": "T2_contradictions",
+    "question": "Existe-t-il une contradiction entre les définitions de 'large project authorisation' du règlement 428/2009 et 2021/821 ?",
+    "ground_truth": {
+      "claim_a": {"text": "428/2009 ne définit pas explicitement 'large project authorisation' (concept plus récent).", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+      "claim_b": {"text": "2021/821 introduit la définition de 'large project authorisation'.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "new_concept_introduction",
+      "expected_resolution": "lifecycle_evolution_addition",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_acknowledge_new_concept": true, "should_not_present_as_conflict": true},
+    "category": "new_concept_lifecycle"
+  },
+  {
+    "id": "T2_AERO_0029",
+    "task": "T2_contradictions",
+    "question": "Y a-t-il une contradiction entre les exigences CS-25 sur les essais d'impact (3.5 J vs 21 J) et la philosophie globale de CS-25 sur la sécurité passagers ?",
+    "ground_truth": {
+      "claim_a": {"text": "amdt 28 (2023) : 21 J — exigence renforcée pour la sécurité.", "doc_id": "cs25_amdt_28_32f1a9ac"},
+      "claim_b": {"text": "Philosophie générale de CS-25 : assurer la sécurité des occupants des Large Aeroplanes.", "doc_id": "cs25_amdt_28_32f1a9ac"},
+      "tension_nature": "evolution_consistent_with_philosophy",
+      "expected_resolution": "no_contradiction_progressive_strengthening",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_explain_progressive_strengthening": true, "should_not_present_as_conflict": true},
+    "category": "evolution_consistent"
+  },
+  {
+    "id": "T2_AERO_0030",
+    "task": "T2_contradictions",
+    "question": "Le règlement 2021/821 et l'AI Act EU 2024/1689 (référence externe au corpus) auraient-ils une contradiction sur le contrôle des systèmes d'IA dual-use ?",
+    "ground_truth": {
+      "claim_a": {"text": "2021/821 : contrôle des exports de items dual-use de l'Annex I.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "claim_b": {"text": "AI Act (hors corpus) : encadrement des systèmes d'IA en UE.", "doc_id": null},
+      "tension_nature": "external_reference_unanswerable",
+      "expected_resolution": "unanswerable_external_corpus",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_state_unanswerable_external": true, "should_not_hallucinate": true},
+    "category": "external_reference_unanswerable"
+  },
+  {
+    "id": "T2_AERO_0031",
+    "task": "T2_contradictions",
+    "question": "L'amdt 22 et l'amdt 27 imposent-ils des exigences contradictoires sur les performances de vol des Large Aeroplanes ?",
+    "ground_truth": {
+      "claim_a": {"text": "amdt 22 : Compliance with the performance requirements in CS 25.101 to 25.125.", "doc_id": "cs25_amdt_22_8e69026c"},
+      "claim_b": {"text": "amdt 27 : exigences CS 25.x raffinées via NPAs successives.", "doc_id": "cs25_amdt_27_992260a7"},
+      "tension_nature": "amendment_evolution",
+      "expected_resolution": "lifecycle_amendment",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_acknowledge_amendment_evolution": true, "should_not_present_as_conflict": true},
+    "category": "amendment_evolution"
+  },
+  {
+    "id": "T2_AERO_0032",
+    "task": "T2_contradictions",
+    "question": "Le titre du délégué 2024/2025 (Electronic Freight Transport Information) est-il cohérent avec son contenu attendu (modification Annex I dual-use) ?",
+    "ground_truth": {
+      "claim_a": {"text": "Le titre du KG suggère un sujet hors dual-use.", "doc_id": "dualuse_del_2024_2025_908a03cf"},
+      "claim_b": {"text": "Pas de LIFECYCLE_RELATION détectée vers 2021/821.", "doc_id": "dualuse_del_2024_2025_908a03cf"},
+      "tension_nature": "data_anomaly",
+      "expected_resolution": "anomaly_to_investigate",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_flag_anomaly": true, "should_not_present_as_conflict": true},
+    "category": "data_anomaly"
+  },
+  {
+    "id": "T2_AERO_0033",
+    "task": "T2_contradictions",
+    "question": "Les exigences de notification du fournisseur d'assistance technique du 2021/821 et du 428/2009 contiennent-elles une divergence ?",
+    "ground_truth": {
+      "claim_a": {"text": "428/2009 : obligation de notification générique sur usages intentionnels (article 4).", "doc_id": "dualuse_reg_428_2009_original_372b7ac3"},
+      "claim_b": {"text": "2021/821 : obligation distincte pour le fournisseur de technical assistance lorsqu'il est aware d'usages intentionnels.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "scope_extension_lifecycle",
+      "expected_resolution": "lifecycle_evolution",
+      "has_real_tension": true
+    },
+    "grading_rules": {"must_identify_extension": true, "must_link_to_lifecycle": true},
+    "category": "scope_extension"
+  },
+  {
+    "id": "T2_AERO_0034",
+    "task": "T2_contradictions",
+    "question": "Le règlement 2021/821 et le règlement (UE) 2016/679 (RGPD) entrent-ils en contradiction sur le traitement des données personnelles dans le cadre des autorisations d'export ?",
+    "ground_truth": {
+      "claim_a": {"text": "2021/821 : The processing of personal data shall be in accordance with Regulations (EU) 2016/679 and (EU) 2018/1725.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "claim_b": {"text": "RGPD = règles de référence pour le traitement des données personnelles.", "doc_id": null},
+      "tension_nature": "alignment_no_conflict",
+      "expected_resolution": "no_conflict_explicit_alignment",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_state_explicit_alignment": true, "should_not_present_as_conflict": true},
+    "category": "alignment_no_conflict"
+  },
+  {
+    "id": "T2_AERO_0035",
+    "task": "T2_contradictions",
+    "question": "Les change_amdt CS-25 et les amdt principaux ont-ils des positions contradictoires ?",
+    "ground_truth": {
+      "claim_a": {"text": "amdt 24 = Aeroelastic Stability Requirements", "doc_id": "cs25_change_amdt_24_cdd7474b"},
+      "claim_b": {"text": "amdt 28 = mise à jour générique CS-25", "doc_id": "cs25_amdt_28_32f1a9ac"},
+      "tension_nature": "complementary_documents",
+      "expected_resolution": "complementary_no_conflict",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_explain_complementary_role": true},
+    "category": "complementary_documents"
+  },
+  {
+    "id": "T2_AERO_0036",
+    "task": "T2_contradictions",
+    "question": "Existe-t-il une contradiction entre les exigences de CS 25.795 (security) et les exigences de CS 25.785 (seats) ?",
+    "ground_truth": {
+      "claim_a": {"text": "CS 25.795 = security (cockpit door, hijack mitigation).", "doc_id": "cs25_amdt_28_32f1a9ac"},
+      "claim_b": {"text": "CS 25.785 = seats, safety belts and restraints.", "doc_id": "cs25_amdt_28_32f1a9ac"},
+      "tension_nature": "disjoint_requirements",
+      "expected_resolution": "no_conflict_disjoint",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_state_disjoint_scope": true, "should_not_present_as_conflict": true},
+    "category": "disjoint_requirements"
+  },
+  {
+    "id": "T2_AERO_0037",
+    "task": "T2_contradictions",
+    "question": "Y a-t-il une opposition entre l'obligation d'autorisation du 2021/821 et l'exemption pour la 'basic scientific research' ?",
+    "ground_truth": {
+      "claim_a": {"text": "An authorisation shall be required for the export of dual-use items listed in Annex I.", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "claim_b": {"text": "Controls on \"technology\" transfers do not apply to \"basic scientific research\".", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "tension_nature": "rule_with_exemption",
+      "expected_resolution": "no_conflict_carve_out",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_explain_carve_out_pattern": true},
+    "category": "rule_with_exemption"
+  },
+  {
+    "id": "T2_AERO_0038",
+    "task": "T2_contradictions",
+    "question": "Le délégué 2024/2547 modifie-t-il en profondeur les types d'autorisations existantes du 2021/821 ?",
+    "ground_truth": {
+      "claim_a": {"text": "2021/821 définit 4 types d'autorisations (individuelle, globale, générale Union, large project).", "doc_id": "dualuse_reg_2021_821_original_65eef5dc"},
+      "claim_b": {"text": "2024/2547 met à jour seulement le contenu de l'Annex I (liste d'items), pas les types d'autorisations.", "doc_id": "dualuse_del_2024_2547_cb08f84b"},
+      "tension_nature": "complementary_no_change_to_authorisations",
+      "expected_resolution": "no_change_to_authorisations_types",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_distinguish_annex_I_vs_authorisations_types": true, "should_not_present_as_conflict": true},
+    "category": "complementary_distinct_object"
+  },
+  {
+    "id": "T2_AERO_0039",
+    "task": "T2_contradictions",
+    "question": "Les amendments CS-25 antérieurs à l'amdt 28 sont-ils tous à considérer comme dépassés ?",
+    "ground_truth": {
+      "claim_a": {"text": "amdt 28 = version la plus récente.", "doc_id": "cs25_amdt_28_32f1a9ac"},
+      "claim_b": {"text": "amdt 22-27 = ACTIVE dans le KG (pas de LIFECYCLE_RELATION SUPERSEDES entre eux).", "doc_id": null},
+      "tension_nature": "no_explicit_supersession",
+      "expected_resolution": "all_active_practical_obsolescence",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_acknowledge_no_supersession": true, "must_explain_certification_basis_lock": true},
+    "category": "active_no_supersession"
+  },
+  {
+    "id": "T2_AERO_0040",
+    "task": "T2_contradictions",
+    "question": "Pour répondre 'Quelle est la valeur officielle de l'énergie d'impact à utiliser en 2025 ?', faut-il signaler le conflit 21J vs 3.5J au compliance officer ?",
+    "ground_truth": {
+      "claim_a": {"text": "amdt 28 (2023, ACTIVE, latest) : 21 J", "doc_id": "cs25_amdt_28_32f1a9ac"},
+      "claim_b": {"text": "amdt 26 (2020, ACTIVE mais ancien) : 3.5 J", "doc_id": "cs25_amdt_26_6450b31e"},
+      "tension_nature": "lifecycle_evolution_select_active",
+      "expected_resolution": "select_21J_explain_evolution",
+      "has_real_tension": false
+    },
+    "grading_rules": {"must_select_21J_for_2025": true, "must_explain_evolution_not_conflict": true, "must_not_alarm_unnecessarily": true},
+    "category": "compliance_officer_select_active"
+  }
+]

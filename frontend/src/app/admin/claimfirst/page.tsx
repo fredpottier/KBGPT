@@ -718,12 +718,12 @@ export default function ClaimFirstPage() {
             return (
             <Box
               bg="bg.primary"
-              border="2px solid"
+              border="1px solid"
               borderColor={
-                isCircuitBreaker ? 'red.500' :
-                isFinished ? 'green.600' :
-                isFailed ? 'red.600' :
-                'blue.600'
+                isCircuitBreaker ? 'red.600' :
+                isFinished ? 'green.700' :
+                isFailed ? 'red.700' :
+                'blue.700'
               }
               rounded="xl"
               p={0}
@@ -732,31 +732,49 @@ export default function ClaimFirstPage() {
             >
               {/* Header */}
               <Box
-                bg={
-                  isCircuitBreaker ? 'red.900' :
-                  isFinished ? 'green.900' :
-                  isFailed ? 'red.900' :
-                  'blue.900'
+                bg="bg.tertiary"
+                borderBottom="1px solid"
+                borderBottomColor={
+                  isCircuitBreaker ? 'red.600' :
+                  isFinished ? 'green.700' :
+                  isFailed ? 'red.700' :
+                  'blue.700'
                 }
                 px={4} py={3}
               >
                 <Flex justify="space-between" align="center">
                   <HStack spacing={3}>
-                    <Icon
-                      as={
-                        isCircuitBreaker ? FiStopCircle :
-                        isFinished ? FiCheckCircle :
-                        isFailed ? FiXCircle :
-                        FiLoader
+                    <Box
+                      w={8}
+                      h={8}
+                      rounded="md"
+                      bg={
+                        isCircuitBreaker ? 'red.900' :
+                        isFinished ? 'green.900' :
+                        isFailed ? 'red.900' :
+                        'blue.900'
                       }
-                      color={
-                        isCircuitBreaker ? 'red.300' :
-                        isFinished ? 'green.300' :
-                        isFailed ? 'red.300' :
-                        'blue.300'
-                      }
-                      boxSize={5}
-                    />
+                      display="flex"
+                      alignItems="center"
+                      justifyContent="center"
+                      flexShrink={0}
+                    >
+                      <Icon
+                        as={
+                          isCircuitBreaker ? FiStopCircle :
+                          isFinished ? FiCheckCircle :
+                          isFailed ? FiXCircle :
+                          FiLoader
+                        }
+                        color={
+                          isCircuitBreaker ? 'red.400' :
+                          isFinished ? 'green.400' :
+                          isFailed ? 'red.400' :
+                          'blue.400'
+                        }
+                        boxSize={4}
+                      />
+                    </Box>
                     <Box>
                       <Text fontWeight="bold" color="text.primary" fontSize="md">
                         {isCircuitBreaker ? 'Circuit Breaker activé' :
@@ -887,7 +905,7 @@ export default function ClaimFirstPage() {
 
                   {/* Circuit breaker alert */}
                   {isCircuitBreaker && (
-                    <Box bg="red.900" border="1px solid" borderColor="red.600" rounded="md" p={3}>
+                    <Box bg="bg.tertiary" border="1px solid" borderColor="red.600" rounded="md" p={3}>
                       <HStack spacing={2} mb={1}>
                         <Icon as={FiStopCircle} color="red.300" boxSize={4} />
                         <Text fontSize="sm" color="red.200" fontWeight="semibold">
@@ -903,7 +921,7 @@ export default function ClaimFirstPage() {
 
                   {/* Erreurs */}
                   {currentJob.errors.length > 0 && !isCircuitBreaker && (
-                    <Box bg="red.900" border="1px solid" borderColor="red.700" rounded="md" p={2}>
+                    <Box bg="bg.tertiary" border="1px solid" borderColor="red.700" rounded="md" p={2}>
                       <Text fontSize="xs" color="red.300" fontWeight="semibold" mb={1}>
                         {currentJob.errors.length} erreur(s)
                       </Text>
@@ -931,7 +949,7 @@ export default function ClaimFirstPage() {
 
                   {/* Résumé final */}
                   {isFinished && elapsed > 0 && (
-                    <Box bg="green.900" border="1px solid" borderColor="green.700" rounded="md" p={3}>
+                    <Box bg="bg.tertiary" border="1px solid" borderColor="green.700" rounded="md" p={3}>
                       <Text fontSize="sm" color="green.200" fontWeight="semibold" mb={1}>
                         Traitement terminé en {formatDuration(elapsed)}
                       </Text>

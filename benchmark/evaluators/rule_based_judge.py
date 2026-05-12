@@ -56,9 +56,9 @@ def judge_t1(result: Dict) -> Dict:
                 "says_idk": True, "citation_present": False,
                 "correct_source_cited": False, "answer_relevant": False}
 
-    idk_patterns = ["information not available", "pas disponible",
-                    "je ne dispose pas", "aucune information",
-                    "not available in the sources", "je ne trouve pas"]
+    # CH-12 — externalisé vers config/detection_keywords.yaml
+    from knowbase.config.detection_keywords import get_detection_keywords
+    idk_patterns = get_detection_keywords().idk_phrases
     says_idk = any(p in answer.lower() for p in idk_patterns)
 
     # 2. Le fait attendu est-il dans la réponse ?

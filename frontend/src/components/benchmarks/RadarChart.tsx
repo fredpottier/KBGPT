@@ -31,7 +31,7 @@ export function RadarChart({ data, size = 240, color = '#f97316' }: RadarChartPr
       g.append('circle')
         .attr('r', radius * level)
         .attr('fill', 'none')
-        .attr('stroke', '#1e1e3a')
+        .style('stroke', 'var(--border-default)')
         .attr('stroke-width', 1)
     }
 
@@ -42,7 +42,7 @@ export function RadarChart({ data, size = 240, color = '#f97316' }: RadarChartPr
         .attr('x1', 0).attr('y1', 0)
         .attr('x2', radius * Math.cos(angle))
         .attr('y2', radius * Math.sin(angle))
-        .attr('stroke', '#1e1e3a')
+        .style('stroke', 'var(--border-default)')
         .attr('stroke-width', 1)
     }
 
@@ -68,7 +68,7 @@ export function RadarChart({ data, size = 240, color = '#f97316' }: RadarChartPr
         .attr('cy', p[1])
         .attr('r', 4)
         .attr('fill', color)
-        .attr('stroke', '#0a0a1a')
+        .style('stroke', 'var(--bg-canvas)')
         .attr('stroke-width', 2)
     })
 
@@ -87,7 +87,7 @@ export function RadarChart({ data, size = 240, color = '#f97316' }: RadarChartPr
         .attr('y', y)
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'central')
-        .attr('fill', '#94a3b8')
+        .style('fill', 'var(--fg-secondary)')
         .attr('font-family', "'Fira Sans', sans-serif")
         .attr('font-size', '10px')
         .text(d.label.replace(/_/g, ' '))

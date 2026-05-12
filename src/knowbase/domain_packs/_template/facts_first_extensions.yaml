@@ -1,0 +1,188 @@
+# Domain Pack — Facts-First Extensions Template
+#
+# Status   : Figé 2026-05-06 (CH-41.M, livrable 2)
+# Décision : ADR_V4_FACTS_FIRST.md D-FF10 (contrat extension Domain Pack)
+# Référence: schemas/facts_first/README.md
+#
+# RÔLE
+# ----
+# Permet à un Domain Pack d'étendre les valeurs énumérées des schémas Facts-First
+# SANS modifier le code core. Le pipeline charge ce fichier au boot du Domain Pack
+# actif et fusionne les extensions avec le core minimal universel.
+#
+# RÈGLE INVARIANTE
+# ----------------
+# Toute valeur étendue DOIT avoir un `maps_to` vers le core minimal universel.
+# Permet au Composer générique de produire une réponse cohérente même quand le
+# Domain Pack n'est pas chargé (fallback safe).
+#
+# Si maps_to est invalide → erreur au boot du Domain Pack, le Domain Pack est rejeté.
+
+schema_version: facts_first_v1
+domain_pack: _template
+
+# ─────────────────────────────────────────────────────────────────────────
+# Extensions COMPARISON (relation type + basis)
+# ─────────────────────────────────────────────────────────────────────────
+comparison:
+  # comparison.relation.type
+  # Core minimal universel : equivalent | different | related | unknown
+  relation_types:
+    # Exemples (à adapter par domaine — supprimer ceux non pertinents)
+    # - name: SUPERSESSION
+    #   description: "A later active source replaces an older deprecated source. Time-based."
+    #   maps_to: different
+    #   examples:
+    #     - "EU 2021/821 supersedes EU 428/2009"
+    # - name: SUBSET
+    #   description: "Side A is a sub-case of Side B (narrower scope)."
+    #   maps_to: related
+    # - name: SUPERSET
+    #   description: "Side A is a broader case of Side B."
+    #   maps_to: related
+    # - name: COMPLEMENTARY
+    #   description: "Sides A and B address different aspects without conflict."
+    #   maps_to: related
+    # - name: CONFLICT
+    #   description: "Sides A and B express genuinely contradictory rules within the same scope/time."
+    #   maps_to: different
+
+  # comparison.relation.basis
+  # Core minimal universel : value | time | unknown
+  relation_basis:
+    # Exemples
+    # - name: scope
+    #   description: "Difference attributed to scope of applicability."
+    #   maps_to: value
+    # - name: method
+    #   description: "Difference in method/procedure but same end goal."
+    #   maps_to: value
+    # - name: definition
+    #   description: "Difference in definition of a term."
+    #   maps_to: value
+
+# ─────────────────────────────────────────────────────────────────────────
+# Extensions TEMPORAL (change_type + time_anchor.kind)
+# ─────────────────────────────────────────────────────────────────────────
+temporal:
+  # temporal.change_type
+  # Core minimal universel : added | removed | changed | unknown
+  change_types:
+    # Exemples
+    # - name: replaced
+    #   description: "Older state is fully replaced by a newer state."
+    #   maps_to: changed
+    # - name: modified
+    #   description: "State is updated/refined without full replacement."
+    #   maps_to: changed
+    # - name: superseded
+    #   description: "State is rendered obsolete by a successor."
+    #   maps_to: changed
+    # - name: clarified
+    #   description: "Same substance, wording clarified."
+    #   maps_to: changed
+
+  # temporal.time_anchor.kind
+  # Core minimal universel : date | version | unknown
+  time_anchor_kinds:
+    # Exemples
+    # - name: amendment
+    #   description: "Anchored to a specific amendment number (e.g. 'CS-25 Amendment 28')."
+    #   maps_to: version
+    # - name: release
+    #   description: "Anchored to a software/product release identifier."
+    #   maps_to: version
+    # - name: effective_date
+    #   description: "Date when rules become enforceable."
+    #   maps_to: date
+    # - name: applicable_from
+    #   description: "Date when rules apply to new cases."
+    #   maps_to: date
+
+# ─────────────────────────────────────────────────────────────────────────
+# Extensions CAUSAL (steps role)
+# ─────────────────────────────────────────────────────────────────────────
+causal:
+  # causal_chains[].steps[].role
+  # Core minimal universel : cause | effect | condition | unknown
+  step_roles:
+    # Exemples
+    # - name: mechanism
+    #   description: "How the cause produces the effect (intermediate step)."
+    #   maps_to: condition
+    # - name: exception
+    #   description: "Conditions under which the causal link does NOT hold."
+    #   maps_to: condition
+    # - name: context
+    #   description: "Background information that contextualizes the chain."
+    #   maps_to: condition
+    # - name: motivation
+    #   description: "Underlying motivation for the rule (legislator intent)."
+    #   maps_to: cause
+
+# ─────────────────────────────────────────────────────────────────────────
+# Extensions FACTUAL (qualifiers.lifecycle_status + object.kind)
+# ─────────────────────────────────────────────────────────────────────────
+factual:
+  # factual.facts[].qualifiers.lifecycle_status
+  # Core minimal universel : ACTIVE | DEPRECATED | UNKNOWN
+  lifecycle_statuses:
+    # Exemples
+    # - name: DRAFT
+    #   description: "Provision adopted but not yet in force."
+    #   maps_to: UNKNOWN
+    # - name: IN_REVIEW
+    #   description: "Provision under revision."
+    #   maps_to: ACTIVE
+    # - name: WITHDRAWN
+    #   description: "Provision officially withdrawn."
+    #   maps_to: DEPRECATED
+    # - name: SUPERSEDED
+    #   description: "Provision replaced by a more recent one."
+    #   maps_to: DEPRECATED
+
+  # factual.facts[].object.kind
+  # Core minimal universel : date | number | identifier | name | currency | duration | boolean | text | unknown
+  object_kinds: []  # extensions rares ici, le core couvre la plupart
+
+# ─────────────────────────────────────────────────────────────────────────
+# Extensions LIST (items[].item_type)
+# ─────────────────────────────────────────────────────────────────────────
+list:
+  # list.items[].item_type
+  # Core minimal universel : category | regulation | entity | concept | value | rule | exemption | unknown
+  item_types:
+    # Exemples
+    # - name: control_list_entry
+    #   description: "An entry in an export control list (e.g. 6A005, 9A610)."
+    #   maps_to: rule
+    # - name: certification_specification
+    #   description: "A CS clause (e.g. CS 25.1309)."
+    #   maps_to: rule
+
+# ─────────────────────────────────────────────────────────────────────────
+# Domain hints (optional — semantic guidance for the Structurer prompts)
+# ─────────────────────────────────────────────────────────────────────────
+# Hints sémantiques optionnels, injectés dans les prompts Structurer pour
+# améliorer l'extraction sur ce domaine SANS hardcoder de regex/keywords.
+# Format texte libre, multilingue, courte phrase contextuelle.
+#
+# Charte anti-V2 : aucun listing métier hardcodé en regex/keywords. Hints =
+# prose contextuelle prose, pas patterns lexicaux.
+domain_hints:
+  list_extraction: ""
+  factual_extraction: ""
+  temporal_extraction: ""
+  comparison_extraction: ""
+  causal_extraction: ""
+  answerability_extraction: ""
+
+# ─────────────────────────────────────────────────────────────────────────
+# Validation
+# ─────────────────────────────────────────────────────────────────────────
+# Au boot du Domain Pack :
+# 1. Charger ce YAML
+# 2. Pour chaque extension, vérifier que maps_to ∈ core minimal universel du champ
+# 3. Si invalide → reject le Domain Pack avec error log explicite
+# 4. Sinon, construire la table de mapping {extended_value: core_value} pour
+#    le Composer générique et le verifier déterministe

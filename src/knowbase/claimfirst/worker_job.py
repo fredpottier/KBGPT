@@ -110,6 +110,11 @@ def claimfirst_process_job(
 
     job_started_at = time.time()
 
+    # Reset complet de l'état Redis pour éviter le leak inter-jobs (errors,
+    # current_filename, phase_elapsed_s, etc. d'un job précédent restaient dans
+    # le hash car _update_state fait un HSET incrémental, jamais un wipe).
+    redis_client.delete(CLAIMFIRST_STATE_KEY)
+
     _update_state(
         redis_client,
         status="STARTING",
@@ -124,6 +129,7 @@ def claimfirst_process_job(
         current_filename="",
         phase="INIT",
         started_at=job_started_at,
+        errors="[]",
     )
     _emit_phase(redis_client, "INIT", "started")
 
@@ -236,12 +242,30 @@ def claimfirst_process_job(
             _heartbeat_thread = _threading.Thread(target=_heartbeat_loop, daemon=True)
             _heartbeat_thread.start()
 
+            # P4.6 — JobManager pour résilience (checkpoints Redis)
+            try:
+                from knowbase.ingestion.resilience import JobManager
+                _job_manager = JobManager()
+            except Exception as _exc:
+                logger.warning(f"[ClaimFirst] JobManager unavailable: {_exc}")
+                _job_manager = None
+
             try:
                 result = orchestrator.process_and_persist(
                     doc_id=doc_id,
                     cache_result=cache_result,
                     tenant_id=tenant_id,
+                    job_manager=_job_manager,
                 )
+            except Exception as _exc:
+                # P4.6 — marquer FAILED dans JobManager pour audit + retry
+                if _job_manager is not None:
+                    try:
+                        from knowbase.ingestion.resilience import JobStateEnum
+                        _job_manager.update_state(doc_id, JobStateEnum.FAILED, error=str(_exc))
+                    except Exception:
+                        pass
+                raise
             finally:
                 _heartbeat_stop.set()
                 _heartbeat_thread.join(timeout=2)

@@ -1,0 +1,452 @@
+[
+  {
+    "id": "T1_AERO_0001",
+    "task": "T1_provenance",
+    "question": "Quel règlement de l'Union européenne établit le régime communautaire de contrôle des exportations, du courtage, de l'assistance technique, du transit et du transfert des produits à double usage ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Le règlement (UE) 2021/821 du Parlement européen et du Conseil du 20 mai 2021 institue ce régime de l'Union pour le contrôle des exportations, du courtage, de l'assistance technique, du transit et du transfert des produits à double usage.",
+    "verbatim_quote": "Regulation (EU) 2021/821",
+    "category": "anchor_master_dualuse"
+  },
+  {
+    "id": "T1_AERO_0002",
+    "task": "T1_provenance",
+    "question": "Under Regulation (EU) 2021/821, what is required for the export of dual-use items listed in Annex I?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "An authorisation from the competent authority is required for the export of any dual-use items listed in Annex I of Regulation (EU) 2021/821.",
+    "verbatim_quote": "An authorisation shall be required for the export of dual-use items listed in Annex I.",
+    "category": "key_obligation_dualuse"
+  },
+  {
+    "id": "T1_AERO_0003",
+    "task": "T1_provenance",
+    "question": "Quelle est l'énergie d'impact spécifiée par CS-25 Amendment 28 pour l'essai d'impact unique sur un grand item en verre ?",
+    "ground_truth_doc_id": "cs25_amdt_28_32f1a9ac",
+    "ground_truth_answer": "CS-25 Amendment 28 spécifie une énergie d'impact de 21 J, appliquée par une bille de 51 mm de diamètre ou, alternativement, par une bille de 40 mm de diamètre.",
+    "verbatim_quote": "The impact energy should be 21 J, caused by a 51mm diameter ball or, alternatively, by a 40-mm diameter ball",
+    "category": "numeric_value_cs25"
+  },
+  {
+    "id": "T1_AERO_0004",
+    "task": "T1_provenance",
+    "question": "Which ED Decision corresponds to the entry into force of CS-25 Amendment 28?",
+    "ground_truth_doc_id": "cs25_amdt_28_32f1a9ac",
+    "ground_truth_answer": "The entry into force of CS-25 Amendment 28 is set out in ED Decision 2023/021/R, published in the Official Publication of EASA.",
+    "verbatim_quote": "ED Decision 2023/021/R",
+    "category": "regulatory_reference_cs25"
+  },
+  {
+    "id": "T1_AERO_0005",
+    "task": "T1_provenance",
+    "question": "Quelle est la durée maximale d'extension du délai de 10 jours dont peuvent convenir les autorités compétentes des États membres pour évaluer une transaction de produits à double usage selon le règlement 2021/821 ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "L'extension du délai initial de 10 jours ne peut excéder 30 jours ouvrables.",
+    "verbatim_quote": "the extension shall not exceed 30 working days",
+    "category": "procedural_deadline_dualuse"
+  },
+  {
+    "id": "T1_AERO_0006",
+    "task": "T1_provenance",
+    "question": "À quel type d'aéronefs s'appliquent les Certification Specifications CS-25 ?",
+    "ground_truth_doc_id": "cs25_amdt_22_8e69026c",
+    "ground_truth_answer": "Les CS-25 s'appliquent aux Large Aeroplanes propulsés par turbines (turbine powered Large Aeroplanes).",
+    "verbatim_quote": "These Certification Specifications are applicable to turbine powered Large Aeroplanes.",
+    "category": "scope_cs25"
+  },
+  {
+    "id": "T1_AERO_0007",
+    "task": "T1_provenance",
+    "question": "Which ED Decision corresponds to the entry into force of CS-25 Amendment 22?",
+    "ground_truth_doc_id": "cs25_amdt_22_8e69026c",
+    "ground_truth_answer": "CS-25 Amendment 22 entered into force per ED Decision 2018/010/R, published in the Official Publication of EASA.",
+    "verbatim_quote": "Decision 2018/010/R",
+    "category": "regulatory_reference_cs25"
+  },
+  {
+    "id": "T1_AERO_0008",
+    "task": "T1_provenance",
+    "question": "Que définit le terme 'large project authorisation' dans le règlement (UE) 2021/821 ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Une 'large project authorisation' désigne une autorisation d'exportation individuelle ou globale octroyée à un exportateur précis pour un type ou une catégorie de produits à double usage, valable vers un ou plusieurs utilisateurs finaux dans un ou plusieurs pays tiers, dans le cadre d'un projet de grande envergure spécifié.",
+    "verbatim_quote": "'large project authorisation' means an individual export authorisation or a global export authorisation granted to one specific exporter, in respect of a type or category of dual-use items",
+    "category": "definition_dualuse"
+  },
+  {
+    "id": "T1_AERO_0009",
+    "task": "T1_provenance",
+    "question": "How does Regulation (EU) 2021/821 define a 'global export authorisation'?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "A 'global export authorisation' is an authorisation granted to one specific exporter in respect of a type or category of dual-use items, which may be valid for exports to one or more specified end-users and/or in one or more specified third countries.",
+    "verbatim_quote": "'global export authorisation' means an authorisation granted to one specific exporter in respect of a type or category of dual-use items",
+    "category": "definition_dualuse"
+  },
+  {
+    "id": "T1_AERO_0010",
+    "task": "T1_provenance",
+    "question": "Sur quel territoire les autorisations émises au titre du règlement (UE) 2021/821 sont-elles valables ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Les autorisations émises ou établies au titre du règlement 2021/821 sont valables sur l'ensemble du territoire douanier de l'Union.",
+    "verbatim_quote": "Authorisations issued or established under this Regulation shall be valid throughout the customs territory of the Union.",
+    "category": "scope_territorial_dualuse"
+  },
+  {
+    "id": "T1_AERO_0011",
+    "task": "T1_provenance",
+    "question": "Quel règlement EU encadre la protection des données à caractère personnel auquel renvoie le règlement (UE) 2021/821 ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Le règlement 2021/821 renvoie aux règlements (UE) 2016/679 (RGPD) et (UE) 2018/1725 pour le traitement des données à caractère personnel.",
+    "verbatim_quote": "The processing of personal data shall be in accordance with the rules laid down in Regulations (EU) 2016/679 and (EU) 2018/1725.",
+    "category": "external_reference_dualuse"
+  },
+  {
+    "id": "T1_AERO_0012",
+    "task": "T1_provenance",
+    "question": "What does Regulation (EU) 2021/821 state about controls on technology transfers concerning information in the public domain?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Controls on 'technology' transfers do not apply to information 'in the public domain', to 'basic scientific research', or to the minimum necessary information for patent applications.",
+    "verbatim_quote": "Controls on \"technology\" transfers do not apply to information \"in the public domain\", to \"basic scientific research\" or to the minimum necessary information for patent applications.",
+    "category": "exemption_dualuse"
+  },
+  {
+    "id": "T1_AERO_0013",
+    "task": "T1_provenance",
+    "question": "Quel règlement antérieur à 2021/821 instaurait le régime communautaire de contrôle des exportations de produits à double usage ?",
+    "ground_truth_doc_id": "dualuse_reg_428_2009_original_372b7ac3",
+    "ground_truth_answer": "Le règlement (CE) n° 428/2009 du Conseil du 5 mai 2009 instituait le régime communautaire de contrôle des exportations, des transferts, du courtage et du transit de biens à double usage. Il a depuis été abrogé par le règlement (UE) 2021/821.",
+    "verbatim_quote": "Regulation (EC) No 428/2009",
+    "category": "anchor_legacy_dualuse"
+  },
+  {
+    "id": "T1_AERO_0014",
+    "task": "T1_provenance",
+    "question": "Comment le règlement 428/2009 définissait-il une 'Community General Export Authorisation' ?",
+    "ground_truth_doc_id": "dualuse_reg_428_2009_original_372b7ac3",
+    "ground_truth_answer": "Une 'Community General Export Authorisation' désignait une autorisation d'export pour les exports vers certains pays de destination, disponible pour tous les exportateurs respectant ses conditions d'usage listées en Annexe II.",
+    "verbatim_quote": "'Community General Export Authorisation' shall mean an export authorisation for exports to certain countries of destination available to all exporters who respect its conditions of use as listed in Annex II",
+    "category": "definition_legacy_dualuse"
+  },
+  {
+    "id": "T1_AERO_0015",
+    "task": "T1_provenance",
+    "question": "Sous le règlement 428/2009, quelle Annexe listait les biens à double usage soumis à une autorisation pour les transferts intra-communautaires ?",
+    "ground_truth_doc_id": "dualuse_reg_428_2009_original_372b7ac3",
+    "ground_truth_answer": "L'Annexe IV du règlement 428/2009 listait les biens dual-use soumis à autorisation pour les transferts intra-communautaires. Les items en Partie 2 de l'Annexe IV ne pouvaient pas être couverts par une autorisation générale.",
+    "verbatim_quote": "An authorisation shall be required for intra-Community transfers of dual-use items listed in Annex IV.",
+    "category": "scope_legacy_dualuse"
+  },
+  {
+    "id": "T1_AERO_0016",
+    "task": "T1_provenance",
+    "question": "Quel acte délégué de la Commission modifie l'Annex I de la régulation (UE) 2021/821 et a été publié le 21 octobre 2022 ?",
+    "ground_truth_doc_id": "dualuse_del_2023_66_cdc2b691",
+    "ground_truth_answer": "Le règlement délégué (UE) 2023/66 de la Commission, publié le 21 octobre 2022, modifie l'Annex I du règlement 2021/821 en remplaçant le texte de cette annexe.",
+    "verbatim_quote": "Annex I to Regulation (EU) 2021/821 is replaced by the text in the Annex to this Regulation.",
+    "category": "anchor_delegated_dualuse"
+  },
+  {
+    "id": "T1_AERO_0017",
+    "task": "T1_provenance",
+    "question": "Quel acte délégué de la Commission modifie l'Annex I de la régulation 2021/821 en septembre 2024 ?",
+    "ground_truth_doc_id": "dualuse_del_2024_2547_cb08f84b",
+    "ground_truth_answer": "Le règlement délégué (UE) 2024/2547 de la Commission, du 5 septembre 2024, modifie l'Annex I du règlement 2021/821 par remplacement intégral.",
+    "verbatim_quote": "amending Regulation (EU) 2021/821",
+    "category": "anchor_delegated_dualuse"
+  },
+  {
+    "id": "T1_AERO_0018",
+    "task": "T1_provenance",
+    "question": "How does the latest delegated regulation (2024/2547) define 'Intrusion software'?",
+    "ground_truth_doc_id": "dualuse_del_2024_2547_cb08f84b",
+    "ground_truth_answer": "'Intrusion software' is defined as software specially designed or modified to avoid detection by 'monitoring tools', or to defeat 'protective countermeasures', of a computer or network-capable device, and performing specific actions.",
+    "verbatim_quote": "\"Intrusion software\" (4 5) means \"software\" specially designed or modified to avoid detection by 'monitoring tools'",
+    "category": "definition_delegated"
+  },
+  {
+    "id": "T1_AERO_0019",
+    "task": "T1_provenance",
+    "question": "Que désigne 'Network access controller' dans le règlement délégué (UE) 2024/2547 ?",
+    "ground_truth_doc_id": "dualuse_del_2024_2547_cb08f84b",
+    "ground_truth_answer": "Un 'Network access controller' est défini comme une interface physique vers un réseau de commutation distribué, qui utilise un médium commun fonctionnant à la même cadence de transfert numérique avec arbitrage (jeton ou détection de porteuse).",
+    "verbatim_quote": "\"Network access controller\" (4) means a physical interface to a distributed switching network.",
+    "category": "definition_delegated"
+  },
+  {
+    "id": "T1_AERO_0020",
+    "task": "T1_provenance",
+    "question": "Pourquoi l'Annex I du règlement 2021/821 doit-il être mis à jour régulièrement, selon le règlement délégué 2024/2547 ?",
+    "ground_truth_doc_id": "dualuse_del_2024_2547_cb08f84b",
+    "ground_truth_answer": "L'Annex I doit être mis à jour régulièrement pour assurer la pleine conformité avec les obligations et engagements internationaux de sécurité auxquels les États membres et l'Union sont parties (régimes Wassenaar, MTCR, NSG).",
+    "verbatim_quote": "The list of dual-use items set out in Annex I to Regulation (EU) 2021/821 needs to be updated regularly",
+    "category": "rationale_delegated"
+  },
+  {
+    "id": "T1_AERO_0021",
+    "task": "T1_provenance",
+    "question": "Quel mécanisme permet à la Commission européenne d'adopter des modifications de l'Annex I du règlement 2021/821 ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Le règlement 2021/821 confère à la Commission le pouvoir d'adopter des actes délégués, dans les conditions prévues à cet article du règlement.",
+    "verbatim_quote": "The power to adopt delegated acts is conferred on the Commission subject to the conditions laid down in this Article.",
+    "category": "mechanism_dualuse"
+  },
+  {
+    "id": "T1_AERO_0022",
+    "task": "T1_provenance",
+    "question": "Selon le règlement 2021/821, peut-on demander la division d'une autorisation globale d'export contenant des limitations quantitatives ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Oui : à la demande des exportateurs, les autorisations globales d'exportation contenant des limitations quantitatives doivent être divisées.",
+    "verbatim_quote": "At the request of exporters, global export authorisations that contain quantitative limitations shall be split.",
+    "category": "procedure_dualuse"
+  },
+  {
+    "id": "T1_AERO_0023",
+    "task": "T1_provenance",
+    "question": "Dans quel État membre une autorisation de transfert intra-Union doit-elle être demandée selon le règlement 2021/821 ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "L'autorisation de transfert doit être demandée dans l'État membre depuis lequel les produits à double usage doivent être transférés.",
+    "verbatim_quote": "The transfer authorisation referred to in paragraphs 1 and 2 shall be applied for in the Member State from which the dual-use items are to be transferred.",
+    "category": "procedure_dualuse"
+  },
+  {
+    "id": "T1_AERO_0024",
+    "task": "T1_provenance",
+    "question": "Quelle autorité octroie les autorisations relatives aux services de courtage et à l'assistance technique selon le règlement 2021/821 ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Les autorisations sont octroyées par l'autorité compétente de l'État membre où le courtier ou le fournisseur d'assistance technique est résident ou établi. Si non établi sur le territoire douanier de l'Union, par l'autorité compétente de l'État membre depuis lequel les services seront fournis.",
+    "verbatim_quote": "Authorisations for the provision of brokering services and technical assistance under this Regulation shall be granted by the competent authority of the Member State where the broker or the provider of technical assistance is resident or established.",
+    "category": "competent_authority_dualuse"
+  },
+  {
+    "id": "T1_AERO_0025",
+    "task": "T1_provenance",
+    "question": "Quelle exemption sur le contrôle de la 'technology' énonce le règlement 428/2009 ?",
+    "ground_truth_doc_id": "dualuse_reg_428_2009_original_372b7ac3",
+    "ground_truth_answer": "Sous le règlement 428/2009, les contrôles sur les transferts de 'technology' ne s'appliquaient pas aux informations 'dans le domaine public', à la 'recherche scientifique fondamentale', ou au minimum nécessaire pour des demandes de brevet.",
+    "verbatim_quote": "Controls on ″technology″ transfer do not apply to information ″in the public domain″, to ″basic scientific research″ or to the minimum necessary information for patent applications.",
+    "category": "exemption_legacy_dualuse"
+  },
+  {
+    "id": "T1_AERO_0026",
+    "task": "T1_provenance",
+    "question": "Quels actes du Conseil/Parlement étaient contrôlés par le règlement 428/2009 concernant les services de courtage liés aux armes de destruction massive ?",
+    "ground_truth_doc_id": "dualuse_reg_428_2009_original_372b7ac3",
+    "ground_truth_answer": "Le 428/2009 prévoyait l'introduction de contrôles sur la fourniture de services de courtage lorsque le courtier avait été informé par les autorités nationales compétentes ou avait connaissance que cette fourniture pourrait conduire à la production ou à la livraison d'armes de destruction massive dans un pays tiers.",
+    "verbatim_quote": "Controls should also be introduced on the provision of brokering services when the broker has been informed by competent national authorities or is aware that such provision might lead to production or delivery of weapons of mass destruction",
+    "category": "scope_legacy_dualuse"
+  },
+  {
+    "id": "T1_AERO_0027",
+    "task": "T1_provenance",
+    "question": "What CS-25 sub-sections were created via NPA 2018-12 according to CS-25 Amendment 28?",
+    "ground_truth_doc_id": "cs25_amdt_28_32f1a9ac",
+    "ground_truth_answer": "CS 25.705 was created via NPA 2018-12, as recorded in the change tables of CS-25 Amendment 28.",
+    "verbatim_quote": "CS 25.705 | Created (NPA 2018-12)",
+    "category": "amendment_change_tracking"
+  },
+  {
+    "id": "T1_AERO_0028",
+    "task": "T1_provenance",
+    "question": "Quelle paragraphe CS-25 a été créé via NPA 2013-02 ?",
+    "ground_truth_doc_id": "cs25_amdt_28_32f1a9ac",
+    "ground_truth_answer": "CS 25.734 a été créé via NPA 2013-02, et l'AMC 25.734 a également été créée par cette NPA.",
+    "verbatim_quote": "CS 25.734 | Created (NPA 2013-02)",
+    "category": "amendment_change_tracking"
+  },
+  {
+    "id": "T1_AERO_0029",
+    "task": "T1_provenance",
+    "question": "Which CS-25 paragraphs were amended via NPA 2014-02?",
+    "ground_truth_doc_id": "cs25_amdt_28_32f1a9ac",
+    "ground_truth_answer": "Via NPA 2014-02, CS 25.629(d), CS 25.671 and CS 25.672 were amended.",
+    "verbatim_quote": "CS 25.629(d) | Amended (NPA 2014-02) | CS 25.671 | Amended (NPA 2014-02) | CS 25.672 | Amended (NPA 2014-02)",
+    "category": "amendment_change_tracking"
+  },
+  {
+    "id": "T1_AERO_0030",
+    "task": "T1_provenance",
+    "question": "Quelle exigence CS 25.1309(c) impose-t-elle concernant les conditions de fonctionnement non sûres d'un système ?",
+    "ground_truth_doc_id": "cs25_amdt_27_992260a7",
+    "ground_truth_answer": "CS 25.1309(c) impose que les informations relatives aux conditions de fonctionnement non sûres d'un système soient fournies à l'équipage pour lui permettre de prendre les actions correctives appropriées en temps utile, atténuant les effets à un niveau acceptable.",
+    "verbatim_quote": "CS 25.1309(c) requires that information concerning unsafe system operating conditions must be provided to the crew",
+    "category": "regulation_cs25"
+  },
+  {
+    "id": "T1_AERO_0031",
+    "task": "T1_provenance",
+    "question": "What rule must flight crew alerting comply with according to CS-25?",
+    "ground_truth_doc_id": "cs25_amdt_27_992260a7",
+    "ground_truth_answer": "When flight crew alerting is required, it must be provided in compliance with CS 25.1322.",
+    "verbatim_quote": "When flight crew alerting is required, it must be provided in compliance with CS 25.1322.",
+    "category": "regulation_cs25"
+  },
+  {
+    "id": "T1_AERO_0032",
+    "task": "T1_provenance",
+    "question": "Selon CS-25, quelles spécifications doivent satisfaire les systèmes de stabilisation augmentée pour la conformité aux exigences de caractéristiques de vol ?",
+    "ground_truth_doc_id": "cs25_amdt_22_8e69026c",
+    "ground_truth_answer": "Si la conformité aux exigences de caractéristiques de vol dépend d'un système de stabilisation augmentée ou de tout autre système automatique ou alimenté en énergie, la conformité doit être démontrée avec CS 25.671 et 25.672.",
+    "verbatim_quote": "If compliance with the flight characteristics requirements is dependent upon a stability augmentation system or upon any other automatic or power-operated system, compliance must be shown with CS 25.671 and 25.672.",
+    "category": "regulation_cs25"
+  },
+  {
+    "id": "T1_AERO_0033",
+    "task": "T1_provenance",
+    "question": "Quel paragraphe CS-25 énonce les exigences de performance avec lesquelles la conformité doit être démontrée ?",
+    "ground_truth_doc_id": "cs25_amdt_22_8e69026c",
+    "ground_truth_answer": "La conformité doit être démontrée avec les exigences de performance définies de CS 25.101 à 25.125.",
+    "verbatim_quote": "Compliance with the performance requirements in CS 25.101 to 25.125.",
+    "category": "regulation_cs25"
+  },
+  {
+    "id": "T1_AERO_0034",
+    "task": "T1_provenance",
+    "question": "Quelle est la date de publication officielle de CS-25 Amendment 27 ?",
+    "ground_truth_doc_id": "cs25_amdt_27_992260a7",
+    "ground_truth_answer": "CS-25 Amendment 27 a été publié le 24 novembre 2021.",
+    "verbatim_quote": "Amendment 27",
+    "category": "publication_metadata_cs25"
+  },
+  {
+    "id": "T1_AERO_0035",
+    "task": "T1_provenance",
+    "question": "Quelle est la date de publication officielle du règlement (UE) 2021/821 ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Le règlement (UE) 2021/821 a été publié le 11 juin 2021 au Journal officiel de l'Union européenne.",
+    "verbatim_quote": "Regulation (EU) 2021/821",
+    "category": "publication_metadata_dualuse"
+  },
+  {
+    "id": "T1_AERO_0036",
+    "task": "T1_provenance",
+    "question": "Avec quelle réglementation EU les termes utilisés dans le règlement 2021/821 doivent-ils être cohérents en raison du rôle des autorités douanières ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Les termes utilisés dans le règlement 2021/821 doivent être, dans la mesure du possible, cohérents avec les définitions du règlement (UE) n° 952/2013 (le 'code des douanes de l'Union').",
+    "verbatim_quote": "consistent with the definitions set out in Regulation (EU) No 952/2013 of the European Parliament and of the Council",
+    "category": "external_reference_dualuse"
+  },
+  {
+    "id": "T1_AERO_0037",
+    "task": "T1_provenance",
+    "question": "Selon le règlement 2021/821, l'approbation d'un export couvre-t-elle automatiquement la 'technology' minimale nécessaire à la maintenance ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Oui : l'approbation d'un export pour des biens autorise également l'export, vers le même utilisateur final, de la 'technology' minimale nécessaire à l'installation, l'exploitation, la maintenance et la réparation de ces biens.",
+    "verbatim_quote": "The approval of goods for export also authorises the export to the same end-user of the minimum \"technology\" required for the installation, operation, maintenance and repair of the goods.",
+    "category": "scope_dualuse"
+  },
+  {
+    "id": "T1_AERO_0038",
+    "task": "T1_provenance",
+    "question": "Quel acte délégué de février 2023 modifie l'Annex I du règlement 2021/821 ?",
+    "ground_truth_doc_id": "dualuse_del_2023_996_3616a044",
+    "ground_truth_answer": "Le règlement délégué (UE) 2023/996 de la Commission, du 23 février 2023, modifie l'Annex I du règlement 2021/821.",
+    "verbatim_quote": "Annex I to Regulation (EU) 2021/821 is replaced by the text in the Annex to this Regulation.",
+    "category": "anchor_delegated_dualuse"
+  },
+  {
+    "id": "T1_AERO_0039",
+    "task": "T1_provenance",
+    "question": "Selon le règlement délégué 2024/2547, à quel régime international de contrôle les listes d'items dual-use renvoient-elles principalement ?",
+    "ground_truth_doc_id": "dualuse_del_2024_2547_cb08f84b",
+    "ground_truth_answer": "Les listes renvoient aux régimes internationaux de contrôle des exportations dual-use (Wassenaar Arrangement, MTCR, NSG, Australia Group, Chemical Weapons Convention) — décisions prises dans le cadre de ces régimes internationaux.",
+    "verbatim_quote": "Decisions regarding the items subject to such controls are taken within the framework of internationally agreed dual-use control",
+    "category": "international_regime_dualuse"
+  },
+  {
+    "id": "T1_AERO_0040",
+    "task": "T1_provenance",
+    "question": "Que désigne 'Communications channel controller' dans les listes d'items dual-use ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "'Communications channel controller' désigne l'interface physique qui contrôle le flux d'informations numériques synchrones ou asynchrones. C'est un assemblage qui peut être intégré dans un équipement informatique ou de télécommunications pour fournir un accès aux communications.",
+    "verbatim_quote": "\"Communications channel controller\" (4) means the physical interface which controls the flow of synchronous or asynchronous digital information.",
+    "category": "definition_dualuse"
+  },
+  {
+    "id": "T1_AERO_0041",
+    "task": "T1_provenance",
+    "question": "What entry from the dual-use Annex I covers plant for the separation of isotopes of natural uranium, depleted uranium or special fissile materials?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Item 0B001 of Annex I covers plant for the separation of isotopes of 'natural uranium', 'depleted uranium' or 'special fissile materials', and specially designed or prepared equipment and components therefor.",
+    "verbatim_quote": "0B001 Plant for the separation of isotopes of \"natural uranium\", \"depleted uranium\" or \"special fissile materials\"",
+    "category": "annex_listing_dualuse"
+  },
+  {
+    "id": "T1_AERO_0042",
+    "task": "T1_provenance",
+    "question": "Quelle catégorie d'équipements 1A006 décrit l'Annex I du règlement 2021/821 ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "1A006 désigne les équipements spécialement conçus ou modifiés pour l'élimination des engins explosifs improvisés (IEDs), ainsi que les composants et accessoires spécialement conçus à cet effet.",
+    "verbatim_quote": "1A006 Equipment, specially designed or modified for the disposal of Improvised Explosive Devices (IEDs)",
+    "category": "annex_listing_dualuse"
+  },
+  {
+    "id": "T1_AERO_0043",
+    "task": "T1_provenance",
+    "question": "Que prévoit le règlement 2021/821 pour les transferts d'autorisation lorsque l'amendement de l'Annex I concerne aussi des items listés en Annex II ou IV ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Lorsque l'amendement de l'Annex I concerne des items dual-use également listés en Annex II ou IV, ces annexes doivent être modifiées en conséquence.",
+    "verbatim_quote": "where the amendment of Annex I concerns dual-use items which are also listed in Annex II or IV, those Annexes shall be amended accordingly.",
+    "category": "procedure_dualuse"
+  },
+  {
+    "id": "T1_AERO_0044",
+    "task": "T1_provenance",
+    "question": "Quel paragraphe du règlement 428/2009 définissait la 'global export authorisation' ?",
+    "ground_truth_doc_id": "dualuse_reg_428_2009_original_372b7ac3",
+    "ground_truth_answer": "Sous le règlement 428/2009, la 'global export authorisation' désignait une autorisation octroyée à un exportateur spécifique pour un type ou une catégorie de bien dual-use, valable pour des exports vers un ou plusieurs utilisateurs finaux et/ou un ou plusieurs pays tiers spécifiés.",
+    "verbatim_quote": "'global export authorisation' shall mean an authorisation granted to one specific exporter in respect of a type or category of dual-use item",
+    "category": "definition_legacy_dualuse"
+  },
+  {
+    "id": "T1_AERO_0045",
+    "task": "T1_provenance",
+    "question": "À quel cas le règlement 428/2009 imposait-il à l'exportateur une obligation de notification s'il était au courant d'une utilisation détournée ?",
+    "ground_truth_doc_id": "dualuse_reg_428_2009_original_372b7ac3",
+    "ground_truth_answer": "Si un exportateur était au courant que des items dual-use non listés en Annex I, qu'il proposait d'exporter, étaient destinés en tout ou partie à des usages liés aux armes de destruction massive ou aux items militaires, il devait notifier les autorités compétentes, qui décidaient de soumettre l'export à autorisation.",
+    "verbatim_quote": "If an exporter is aware that dual-use items which he proposes to export, not listed in Annex I, are intended, in their entirety or in part, for any of the uses referred to",
+    "category": "obligation_legacy_dualuse"
+  },
+  {
+    "id": "T1_AERO_0046",
+    "task": "T1_provenance",
+    "question": "What does CS-25 Amendment 28 indicate about CS 25.795 in its change tracking?",
+    "ground_truth_doc_id": "cs25_amdt_28_32f1a9ac",
+    "ground_truth_answer": "CS 25.795 (along with 25.807, 25.810, 25.813) was amended via NPA 2015-11, as recorded in the CS-25 Amendment 28 change tables.",
+    "verbatim_quote": "CS 25.795 | Amended (NPA 2015-11)",
+    "category": "amendment_change_tracking"
+  },
+  {
+    "id": "T1_AERO_0047",
+    "task": "T1_provenance",
+    "question": "Quel paragraphe CS-25 a été créé via NPA 2015-19 selon CS-25 Amendment 28 ?",
+    "ground_truth_doc_id": "cs25_amdt_28_32f1a9ac",
+    "ground_truth_answer": "CS 25.788 a été créé via NPA 2015-19, ainsi que les AMC 25.785(h)(2), AMC 25.788(a) et AMC 25.788(b).",
+    "verbatim_quote": "CS 25.788 | Created (NPA 2015-19)",
+    "category": "amendment_change_tracking"
+  },
+  {
+    "id": "T1_AERO_0048",
+    "task": "T1_provenance",
+    "question": "Quels CS-25 paragraphes mentionne CS-25 Amendment 28 comme amendés via NPA 2018-05 ?",
+    "ground_truth_doc_id": "cs25_amdt_28_32f1a9ac",
+    "ground_truth_answer": "Via NPA 2018-05, CS 25.791(d), CS 25.831(a), AMC 25.831(a) et CS 25.853(g) ont été amendés.",
+    "verbatim_quote": "CS 25.791(d) | Amended (NPA 2018-05) | CS 25.831(a) | Amended (NPA 2018-05)",
+    "category": "amendment_change_tracking"
+  },
+  {
+    "id": "T1_AERO_0049",
+    "task": "T1_provenance",
+    "question": "Sous quelle Annex II du règlement 2021/821 sont définies les exclusions concernant des items spécifiques ?",
+    "ground_truth_doc_id": "dualuse_reg_2021_821_original_65eef5dc",
+    "ground_truth_answer": "Les autorisations générales de l'Union peuvent exclure de leur champ d'application les items listés dans la Section I de l'Annex II.",
+    "verbatim_quote": "exclude from their scope items listed in Section I of Annex II",
+    "category": "exclusion_dualuse"
+  },
+  {
+    "id": "T1_AERO_0050",
+    "task": "T1_provenance",
+    "question": "Quel paragraphe CS-25 a été supprimé via NPA 2013-02 selon CS-25 Amendment 28 ?",
+    "ground_truth_doc_id": "cs25_amdt_28_32f1a9ac",
+    "ground_truth_answer": "CS 25.729(f) a été supprimé via NPA 2013-02.",
+    "verbatim_quote": "CS 25.729(f) | Deleted (NPA 2013-02)",
+    "category": "amendment_change_tracking"
+  }
+]

@@ -7,6 +7,35 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# Charge SEULEMENT les secrets du .env (passwords, API keys).
+# Pas les hostnames/URLs : le .env contient des noms de containers Docker
+# (qdrant, neo4j, redis) inadaptés au cockpit qui tourne sur l'hôte.
+# Les defaults os.getenv(..., "localhost") ci-dessous fournissent la bonne
+# connectivité depuis l'hôte ; on ne complète que les secrets manquants.
+#
+# Contexte : le cockpit lancé via streamdeck (Start-Process Hidden) n'hérite
+# pas du shell parent → REDIS_PASSWORD absent → lectures Redis échouent en
+# AuthenticationError silencieuse → widget "OSMOSIS PIPELINE" vide.
+# Fix post-incident sécurisation Redis (27/04).
+try:
+    from dotenv import dotenv_values
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+    if _env_path.exists():
+        _env_vars = dotenv_values(_env_path)
+        _SECRETS_TO_LOAD = (
+            "REDIS_PASSWORD",
+            "NEO4J_PASSWORD",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "DEEPINFRA_API_KEY",
+            "TOGETHER_API_KEY",
+        )
+        for _key in _SECRETS_TO_LOAD:
+            if _env_vars.get(_key) and _key not in os.environ:
+                os.environ[_key] = _env_vars[_key]
+except ImportError:
+    pass  # python-dotenv non installé : env doit être fourni par le caller
+
 # Réseau
 COCKPIT_HOST = os.getenv("COCKPIT_HOST", "0.0.0.0")
 COCKPIT_PORT = int(os.getenv("COCKPIT_PORT", "9090"))
@@ -19,7 +48,20 @@ BURST_COLLECT_INTERVAL = float(os.getenv("COCKPIT_BURST_INTERVAL", "15"))
 LLM_COLLECT_INTERVAL = float(os.getenv("COCKPIT_LLM_INTERVAL", "10"))
 
 # Redis
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+# Si REDIS_URL n'est pas explicite, on construit l'URL avec REDIS_PASSWORD si fourni
+# (le Redis du repo principal exige une auth depuis l'incident 27/04 — cf. memory).
+def _build_redis_url() -> str:
+    if "REDIS_URL" in os.environ:
+        return os.environ["REDIS_URL"]
+    pwd = os.getenv("REDIS_PASSWORD", "").strip()
+    host = os.getenv("REDIS_HOST", "localhost")
+    port = os.getenv("REDIS_PORT", "6379")
+    db = os.getenv("REDIS_DB", "0")
+    if pwd:
+        return f"redis://:{pwd}@{host}:{port}/{db}"
+    return f"redis://{host}:{port}/{db}"
+
+REDIS_URL = _build_redis_url()
 
 # Qdrant
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")

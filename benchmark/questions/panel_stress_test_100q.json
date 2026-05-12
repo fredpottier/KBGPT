@@ -1,0 +1,1911 @@
+[
+  {
+    "question": "Quelle est la dose recommandée de paracétamol pour un adulte ?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Recherche d'une information factuelle simple.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_001",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the common side effects of ibuprofen?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Recherche d'une information factuelle simple.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_002",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelles sont les contre-indications de l'aspirine ?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Recherche d'une information factuelle spécifique.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_003",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the recommended duration of treatment with amoxicillin for a urinary tract infection?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Recherche d'une information factuelle spécifique.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_004",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la posologie maximale de la morphine par voie orale pour un adulte ?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "Recherche d'une information factuelle complexe.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_005",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quelles sont les principales interactions médicamenteuses de la warfarine ?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Énumération d'une liste d'interactions médicamenteuses.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_006",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the key components of a standard CPR protocol?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Énumération d'une liste de composants d'un protocole.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_007",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Listez les principales contre-indications de l'insuline.",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Énumération d'une liste de contre-indications.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_008",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quels sont les signes d'une réaction allergique sévère à la pénicilline ?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Énumération d'une liste de signes cliniques.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_009",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quelle est la date de la dernière mise à jour des recommandations pour la vaccination contre la grippe ?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Recherche d'une date spécifique.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_010",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "When was the last clinical trial on the effectiveness of antiviral drugs for influenza conducted?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Recherche d'une date spécifique.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_011",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Comment a évolué la recommandation pour l'utilisation de l'aspirine chez les enfants au cours des dernières décennies ?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "Recherche d'une évolution temporelle.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_012",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Compare the side effects of acetaminophen and ibuprofen.",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Comparaison des effets secondaires de deux médicaments.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_013",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelles sont les différences entre les protocoles de réanimation cardio-pulmonaire pour les adultes et les enfants ?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "Comparaison de deux protocoles.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_014",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Compare the efficacy of different antihypertensive drugs in treating high blood pressure.",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "Comparaison de l'efficacité de plusieurs médicaments.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_015",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Pourquoi le paracétamol est-il contre-indiqué chez les patients avec une insuffisance hépatique ?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Recherche de la cause d'une contre-indication.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_016",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the mechanism of action of statins in lowering cholesterol levels?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Recherche du mécanisme d'action d'un médicament.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_017",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Pourquoi la cortisone est-elle utilisée dans le traitement de l'asthme ?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Recherche du rôle d'un médicament dans un traitement.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_018",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quelle est la dose maximale de morphine recommandée pour un enfant de 10 ans ?",
+    "expected_primary_type": "unanswerable",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": true,
+    "rationale": "La question est ambiguë car la dose maximale peut varier selon le poids et d'autres facteurs.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_019",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the side effects of a drug that does not exist?",
+    "expected_primary_type": "false_premise",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": true,
+    "rationale": "La prémisse de la question est fausse car le médicament n'existe pas.",
+    "domain": "medical",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_020",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la durée maximale de détention provisoire en France pour une infraction punie de 10 ans de prison ou plus ?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "La question demande un fait spécifique et clair.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_021",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the key elements required for a valid contract under English law?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "The question asks for a specific set of facts.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_022",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la procédure pour contester une décision administrative en France ?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "La question demande une procédure spécifique.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_023",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the statute of limitations for breach of contract in California?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "The question asks for a specific legal fact.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_024",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la définition légale de la diffamation en droit français ?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "La question demande une définition légale spécifique.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_025",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quelles sont les principales obligations du propriétaire envers le locataire en droit français ?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "La question demande une liste d'obligations spécifiques.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_026",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the main grounds for challenging a will in English law?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "The question asks for a list of specific grounds.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_027",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelles sont les sanctions prévues pour le non-respect du droit du travail en France ?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "La question demande une liste de sanctions spécifiques.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_028",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the key components of a non-disclosure agreement (NDA) in business law?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "The question asks for a list of components in an NDA.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_029",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelles sont les étapes pour déposer une marque en France ?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "La question demande une liste d'étapes spécifiques.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_030",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quelle est l'évolution de la législation sur le mariage homosexuel en France depuis 2000 ?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "La question demande une évolution temporelle de la législation.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_031",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "How has the interpretation of the First Amendment in the United States changed over the past 50 years?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "The question asks for a temporal evolution of legal interpretation.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_032",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la date d'entrée en vigueur de la loi sur la protection des données personnelles en France ?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "La question demande une date spécifique.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_033",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the timeline for the implementation of the GDPR in the European Union?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "The question asks for a timeline of implementation.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_034",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Comment la législation sur le travail diffère-t-elle entre la France et l'Allemagne en termes de durée maximale hebdomadaire de travail ?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "La question demande une comparaison entre deux pays.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_035",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the key differences between the legal systems of common law and civil law?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "The question asks for a comparison of two legal systems.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_036",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelles sont les principales différences entre le droit des contrats en France et en Angleterre ?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "La question demande une comparaison de deux systèmes de droit des contrats.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_037",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Pourquoi la loi sur la protection des données personnelles a-t-elle été mise en place en France ?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "La question demande les raisons derrière une loi spécifique.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_038",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the reasons for the strict liability principle in product liability law?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "The question asks for the reasons behind a legal principle.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_039",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelles sont les causes de l'augmentation des litiges en matière de propriété intellectuelle ces dernières années ?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "La question demande les causes d'une tendance spécifique.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_040",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quelle est la loi sur le mariage entre personnes du même sexe en Russie ?",
+    "expected_primary_type": "unanswerable",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": true,
+    "rationale": "La question est basée sur une fausse prémisse, car la Russie n'a pas de loi spécifique sur le mariage entre personnes du même sexe.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_041",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the legal status of same-sex marriage in Saudi Arabia?",
+    "expected_primary_type": "unanswerable",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": true,
+    "rationale": "The question is based on a false premise, as Saudi Arabia does not recognize same-sex marriage.",
+    "domain": "legal",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_042",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la dernière version stable de Node.js ?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'un fait spécifique et facilement vérifiable.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_043",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the configuration parameters for setting up a PostgreSQL database in Django?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'un fait spécifique sur la configuration.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_044",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelles sont les dépendances requises pour installer Flask ?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'un fait spécifique sur les dépendances.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_045",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the default port number for the Redis server?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'un fait spécifique sur le port par défaut.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_046",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la méthode recommandée pour gérer les secrets dans une application Node.js ?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'un fait spécifique sur les meilleures pratiques.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_047",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quelles sont les principales fonctionnalités de React 18 ?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'une liste de fonctionnalités.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_048",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the supported database backends in Django?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'une liste de bases de données supportées.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_049",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quels sont les types de données primitifs en JavaScript ?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'une liste de types de données.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_050",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the HTTP status codes for client errors?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'une liste de codes d'erreur HTTP.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_051",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelles sont les principales différences entre Python 2 et Python 3 ?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Comparaison entre deux versions de Python.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_052",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the key differences between REST and GraphQL APIs?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Comparaison entre deux types d'API.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_053",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelles sont les principales différences entre Vue.js et Angular ?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Comparaison entre deux frameworks JavaScript.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_054",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quand a été publiée la version 1.0 de React ?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'une date spécifique.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_055",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "When was the last major update to the React documentation?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'une date de mise à jour.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_056",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est l'évolution des fonctionnalités de Node.js depuis sa première version ?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'une évolution temporelle.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_057",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Pourquoi les variables en JavaScript sont-elles parfois hoistées ?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'une explication de mécanisme.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_058",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What causes the 'Maximum call stack size exceeded' error in JavaScript?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'une explication de mécanisme.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_059",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Pourquoi les promesses en JavaScript sont-elles asynchrones ?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Demande d'une explication de mécanisme.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_060",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quelle est la meilleure façon de déployer une application Node.js sur AWS ?",
+    "expected_primary_type": "unanswerable",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": true,
+    "rationale": "La question est trop large et dépend de nombreux facteurs.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_061",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the best programming language for web development?",
+    "expected_primary_type": "false_premise",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": true,
+    "rationale": "La question est subjective et dépend des besoins spécifiques.",
+    "domain": "software",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_062",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la capacité de la batterie du smartphone Galaxy S21?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for a single, specific technical specification.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_063",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the warranty period for the MacBook Air M1?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for a single, specific piece of information.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_064",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la taille de l'écran de l'iPad Pro 2021?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for a single, specific technical specification.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_065",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the maximum weight capacity of the AmazonBasics 5-Shelf Wire Shelving Unit?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for a single, specific technical specification.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_066",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la vitesse maximale du processeur Ryzen 9 5900X?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for a single, specific technical specification.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_067",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quelles sont les principales fonctionnalités de la caméra de l'iPhone 12 Pro Max?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for an enumeration of features.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_068",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the available colors for the Samsung Galaxy Watch 4?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for an enumeration of options.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_069",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quels sont les accessoires compatibles avec le Google Nest Hub 2e génération?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for an enumeration of compatible accessories.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_070",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the supported file formats for the Canon EOS R5 camera?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for an enumeration of supported formats.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_071",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quand a été lancée la première version de la PlayStation 5?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for a specific date.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_072",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the release date of the next version of the Apple Watch?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for a future date, which may not be known.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_073",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est l'évolution de la capacité de stockage des iPhone depuis 2015?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for a historical progression.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_074",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "When was the last firmware update for the Bose QuietComfort 35 II headphones?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for a specific date.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_075",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Comment la qualité de la batterie du Tesla Model S compare-t-elle avec celle du Model 3?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for a comparison between two products.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_076",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the difference in screen resolution between the Samsung Galaxy S22 and the S22 Ultra?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": null,
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for a comparison between two products.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_077",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Comment les performances du processeur Intel Core i9-11900K se comparent-elles avec celles du Ryzen 9 5900X?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for a comparison between two products.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_078",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the difference in battery life between the iPad Air 4th generation and the iPad Pro 11-inch?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for a comparison between two products.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_079",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Pourquoi le processeur AMD Ryzen 9 5900X est-il plus performant que le Ryzen 7 5800X?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for the reason behind a performance difference.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_080",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Why does the MacBook Pro M1 have a longer battery life than the MacBook Air M1?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for the reason behind a performance difference.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_081",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Pourquoi les écrans OLED sont-ils préférés aux écrans LCD pour les smartphones haut de gamme?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": null,
+    "expected_difficulty": "normal",
+    "expected_to_trigger_eav": false,
+    "rationale": "Asks for the reason behind a preference.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_082",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the warranty policy for the Google Pixel 6 Pro in France?",
+    "expected_primary_type": "unanswerable",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": true,
+    "rationale": "Asks for a specific policy that may not be available or documented.",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_083",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la différence entre le MacBook Pro 16 pouces et le MacBook Pro 17 pouces?",
+    "expected_primary_type": "false_premise",
+    "expected_secondary_type": null,
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": true,
+    "rationale": "Asks about a non-existent product (MacBook Pro 17 pouces).",
+    "domain": "product",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_084",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quelles sont les principales différences entre le protocole de soins actuel et celui de l'année dernière pour le traitement du diabète de type 2 ?",
+    "edge_case_kind": "multi_label_natural",
+    "rationale": "Cette question combine les catégories 'list' et 'temporal' en demandant une comparaison entre deux versions d'un protocole de soins.",
+    "language": "fr",
+    "expected_to_trigger_eav": false,
+    "id": "STRESS_v1_085",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Pouvez-vous me donner un résumé des changements apportés à la politique de confidentialité de notre entreprise depuis sa dernière mise à jour ?",
+    "edge_case_kind": "multi_label_natural",
+    "rationale": "Cette question combine les catégories 'list' et 'temporal' en demandant une liste de changements sur une période de temps.",
+    "language": "fr",
+    "expected_to_trigger_eav": false,
+    "id": "STRESS_v1_086",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Quelles sont les principales fonctionnalités ajoutées dans la version 3.0 de notre logiciel par rapport à la version 2.5 ?",
+    "edge_case_kind": "multi_label_natural",
+    "rationale": "Cette question combine les catégories 'list' et 'temporal' en demandant une comparaison des fonctionnalités entre deux versions d'un logiciel.",
+    "language": "fr",
+    "expected_to_trigger_eav": false,
+    "id": "STRESS_v1_087",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Quels sont les principaux changements dans la politique de recrutement de notre entreprise depuis l'année dernière ?",
+    "edge_case_kind": "multi_label_natural",
+    "rationale": "Cette question combine les catégories 'list' et 'temporal' en demandant une liste de changements dans une politique HR.",
+    "language": "fr",
+    "expected_to_trigger_eav": false,
+    "id": "STRESS_v1_088",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Quelles sont les principales améliorations apportées au design de notre produit depuis sa dernière mise à jour ?",
+    "edge_case_kind": "multi_label_natural",
+    "rationale": "Cette question combine les catégories 'list' et 'temporal' en demandant une comparaison des améliorations dans le design d'un produit.",
+    "language": "fr",
+    "expected_to_trigger_eav": false,
+    "id": "STRESS_v1_089",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "What are the key differences between the current version of the software and the version released six months ago?",
+    "edge_case_kind": "multi_label_natural",
+    "rationale": "This question combines the categories 'list' and 'temporal' by asking for a comparison of features between two versions of software.",
+    "language": "en",
+    "expected_to_trigger_eav": false,
+    "id": "STRESS_v1_090",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Can you provide a summary of the changes made to our company's data protection policy over the past year?",
+    "edge_case_kind": "multi_label_natural",
+    "rationale": "This question combines the categories 'list' and 'temporal' by asking for a list of changes in a legal document over time.",
+    "language": "en",
+    "expected_to_trigger_eav": false,
+    "id": "STRESS_v1_091",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "What are the main updates in the employee benefits package since the last review?",
+    "edge_case_kind": "multi_label_natural",
+    "rationale": "This question combines the categories 'list' and 'temporal' by asking for a list of updates in an HR policy over time.",
+    "language": "en",
+    "expected_to_trigger_eav": false,
+    "id": "STRESS_v1_092",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Quelles sont les principales modifications apportées à notre contrat de travail depuis sa dernière révision ?",
+    "edge_case_kind": "multi_label_natural",
+    "rationale": "Cette question combine les catégories 'list' et 'temporal' en demandant une liste de modifications dans un contrat de travail.",
+    "language": "fr",
+    "expected_to_trigger_eav": false,
+    "id": "STRESS_v1_093",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "What are the significant changes in the user interface of our application since the last major release?",
+    "edge_case_kind": "multi_label_natural",
+    "rationale": "This question combines the categories 'list' and 'temporal' by asking for a list of significant changes in the user interface of a product.",
+    "language": "en",
+    "expected_to_trigger_eav": false,
+    "id": "STRESS_v1_094",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Comment gères-tu les contradictions entre les informations fournies par différents experts médicaux?",
+    "edge_case_kind": "meta_question",
+    "rationale": "This question tests the system's ability to handle conflicting information, especially in a domain where accuracy is critical.",
+    "language": "fr",
+    "expected_primary_type": "unanswerable",
+    "expected_to_trigger_eav": true,
+    "id": "STRESS_v1_095",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "How do you ensure the accuracy of legal citations in your responses?",
+    "edge_case_kind": "meta_question",
+    "rationale": "This question evaluates the system's reliability in a domain where precision and legal accuracy are paramount.",
+    "language": "en",
+    "expected_primary_type": "unanswerable",
+    "expected_to_trigger_eav": true,
+    "id": "STRESS_v1_096",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Quelles sont les limites de ton système en termes de compréhension des termes techniques complexes en informatique?",
+    "edge_case_kind": "meta_question",
+    "rationale": "This question assesses the system's awareness of its own limitations in handling highly technical language.",
+    "language": "fr",
+    "expected_primary_type": "unanswerable",
+    "expected_to_trigger_eav": true,
+    "id": "STRESS_v1_097",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "How do you handle sensitive HR information and ensure compliance with data protection laws?",
+    "edge_case_kind": "meta_question",
+    "rationale": "This question tests the system's understanding of data privacy and compliance in the HR domain.",
+    "language": "en",
+    "expected_primary_type": "unanswerable",
+    "expected_to_trigger_eav": true,
+    "id": "STRESS_v1_098",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Dans quelle mesure peux-tu adapter tes réponses en fonction des différentes phases du cycle de vie d'un produit?",
+    "edge_case_kind": "meta_question",
+    "rationale": "This question evaluates the system's ability to tailor its responses to different stages of a product's lifecycle.",
+    "language": "fr",
+    "expected_primary_type": "unanswerable",
+    "expected_to_trigger_eav": true,
+    "id": "STRESS_v1_099",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Quels sont les effets secondaires du médicament X et comment peuvent-ils être gérés si le patient a des antécédents d'allergies ?",
+    "edge_case_kind": "ambiguous",
+    "rationale": "Cette question peut être interprétée comme une demande de liste d'effets secondaires ou comme une demande de conseils sur la gestion des allergies spécifiques.",
+    "language": "fr",
+    "expected_to_trigger_eav": true,
+    "id": "STRESS_v1_100",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Can the new software update be installed on all devices, or are there specific compatibility issues to consider?",
+    "edge_case_kind": "ambiguous",
+    "rationale": "Cette question peut être interprétée comme une demande de confirmation de compatibilité générale ou comme une demande de détails sur les problèmes de compatibilité spécifiques.",
+    "language": "en",
+    "expected_to_trigger_eav": true,
+    "id": "STRESS_v1_101",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Quelles sont les implications légales de la non-conformité à la réglementation X, et comment cela peut-il affecter les contrats existants ?",
+    "edge_case_kind": "ambiguous",
+    "rationale": "Cette question peut être interprétée comme une demande d'informations sur les sanctions légales ou comme une demande de conseils sur les impacts contractuels.",
+    "language": "fr",
+    "expected_to_trigger_eav": true,
+    "id": "STRESS_v1_102",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "What are the key performance indicators for employee satisfaction, and how do they relate to turnover rates?",
+    "edge_case_kind": "ambiguous",
+    "rationale": "Cette question peut être interprétée comme une demande de liste des indicateurs de satisfaction ou comme une demande d'analyse des relations entre ces indicateurs et les taux de turnover.",
+    "language": "en",
+    "expected_to_trigger_eav": true,
+    "id": "STRESS_v1_103",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Quelles sont les principales fonctionnalités de la version 2.0 du produit, et comment diffèrent-elles des attentes des clients ?",
+    "edge_case_kind": "ambiguous",
+    "rationale": "Cette question peut être interprétée comme une demande de liste des nouvelles fonctionnalités ou comme une demande de comparaison avec les attentes des clients.",
+    "language": "fr",
+    "expected_to_trigger_eav": true,
+    "id": "STRESS_v1_104",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    }
+  },
+  {
+    "question": "Quelle est la politique de congé maladie de l'entreprise?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": "policy",
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a specific policy, which is a factual piece of information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_001",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the steps involved in the onboarding process for new employees?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": "procedure",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a specific process, which is a factual piece of information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_002",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quels sont les avantages sociaux offerts aux employés?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": "benefits",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a list of benefits, which is a factual piece of information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_003",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the company's policy on remote work?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": "policy",
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a specific policy, which is a factual piece of information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_004",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la procédure pour déclarer un harcèlement au travail?",
+    "expected_primary_type": "factual",
+    "expected_secondary_type": "procedure",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a specific procedure, which is a factual piece of information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_005",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quelles sont les principales étapes du processus de recrutement?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": "procedure",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a list of steps, which is a list of factual information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_006",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the key components of the company's diversity and inclusion policy?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": "policy",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a list of components, which is a list of factual information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_007",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quels sont les critères d'éligibilité pour le programme de formation continue?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": "eligibility",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a list of criteria, which is a list of factual information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_008",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What are the different types of leave available to employees?",
+    "expected_primary_type": "list",
+    "expected_secondary_type": "benefits",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a list of different types of leave, which is a list of factual information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_009",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quand est-ce que les employés peuvent commencer à accumuler des congés payés?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": "policy",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a specific time-related policy, which is a temporal piece of information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_010",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "When is the annual performance review conducted for employees?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": "procedure",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a specific time-related procedure, which is a temporal piece of information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_011",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la date limite pour soumettre une demande de congé?",
+    "expected_primary_type": "temporal",
+    "expected_secondary_type": "policy",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a specific time-related policy, which is a temporal piece of information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_012",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Comment la politique de promotion interne a-t-elle changé au cours des dernières années?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": "policy",
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a comparison of policies over time, which is a comparison of factual information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_013",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "How does the company's parental leave policy compare to industry standards?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": "policy",
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a comparison of the company's policy to industry standards, which is a comparison of factual information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_014",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est la différence entre le congé de maladie et le congé de longue durée?",
+    "expected_primary_type": "comparison",
+    "expected_secondary_type": "benefits",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for a comparison of two types of leave, which is a comparison of factual information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_015",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Pourquoi les employés doivent-ils suivre une formation de sensibilisation à la diversité?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": "policy",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for the reason behind a policy, which is a causal piece of information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_016",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the rationale behind the company's flexible working hours policy?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": "policy",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for the reason behind a policy, which is a causal piece of information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_017",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  },
+  {
+    "question": "Quelle est l'importance de la période d'essai pour les nouveaux employés?",
+    "expected_primary_type": "causal",
+    "expected_secondary_type": "procedure",
+    "expected_difficulty": "medium",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question asks for the reason behind a procedure, which is a causal piece of information.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_018",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "Quelle est la politique de l'entreprise concernant les horaires de travail flexibles pour les parents?",
+    "expected_primary_type": "unanswerable",
+    "expected_secondary_type": "policy",
+    "expected_difficulty": "hard",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question is unanswerable because the company may not have a specific policy for flexible working hours for parents.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_019",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "fr"
+  },
+  {
+    "question": "What is the company's policy on time travel for business purposes?",
+    "expected_primary_type": "false_premise",
+    "expected_secondary_type": "policy",
+    "expected_difficulty": "easy",
+    "expected_to_trigger_eav": false,
+    "rationale": "This question is based on a false premise, as time travel is not a real business practice.",
+    "domain": "hr",
+    "edge_case_kind": null,
+    "id": "STRESS_v1_HR_020",
+    "annotation_meta": {
+      "bootstrap_source": "Qwen/Qwen2.5-72B-Instruct",
+      "generated_at": "2026-05-06"
+    },
+    "language": "en"
+  }
+]

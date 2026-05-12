@@ -16,6 +16,13 @@ $INFRA_FILE = "docker-compose.infra.yml"
 $APP_FILE = "docker-compose.yml"
 $MONITORING_FILE = "docker-compose.monitoring.yml"
 $COMPOSE_CMD = "docker-compose -f $INFRA_FILE -f $APP_FILE -f $MONITORING_FILE"
+# Commande pour les targets app/api/frontend : infra+app combinés pour résoudre
+# les depends_on cross-fichier (app->qdrant/redis définis dans infra.yml).
+# Fix post-séparation ea86306 : sans cela, docker-compose -f app.yml seul
+# échoue avec "service depends on undefined service qdrant".
+$APP_COMPOSE_CMD = "docker-compose -f $INFRA_FILE -f $APP_FILE"
+# Services stateless gérés par les targets app/api/frontend
+$APP_SERVICES = "app ingestion-worker ingestion-worker-2 folder-watcher frontend"
 
 # Mot de passe Grafana (synchronisé avec .env)
 $GRAFANA_PASSWORD = "Rn1lm@tr"
@@ -151,15 +158,15 @@ function Start-Services {
         }
         "app" {
             Write-Host "   Application complete (App, Worker, Frontend, UI)" -ForegroundColor Gray
-            docker-compose -f $APP_FILE up -d
+            Invoke-Expression "$APP_COMPOSE_CMD up -d $APP_SERVICES"
         }
         "api" {
             Write-Host "   API + Frontend seulement (worker preserve)" -ForegroundColor Yellow
-            docker-compose -f $APP_FILE up -d --no-deps app frontend
+            Invoke-Expression "$APP_COMPOSE_CMD up -d --no-deps app frontend"
         }
         "frontend" {
             Write-Host "   Frontend seulement" -ForegroundColor Yellow
-            docker-compose -f $APP_FILE up -d --no-deps frontend
+            Invoke-Expression "$APP_COMPOSE_CMD up -d --no-deps frontend"
         }
         "monitoring" {
             Write-Host "   Monitoring uniquement (Grafana, Loki, Promtail)" -ForegroundColor Gray
@@ -202,19 +209,22 @@ function Stop-Services {
         }
         "app" {
             Write-Host "   Application complete (App, Worker, Frontend, UI)" -ForegroundColor Gray
-            docker-compose -f $APP_FILE down
+            # `down` arrêterait TOUT le projet (infra incluse) car -f infra+app.
+            # On utilise stop+rm ciblés sur les services stateless uniquement.
+            Invoke-Expression "$APP_COMPOSE_CMD stop $APP_SERVICES"
+            Invoke-Expression "$APP_COMPOSE_CMD rm -f $APP_SERVICES"
         }
         "api" {
             Write-Host "   API + Frontend seulement (worker preserve)" -ForegroundColor Yellow
-            docker-compose -f $APP_FILE stop app frontend
-            docker-compose -f $APP_FILE rm -f app frontend
-            docker-compose -f $APP_FILE build app frontend
+            Invoke-Expression "$APP_COMPOSE_CMD stop app frontend"
+            Invoke-Expression "$APP_COMPOSE_CMD rm -f app frontend"
+            Invoke-Expression "$APP_COMPOSE_CMD build app frontend"
         }
         "frontend" {
             Write-Host "   Frontend seulement" -ForegroundColor Yellow
-            docker-compose -f $APP_FILE stop frontend
-            docker-compose -f $APP_FILE rm -f frontend
-            docker-compose -f $APP_FILE build frontend
+            Invoke-Expression "$APP_COMPOSE_CMD stop frontend"
+            Invoke-Expression "$APP_COMPOSE_CMD rm -f frontend"
+            Invoke-Expression "$APP_COMPOSE_CMD build frontend"
         }
         "monitoring" {
             Write-Host "   Monitoring uniquement" -ForegroundColor Gray

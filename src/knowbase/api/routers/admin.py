@@ -158,10 +158,12 @@ async def admin_health(
     # Check Redis
     try:
         import redis
+        import os as _os
         redis_client = redis.Redis(
             host=settings.redis_host,
             port=settings.redis_port,
             db=0,  # DB par défaut pour RQ
+            password=_os.getenv("REDIS_PASSWORD") or None,
         )
         redis_client.ping()
         keys_count = len(redis_client.keys("rq:*"))

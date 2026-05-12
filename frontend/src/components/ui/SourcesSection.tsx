@@ -9,11 +9,13 @@ import {
   Text,
   VStack,
   HStack,
-  Link,
   Icon,
+  useToast,
 } from '@chakra-ui/react'
 import { SynthesisResult } from '@/types/api'
 import { FiFileText } from 'react-icons/fi'
+import { formatDocumentName, getFileExtension } from '@/lib/formatDocumentName'
+import { openSourceFile } from '@/lib/openSourceFile'
 
 interface SourcesSectionProps {
   synthesis: SynthesisResult
@@ -31,28 +33,23 @@ const FILE_TYPE_CONFIG: Record<string, { color: string; bg: string }> = {
 }
 
 export default function SourcesSection({ synthesis }: SourcesSectionProps) {
-  const getDocumentName = (sourceFile: string) => {
-    let name = sourceFile.split('/').pop() || sourceFile
-    // Retirer le hash final (ex: _c160af0e, _44f7ec32)
-    name = name.replace(/_[a-f0-9]{6,}$/i, '')
-    // Retirer le prefixe numerique (ex: 027_, 023_1212_)
-    name = name.replace(/^\d{3}_(\d+_)?/, '')
-    // Retirer l'extension
-    name = name.replace(/\.\w+$/, '')
-    // Remplacer underscores et tirets par espaces
-    name = name.replace(/[_-]+/g, ' ').trim()
-    // Tronquer si trop long
-    if (name.length > 55) name = name.substring(0, 52) + '...'
-    return name || sourceFile
-  }
-
-  const getFileExtension = (filename: string) => {
-    const ext = filename.split('.').pop()?.toUpperCase()
-    return ext || 'FILE'
-  }
+  const toast = useToast()
 
   const getFileTypeConfig = (extension: string) => {
     return FILE_TYPE_CONFIG[extension] || FILE_TYPE_CONFIG.DEFAULT
+  }
+
+  const handleOpenSource = async (source: string) => {
+    const err = await openSourceFile(source)
+    if (err) {
+      toast({
+        title: 'Source indisponible',
+        description: `Impossible d'ouvrir le fichier source (${err.message})`,
+        status: 'warning',
+        duration: 4000,
+        isClosable: true,
+      })
+    }
   }
 
   if (!synthesis.sources_used || synthesis.sources_used.length === 0) {
@@ -83,15 +80,15 @@ export default function SourcesSection({ synthesis }: SourcesSectionProps) {
         {/* Sources list */}
         <HStack spacing={2} flexWrap="wrap">
           {synthesis.sources_used.map((source, index) => {
-            const filename = getDocumentName(source)
-            const extension = getFileExtension(filename)
+            const filename = formatDocumentName(source)
+            const extension = getFileExtension(source)
             const config = getFileTypeConfig(extension)
 
             return (
-              <Link
+              <Box
                 key={index}
-                href={source}
-                isExternal
+                as="button"
+                onClick={() => handleOpenSource(source)}
                 px={2}
                 py={1}
                 bg="bg.tertiary"
@@ -100,6 +97,7 @@ export default function SourcesSection({ synthesis }: SourcesSectionProps) {
                 borderRadius="md"
                 fontSize="xs"
                 color="text.secondary"
+                cursor="pointer"
                 _hover={{
                   bg: 'bg.hover',
                   borderColor: 'border.active',
@@ -109,6 +107,7 @@ export default function SourcesSection({ synthesis }: SourcesSectionProps) {
                 alignItems="center"
                 gap={1.5}
                 transition="all 0.2s"
+                title="Ouvrir le fichier source"
               >
                 <HStack
                   px={1.5}
@@ -123,7 +122,7 @@ export default function SourcesSection({ synthesis }: SourcesSectionProps) {
                 <Text noOfLines={1} maxW="150px">
                   {filename.replace(`.${extension.toLowerCase()}`, '')}
                 </Text>
-              </Link>
+              </Box>
             )
           })}
         </HStack>

@@ -26,6 +26,16 @@ services:
       - qdrant
       - redis
     shm_size: '2gb'  # Nécessaire pour OnnxTR/PyTorch (défaut 64MB insuffisant)
+    # CH-35.A4 — accès GPU pour cross-encoder rerank (BAAI/bge-reranker-v2-m3)
+    # GPU partagé avec worker (ingestion). Acceptable car query rerank ~50ms,
+    # ingestion bursty et pas concurrente avec query.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     env_file:
       - .env
     environment:
@@ -34,10 +44,39 @@ services:
       HF_HOME: /data/models
       ONNXTR_CACHE_DIR: /data/models/onnxtr  # Persister cache OnnxTR (sinon re-download à chaque restart)
       KNOWBASE_DATA_DIR: /data
-      REDIS_URL: redis://redis:6379/0
-      BURST_MAX_CONCURRENT_DOCS: "2"  # 2 docs en parallèle (augmenté sur demande)
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+      BURST_MAX_CONCURRENT_DOCS: "3"  # 3 docs en parallèle (test 12/05/2026 sur batch SAP, à monter à 4 si KV cache OK)
       SERVICE_NAME: app  # Pour logs persistants /app/logs/app/app.log
       LOGS_DIR: /app/logs
+      # CH-46 Phase A — optims latence V4 (env-only)
+      # NOTE CH-48 (2026-05-09) : ces env vars Mistral-Small sont commentées pendant le
+      # bake-off Together AI car Mistral-Small-3.2-24B n'est PAS dans le catalogue Together.
+      # CH-48 (2026-05-09) — Bake-off Together AI serverless. Décision :
+      # Mistral-Small-3.2-24B-2506 (DeepInfra hist.) NON dispo serverless Together.
+      # Mistral-Small-24B-2501 listé mais NON-serverless réel.
+      # Choix retenu : Llama-3.3-70B-Turbo PARTOUT (Analyzer + Structurer + Composer).
+      # Justification :
+      #  - Seul modèle viable serverless ET batch (-50%) dans la liste Together
+      #  - 4/5 ANSWER smoke (meilleur des 3 testés Llama / Qwen3-235B / DeepSeek-V3.1)
+      #  - Latence 19.7s mean smoke (cible Test Armand 30-40s atteinte)
+      #  - Cohérence bench/prod (même modèle des 2 côtés) = critère #1 Fred
+      #  - Biais auto-juge avec LLM-judge=Llama-3.3 jugé acceptable car tâches
+      #    radicalement différentes (composer vs juger) + garde-fous structured
+      #    metrics + sanity check Fred
+      # Signal d'alarme historique : Levier 4 06/05 = "Llama-Turbo PIÈGE 129/132
+      # abstentions" sur Structurer. À vérifier sur bench micro 30q de Phase 1.
+      ANALYZER_MODEL: meta-llama/Llama-3.3-70B-Instruct-Turbo
+      FACTS_FIRST_STRUCTURER_MODEL: meta-llama/Llama-3.3-70B-Instruct-Turbo
+      # CH-47 — V4.1 Evidence-Grounded Reasoning (active path _answer_reasoning pour
+      # types causal/comparison/temporal qui régressent fortement sur Robust)
+      V4_REASONING_MODE_ENABLED: "true"
+      REASONING_COMPOSER_MODEL: meta-llama/Llama-3.3-70B-Instruct-Turbo
+      # CH-48 — Together AI serverless. Pour rollback : retirer TOGETHER_API_KEY de
+      # .env + commenter ANALYZER_MODEL + FACTS_FIRST_STRUCTURER_MODEL → fallback
+      # auto DeepInfra (Mistral-Small-3.2-24B + Qwen2.5-72B).
+      TOGETHER_API_KEY: ${TOGETHER_API_KEY}
+      TOGETHER_RUNTIME_MODEL: meta-llama/Llama-3.3-70B-Instruct-Turbo
     ports:
       - "${APP_PORT}:8000"
       - "5678:5678"
@@ -84,14 +123,28 @@ services:
       HF_HOME: /data/models
       ONNXTR_CACHE_DIR: /data/models/onnxtr  # Persister cache OnnxTR
       KNOWBASE_DATA_DIR: /data
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
       OSMOSIS_API_URL: http://app:8000
+      # CH-39 — runtime version (v3 = refonte minimaliste, v2 = ancien)
+      # CH-43 — bascule v4 Facts-First (Tranches 1-5 + leviers latence) — 2026-05-07
+      # CH-49 — bascule v4_2 Tiered Pipeline (Layer 0+1+2 + 5 operators + verifier veto) — 2026-05-10
+      RUNTIME_VERSION: v4_2
+      # Concurrence docs en parallèle pour ClaimFirst pipeline (était oubliée
+      # dans ce bloc, présente uniquement dans `app` historiquement).
+      BURST_MAX_CONCURRENT_DOCS: "3"  # 3 docs en parallèle (test 12/05/2026 sur batch SAP, à monter à 4 si KV cache OK)
       # Judges centralises — switch d'Ollama vers llama.cpp self-hosted
       # (container prometheus-judge, GPU, stable vs Ollama timeout 14B)
-      T2T5_JUDGE_PROVIDER: llamacpp
-      T2T5_JUDGE_MODEL_NAME: m-prometheus-14b
-      RAGAS_JUDGE_PROVIDER: llamacpp
-      RAGAS_JUDGE_MODEL: m-prometheus-14b
+      # CH-34 (04/05/2026) — bascule de Prometheus (sous-évaluait 90% des cas, +0.687 delta)
+      # vers Llama-3.3-70B-Instruct sur DeepInfra (calibration honnête, distingue
+      # abstention correcte vs hallucination). Audit benchmark/audit_judge_calibration_llama70b.json
+      T2T5_JUDGE_PROVIDER: deepinfra
+      T2T5_JUDGE_MODEL_NAME: meta-llama/Llama-3.3-70B-Instruct
+      RAGAS_JUDGE_PROVIDER: deepinfra
+      RAGAS_JUDGE_MODEL: meta-llama/Llama-3.3-70B-Instruct
+      ROBUSTNESS_JUDGE_PROVIDER: deepinfra
+      ROBUSTNESS_JUDGE_MODEL: meta-llama/Llama-3.3-70B-Instruct
+      OSMOSIS_JUDGE_MODEL: meta-llama/Llama-3.3-70B-Instruct  # used by robustness pour le label
       LLAMACPP_URL: http://prometheus-judge:8000
       OLLAMA_URL: http://host.docker.internal:11434  # fallback si besoin
       DEV_MODE: "false"  # Mode production: worker tourne en continu (10 jobs avant reload)
@@ -117,6 +170,12 @@ services:
       CUDA_VISIBLE_DEVICES: "0"  # Exposer GPU comme device 0 dans le container (mapping de host device 1)
       SERVICE_NAME: worker  # Pour logs persistants /app/logs/worker/worker.log
       LOGS_DIR: /app/logs
+      # CH-46 Phase A — optims latence V4 (cohérence avec service app)
+      ANALYZER_MODEL: mistralai/Mistral-Small-3.2-24B-Instruct-2506
+      FACTS_FIRST_STRUCTURER_MODEL: mistralai/Mistral-Small-3.2-24B-Instruct-2506
+      # CH-46 — bench concurrency réduite pour éviter saturation DeepInfra publique
+      # (default 3 → 2 calls Mistral simultanés × 5 LLM/q = 10 simultanés gérables)
+      BENCHMARK_CONCURRENCY: "2"
     ports:
       - "5679:5679"  # Debug port for worker
     volumes:
@@ -157,18 +216,32 @@ services:
       HF_HOME: /data/models
       ONNXTR_CACHE_DIR: /data/models/onnxtr
       KNOWBASE_DATA_DIR: /data
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
       OSMOSIS_API_URL: http://app:8000
-      T2T5_JUDGE_PROVIDER: llamacpp
-      T2T5_JUDGE_MODEL_NAME: m-prometheus-14b
-      RAGAS_JUDGE_PROVIDER: llamacpp
-      RAGAS_JUDGE_MODEL: m-prometheus-14b
+      # CH-39 — runtime version (v3 = refonte minimaliste, v2 = ancien)
+      # CH-43 — bascule v4 Facts-First (Tranches 1-5 + leviers latence) — 2026-05-07
+      # CH-49 — bascule v4_2 Tiered Pipeline (Layer 0+1+2 + 5 operators + verifier veto) — 2026-05-10
+      RUNTIME_VERSION: v4_2
+      # CH-34 (04/05/2026) — bascule de Prometheus (sous-évaluait 90% des cas, +0.687 delta)
+      # vers Llama-3.3-70B-Instruct sur DeepInfra (calibration honnête, distingue
+      # abstention correcte vs hallucination). Audit benchmark/audit_judge_calibration_llama70b.json
+      T2T5_JUDGE_PROVIDER: deepinfra
+      T2T5_JUDGE_MODEL_NAME: meta-llama/Llama-3.3-70B-Instruct
+      RAGAS_JUDGE_PROVIDER: deepinfra
+      RAGAS_JUDGE_MODEL: meta-llama/Llama-3.3-70B-Instruct
+      ROBUSTNESS_JUDGE_PROVIDER: deepinfra
+      ROBUSTNESS_JUDGE_MODEL: meta-llama/Llama-3.3-70B-Instruct
+      OSMOSIS_JUDGE_MODEL: meta-llama/Llama-3.3-70B-Instruct  # used by robustness pour le label
       LLAMACPP_URL: http://prometheus-judge:8000
       OLLAMA_URL: http://host.docker.internal:11434
       DEV_MODE: "false"
       MAX_DOCUMENT_PROCESSING_TIME: "3600"
       SERVICE_NAME: worker-2  # Pour logs persistants /app/logs/worker-2/worker-2.log
       LOGS_DIR: /app/logs
+      # CH-46 Phase A — optims latence V4 (cohérence avec service app)
+      ANALYZER_MODEL: mistralai/Mistral-Small-3.2-24B-Instruct-2506
+      FACTS_FIRST_STRUCTURER_MODEL: mistralai/Mistral-Small-3.2-24B-Instruct-2506
     volumes:
       - ./app:/app
       - ./data:/data
@@ -200,7 +273,8 @@ services:
       TZ: Europe/Paris
       PYTHONPATH: /app:/app/src
       KNOWBASE_DATA_DIR: /data
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
     volumes:
       - ./app:/app
       - ./data:/data

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import hashlib
+import os
 from typing import Optional, Dict, Any, Tuple
 
 import redis
@@ -48,7 +49,7 @@ class ScoreCache:
             settings = get_settings()
             redis_client = redis.Redis(
                 host=settings.redis_host,
-                port=settings.redis_port,
+                port=settings.redis_port, password=getattr(settings, "redis_password", None) or os.getenv("REDIS_PASSWORD") or None,
                 db=0,
                 decode_responses=True
             )

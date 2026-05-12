@@ -108,7 +108,10 @@ class EvidenceRewriter:
 
         router = get_llm_router()
         try:
-            response = router.complete(
+            # acomplete (pas complete) : nécessaire dans un async def appelé via
+            # asyncio.gather, sinon le sync HTTP bloque l'event loop et sérialise
+            # tous les claims → 1 req vLLM à la fois (au lieu des N en parallèle).
+            response = await router.acomplete(
                 task_type=TaskType.SHORT_ENRICHMENT,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,

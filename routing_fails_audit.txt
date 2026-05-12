@@ -1,0 +1,101 @@
+﻿=== ROUTING FAILS BY EXPECTED TYPE ===
+
+## factual : 5 fails
+   predicted distribution: {'list': 3, 'comparison': 1, 'causal': 1}
+   - [GOLD_v4_T1_AERO_0029] (conf=0.85) → list      
+     Q: Which CS-25 paragraphs were amended via NPA 2014-02?
+     A_expected: 
+
+   - [GOLD_v4_T1_AERO_0036] (conf=0.75) → comparison
+     Q: Avec quelle réglementation EU les termes utilisés dans le règlement 2021/821 doivent-ils être cohérents en raison du rôle des autorités doua
+     A_expected: 
+
+   - [GOLD_v4_T1_AERO_0048] (conf=0.85) → list      
+     Q: Quels CS-25 paragraphes mentionne CS-25 Amendment 28 comme amendés via NPA 2018-05 ?
+     A_expected: 
+
+   - [GOLD_v4_T1_AERO_0020] (conf=0.85) → causal    
+     Q: Pourquoi l'Annex I du règlement 2021/821 doit-il être mis à jour régulièrement, selon le règlement délégué 2024/2547 ?
+     A_expected: 
+
+   - [GOLD_v4_T6_AERO_NEG_007] (conf=0.85) → list      
+     Q: Quels CS-25 paragraphes NE SONT PAS référencés dans les change tables de l'Amendment 22 ?
+     A_expected: 
+
+## list : 7 fails
+   predicted distribution: {'causal': 3, 'comparison': 1, 'factual': 2, 'temporal': 1}
+   - [GOLD_v4_T6_AERO_SYN_006] (conf=0.85) → causal    
+     Q: Résume la chaîne de causalité réglementaire des items dual-use depuis les régimes internationaux jusqu'à l'autorisation finale d'un exportat
+     A_expected: 
+
+   - [GOLD_v4_T6_AERO_SYN_010] (conf=0.75) → comparison
+     Q: Synthétise les exigences CS-25 sur la sécurité passagers en croisant les paragraphes pertinents (CS 25.561 crash, CS 25.785 seats, CS 25.795
+     A_expected: 
+
+   - [GOLD_v4_T6_AERO_SYN_007] (conf=0.70) → factual   
+     Q: Donne une vue d'ensemble des LIFECYCLE_RELATION dans le KG aerospace et explique leur valeur métier.
+     A_expected: 
+
+   - [GOLD_v4_T6_AERO_MH_011] (conf=0.85) → causal    
+     Q: Pourquoi, malgré l'apparence d'une contradiction sur l'énergie d'impact (21J vs 3.5J), OSMOSIS V2 ne doit pas alarmer un compliance officer 
+     A_expected: 
+
+   - [GOLD_v4_T6_AERO_MH_010] (conf=0.85) → causal    
+     Q: Si on découvre via l'audit qu'un item a été exporté sans autorisation en 2018, quel raisonnement réglementaire doit s'appliquer pour évaluer
+     A_expected: 
+
+   - [GOLD_v4_T6_AERO_MH_001] (conf=0.85) → factual   
+     Q: Si une entreprise basée en France exporte vers le Japon un 'network access controller' tel que défini dans le délégué 2024/2547, quelle est 
+     A_expected: 
+
+   - [GOLD_v4_T6_AERO_MH_007] (conf=0.85) → temporal  
+     Q: Un avocat doit défendre la position d'un exportateur ayant exporté un item en 2020 sur la base du règlement 428/2009 (alors en vigueur). En 
+     A_expected: 
+
+## temporal : 4 fails
+   predicted distribution: {'unanswerable': 1, 'factual': 2, 'list': 1}
+   - [GOLD_v4_T7_AERO_0032] (conf=0.85) → unanswerable
+     Q: Existe-t-il une chaîne complète de SUPERSEDES dans le corpus aerospace ?
+     A_expected: 
+
+   - [GOLD_v4_T7_AERO_0033] (conf=0.85) → factual   
+     Q: Y a-t-il un acte délégué dual-use du corpus qui ne semble pas modifier l'Annex I de 2021/821 ?
+     A_expected: 
+
+   - [GOLD_v4_T7_AERO_0007] (conf=0.85) → factual   
+     Q: Quel est le règlement délégué le plus récent qui modifie l'Annex I de la régulation 2021/821 ?
+     A_expected: 
+
+   - [GOLD_v4_T7_AERO_0002] (conf=0.85) → list      
+     Q: Quels actes délégués modifient l'Annex I du règlement (UE) 2021/821 ?
+     A_expected: 
+
+## comparison : 4 fails
+   predicted distribution: {'temporal': 1, 'factual': 3}
+   - [GOLD_v4_T2_AERO_0026] (conf=0.85) → temporal  
+     Q: Une transaction d'export en juin 2021 (juste après publication 2021/821) doit-elle suivre 428/2009 ou 2021/821 ?
+     A_expected: 
+
+   - [GOLD_v4_T2_AERO_0001] (conf=0.85) → factual   
+     Q: Quelle est l'énergie d'impact spécifiée par CS-25 pour l'essai d'impact unique sur un grand item en verre ?
+     A_expected: 
+
+   - [GOLD_v4_T2_AERO_0003] (conf=0.85) → factual   
+     Q: What does CS 25.1309(c) require regarding flight crew alerting for unsafe system operating conditions?
+     A_expected: 
+
+   - [GOLD_v4_T2_AERO_0004] (conf=0.85) → factual   
+     Q: Le règlement (UE) 2021/821 fixe-t-il une liste figée de produits à double usage soumis à autorisation ?
+     A_expected: 
+
+## causal : 2 fails
+   predicted distribution: {'temporal': 2}
+   - [GOLD_v4_T6_AERO_HYP_002] (conf=0.85) → temporal  
+     Q: Si CS-25 Amendment 28 était abrogé demain, quelle serait la version applicable ?
+     A_expected: 
+
+   - [GOLD_v4_T6_AERO_HYP_003] (conf=0.85) → temporal  
+     Q: Si un délégué 2025/X était publié et abrogeait le 2024/2547, l'Annex I reviendrait-elle à la version du 2023/996 ?
+     A_expected: 
+
+TOTAL fails: 22

@@ -40,59 +40,14 @@ REDIS_TTL = 7200
 # Keyword utilities
 # ═══════════════════════════════════════════════════════════════════════
 
-IGNORANCE_KEYWORDS = [
-    "pas d'information",
-    "ne dispose pas",
-    "pas mentionne",
-    "non disponible",
-    "aucune donnee",
-    "aucune reference",
-    "ne mentionne pas",
-    "ne traite pas",
-    "hors du scope",
-    "pas de donnee",
-    "je ne sais pas",
-    "impossible de repondre",
-    "aucune information",
-    "pas trouve",
-    "not found",
-    "no information",
-    "cannot answer",
-    "documents ne contiennent pas",
-    "corpus ne contient pas",
-    "pas dans les documents",
-    "pas dans le corpus",
-]
+# CH-12 — IGNORANCE/CORRECTION/TEMPORAL keywords externalisées vers
+# config/detection_keywords.yaml
+from knowbase.config.detection_keywords import get_detection_keywords as _get_dk
 
-CORRECTION_KEYWORDS = [
-    "en realite",
-    "contrairement",
-    "cependant",
-    "neanmoins",
-    "toutefois",
-    "en fait",
-    "il est important de noter",
-    "attention",
-    "incorrect",
-    "inexact",
-    "faux",
-    "erreur",
-    "la premisse",
-    "actually",
-    "however",
-    "contrary",
-    "not correct",
-    "supporte", "supportent",
-    "est disponible", "sont disponibles",
-]
-
-TEMPORAL_KEYWORDS = [
-    "2021", "2022", "2023", "2024", "2025",
-    "evolution", "evolue", "change", "modifie",
-    "avant", "apres", "precedent", "nouveau",
-    "ancienne", "nouvelle", "mise a jour",
-    "version", "edition", "fps",
-]
+_dk = _get_dk()
+IGNORANCE_KEYWORDS = list(_dk.ignorance_keywords)
+CORRECTION_KEYWORDS = list(_dk.correction_keywords)
+TEMPORAL_KEYWORDS = list(_dk.temporal_keywords)
 
 
 def normalize(text: str) -> str:
@@ -405,6 +360,26 @@ CATEGORY_JUDGE_CRITERIA = {
     "conditional": "The question asks about a specific condition or prerequisite. A good answer identifies and explains the condition from the sources. A bad answer misses the conditional aspect.",
     "set_list": "The question asks to LIST or ENUMERATE items. A good answer lists the correct items from the sources. A bad answer misses items or lists wrong ones.",
     "multi_hop": "The question requires CHAINING facts from multiple sources. A good answer connects the facts logically. A bad answer only addresses part of the chain.",
+    "unanswerable": "The question asks for information that does NOT exist in the corpus. A good answer abstains, says it cannot find the information, or explains why the answer is unavailable. A bad answer fabricates an answer.",
+    # CH-30.10 — catégories T7 V2 anchor (lifecycle + applicability + scope)
+    "lifecycle_supersedes": "The question asks about a regulation that REPLACED another (SUPERSEDES). A good answer identifies the replacement regulation and cites the explicit repeal/replacement. A bad answer misses the lifecycle relationship.",
+    "lifecycle_evolves_from": "The question asks about regulations that MODIFY or update another via delegated/amending acts. A good answer identifies the modifications and the parent regulation. A bad answer treats them as unrelated documents.",
+    "lifecycle_filtering_active": "The question requires returning ACTIVE versions only and excluding DEPRECATED ones. A good answer correctly filters and explains why deprecated content is excluded. A bad answer cites obsolete sources as applicable.",
+    "anchor_applicability_temporal": "The question requires identifying which version was applicable at a given DATE (temporal anchor). A good answer selects the right version using publication dates. A bad answer ignores the date or uses the latest version.",
+    "anchor_scope_hierarchy": "The question asks about the SCOPE relationship between concepts (subset/superset/disjoint). A good answer correctly identifies the hierarchy. A bad answer conflates distinct scopes.",
+    "lifecycle_vs_conflict": "The question tests whether OSMOSIS distinguishes a real CONFLICT from a regulatory EVOLUTION (lifecycle). A good answer identifies it as evolution and selects the active value. A bad answer raises a false alarm of contradiction.",
+}
+
+# CH-30.10 — Mapping des catégories T7 vers les évaluateurs keyword T6 quand un
+# match sémantique direct existe. Les catégories T7 non listées tombent
+# dans le fallback LLM-juge (criteria définis dans CATEGORY_JUDGE_CRITERIA).
+T7_TO_T6_KEYWORD_FALLBACK = {
+    "lifecycle_supersedes": "temporal_evolution",
+    "lifecycle_evolves_from": "temporal_evolution",
+    "lifecycle_filtering_active": "temporal_evolution",
+    "anchor_applicability_temporal": "temporal_evolution",
+    "anchor_scope_hierarchy": "set_list",
+    "lifecycle_vs_conflict": "false_premise",
 }
 
 _llm_judge_client = None
@@ -412,12 +387,14 @@ _judge_failure_count = 0
 _judge_success_count = 0
 
 def _get_llm_judge_client():
-    """Retourne le client OpenAI pour le LLM-juge.
+    """Retourne le client OpenAI-compatible pour le LLM-juge.
 
-    IMPORTANT : le juge utilise gpt-4o-mini par defaut. Pour le changer,
-    definir explicitement OSMOSIS_JUDGE_MODEL=xxx. On n'herite PAS de
-    OSMOSIS_SYNTHESIS_MODEL car celui-ci peut etre un modele Anthropic
-    (Claude) qui n'est pas compatible avec le client OpenAI.
+    Provider défaut : **openai** (legacy compat). Pour utiliser Prometheus
+    (m-prometheus-14b — modèle spécialisé juge, choix produit), définir
+    `T2T5_JUDGE_PROVIDER=llamacpp` + `LLAMACPP_URL=http://prometheus-judge:8000`
+    (déjà en place dans docker-compose worker).
+
+    Override possible via `ROBUSTNESS_JUDGE_PROVIDER` (priorité haute).
     """
     global _llm_judge_client
     if _llm_judge_client is not None:
@@ -428,7 +405,15 @@ def _get_llm_judge_client():
     try:
         from openai import OpenAI
 
-        if judge_provider == "ollama":
+        if judge_provider == "llamacpp":
+            llamacpp_url = os.getenv("LLAMACPP_URL", "http://prometheus-judge:8000")
+            _llm_judge_client = OpenAI(
+                base_url=f"{llamacpp_url}/v1",
+                api_key="local",
+            )
+            model = os.getenv("ROBUSTNESS_JUDGE_MODEL", os.getenv("T2T5_JUDGE_MODEL_NAME", "m-prometheus-14b"))
+            logger.info(f"[JUDGE] llama.cpp judge initialized: {model} at {llamacpp_url}")
+        elif judge_provider == "ollama":
             ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
             _llm_judge_client = OpenAI(
                 base_url=f"{ollama_url}/v1",
@@ -436,6 +421,17 @@ def _get_llm_judge_client():
             )
             model = os.getenv("ROBUSTNESS_JUDGE_MODEL", os.getenv("T2T5_JUDGE_MODEL_NAME", "m-prometheus-14b"))
             logger.info(f"[JUDGE] Ollama judge initialized: {model} at {ollama_url}")
+        elif judge_provider == "deepinfra":
+            di_key = os.getenv("DEEPINFRA_API_KEY", "").strip()
+            if not di_key:
+                logger.warning("[JUDGE] DEEPINFRA_API_KEY missing — LLM judge unavailable")
+                return None
+            _llm_judge_client = OpenAI(
+                base_url="https://api.deepinfra.com/v1/openai",
+                api_key=di_key,
+            )
+            model = os.getenv("ROBUSTNESS_JUDGE_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+            logger.info(f"[JUDGE] DeepInfra judge initialized: {model}")
         else:
             openai_key = os.getenv("OPENAI_API_KEY", "")
             if not openai_key:
@@ -507,65 +503,97 @@ Reply in this exact format on two lines:
 SCORE: <number 0-100>
 REASON: <one short sentence explaining the score, max 25 words>"""
 
-    try:
-        judge_provider = os.getenv("ROBUSTNESS_JUDGE_PROVIDER", os.getenv("T2T5_JUDGE_PROVIDER", "openai"))
-        if judge_provider == "ollama":
-            judge_model = os.getenv("ROBUSTNESS_JUDGE_MODEL", os.getenv("T2T5_JUDGE_MODEL_NAME", "m-prometheus-14b"))
-        else:
-            judge_model = os.getenv("OSMOSIS_JUDGE_MODEL", "gpt-4o-mini")
-        resp = client.chat.completions.create(
-            model=judge_model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=80,  # score + short reason
-            temperature=0.0,
+    judge_provider = os.getenv("ROBUSTNESS_JUDGE_PROVIDER", os.getenv("T2T5_JUDGE_PROVIDER", "openai"))
+    # CH-34 : "ollama" était un legacy alias — le default actuel est "llamacpp"
+    # (Prometheus via llama.cpp). On supporte les deux pour compat ascendante.
+    if judge_provider in ("llamacpp", "ollama"):
+        judge_model = os.getenv("ROBUSTNESS_JUDGE_MODEL", os.getenv("T2T5_JUDGE_MODEL_NAME", "m-prometheus-14b"))
+    else:
+        judge_model = os.getenv("OSMOSIS_JUDGE_MODEL", "gpt-4o-mini")
+
+    # CH-40.3 — Retry exponentiel sur les appels juge LLM avec backoff 2s/4s/8s.
+    # Si retry exhausted → return None (et le caller marque le sample en erreur,
+    # PAS de fallback keyword silencieux).
+    import time as _time
+    last_exception = None
+    n_retries_used = 0
+    for attempt in range(3):
+        try:
+            resp = client.chat.completions.create(
+                model=judge_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=80,  # score + short reason
+                temperature=0.0,
+            )
+            raw = resp.choices[0].message.content.strip()
+            import re as _re
+            # Parse SCORE: NN and REASON: ... format
+            score_m = _re.search(r"SCORE\s*:\s*(\d+)", raw, _re.IGNORECASE)
+            reason_m = _re.search(r"REASON\s*:\s*(.+?)(?:$|\n)", raw, _re.IGNORECASE | _re.DOTALL)
+            if score_m:
+                score = int(score_m.group(1)) / 100.0
+            else:
+                # Fallback : chercher juste un nombre
+                m = _re.search(r"\d+", raw)
+                score = int(m.group()) / 100.0 if m else 0.0
+            score = min(1.0, max(0.0, score))
+            reason = reason_m.group(1).strip() if reason_m else ""
+
+            global _judge_success_count
+            _judge_success_count += 1
+            return {
+                "category": category,
+                "score": round(score, 3),
+                "judge_model": judge_model,
+                "judge_raw": raw,
+                "judge_reason": reason,
+                "n_retries_used": n_retries_used,
+            }
+
+        except Exception as e:
+            last_exception = e
+            n_retries_used = attempt + 1
+            if attempt < 2:
+                wait_s = 2 ** (attempt + 1)  # 2s, 4s, 8s
+                logger.info(f"[JUDGE] retry {attempt + 1}/3 after {wait_s}s — {type(e).__name__}: {e}")
+                _time.sleep(wait_s)
+
+    # All retries exhausted
+    global _judge_failure_count
+    _judge_failure_count += 1
+    if _judge_failure_count <= 3:
+        logger.warning(
+            f"[JUDGE] LLM judge call failed after 3 retries: "
+            f"{type(last_exception).__name__}: {last_exception}"
         )
-        raw = resp.choices[0].message.content.strip()
-        import re as _re
-        # Parse SCORE: NN and REASON: ... format
-        score_m = _re.search(r"SCORE\s*:\s*(\d+)", raw, _re.IGNORECASE)
-        reason_m = _re.search(r"REASON\s*:\s*(.+?)(?:$|\n)", raw, _re.IGNORECASE | _re.DOTALL)
-        if score_m:
-            score = int(score_m.group(1)) / 100.0
-        else:
-            # Fallback : chercher juste un nombre
-            m = _re.search(r"\d+", raw)
-            score = int(m.group()) / 100.0 if m else 0.0
-        score = min(1.0, max(0.0, score))
-        reason = reason_m.group(1).strip() if reason_m else ""
-
-        global _judge_success_count
-        _judge_success_count += 1
-        return {
-            "category": category,
-            "score": round(score, 3),
-            "judge_model": judge_model,
-            "judge_raw": raw,
-            "judge_reason": reason,
-        }
-
-    except Exception as e:
-        # VISIBLE : warning au lieu de debug. Si le juge plante, on doit le
-        # voir immediatement dans les logs, pas le decouvrir 5 jours plus tard
-        # en explorant les rapports.
-        global _judge_failure_count
-        _judge_failure_count += 1
-        if _judge_failure_count <= 3:
-            logger.warning(f"[JUDGE] LLM judge call failed: {type(e).__name__}: {e}")
-        elif _judge_failure_count == 4:
-            logger.warning(f"[JUDGE] 4+ consecutive judge failures — further errors suppressed")
-        if _judge_failure_count % 50 == 0:
-            logger.warning(f"[JUDGE] {_judge_failure_count} total failures so far (success={_judge_success_count})")
-        return None
+    elif _judge_failure_count == 4:
+        logger.warning(f"[JUDGE] 4+ consecutive judge failures — further errors suppressed")
+    if _judge_failure_count % 50 == 0:
+        logger.warning(
+            f"[JUDGE] {_judge_failure_count} total failures so far "
+            f"(success={_judge_success_count})"
+        )
+    # CH-40.3 — return None means "judge_unavailable" → caller marks sample as error
+    # PAS de fallback keyword (anti-pattern V2)
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Router
 # ═══════════════════════════════════════════════════════════════════════
 
-# Categories evaluees par LLM-juge (cross-lingue, keyword insuffisant)
+# Categories evaluees par LLM-juge — CH-30.16 : étendues à TOUTES les catégories
+# T6 + T7 (cross-lingue, keyword scorer insuffisant pour réponses V2 concises).
+# `unanswerable` ajouté car la question V2 répond souvent "information non disponible"
+# qui peut ne pas matcher les keywords figés.
 LLM_JUDGE_CATEGORIES = {
+    # T6 (10 catégories)
     "false_premise", "temporal_evolution", "causal_why", "hypothetical",
     "negation", "synthesis_large", "conditional", "set_list", "multi_hop",
+    "unanswerable",
+    # T7 V2 anchor (6 catégories)
+    "lifecycle_supersedes", "lifecycle_evolves_from", "lifecycle_filtering_active",
+    "anchor_applicability_temporal", "anchor_scope_hierarchy", "lifecycle_vs_conflict",
 }
 
 # Keyword evaluators (fallback ou categories non-LLM)
@@ -590,41 +618,78 @@ EVALUATORS = KEYWORD_EVALUATORS  # Kept for backward compat
 # ═══════════════════════════════════════════════════════════════════════
 
 def _call_osmosis_api(question: str, api_base: str, token: str = "") -> dict:
+    """CH-30.14 — V2 par défaut. CH-39 — V3. CH-43 — V4. CH-49 — V4.2 (Tiered Pipeline)."""
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
+    runtime_version = os.getenv("RUNTIME_VERSION", "v2").lower()
+    if runtime_version in ("v3", "v4", "v4_2"):
+        endpoint_seg = "v4_2" if runtime_version == "v4_2" else runtime_version
+        endpoint = f"/api/runtime_{endpoint_seg}/answer"
+        # CH-46 L4 — top_k_claims V4 : 20→12 (réduit context Structurer ~40% tokens).
+        # Override : V4_TOP_K_CLAIMS=20 pour rollback.
+        top_k_v4 = int(os.getenv("V4_TOP_K_CLAIMS", "12"))
+        top_k = top_k_v4 if runtime_version in ("v4", "v4_2") else 10
+        resp = requests.post(
+            f"{api_base}{endpoint}",
+            json={"question": question, "top_k_claims": top_k},
+            headers=headers,
+            timeout=300,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "answer": data.get("answer") or "",
+            "sources_used": data.get("doc_ids_cited") or [],
+            f"_{runtime_version}_meta": {
+                "decision": data.get("decision"),
+                "confidence": data.get("confidence"),
+                "false_premise_detected": data.get("false_premise_detected"),
+                "faithfulness_score": data.get("faithfulness_score"),
+                "faithfulness_verdict": data.get("faithfulness_verdict"),
+                "n_chunks_retrieved": data.get("n_chunks_retrieved"),
+                "regenerated": data.get("regenerated"),
+                "primary_type": data.get("primary_type"),  # V4-only
+                "routing_decision": data.get("routing_decision"),  # V4-only
+                "rerouter_promoted": data.get("rerouter_promoted"),  # V4-only
+                # V4.2 only fields
+                "layer": data.get("layer"),
+                "abstention_reason": data.get("abstention_reason"),
+                "abstain_category": data.get("abstain_category"),
+                "qa_alignment": data.get("qa_alignment"),
+                "escalation_reason": data.get("escalation_reason"),
+            },
+        }
+
+    # Default V2
     resp = requests.post(
-        f"{api_base}/api/search",
-        json={
-            "question": question,
-            "graph_enrichment_level": "standard",
-            "use_graph_first": True,
-            "use_kg_traversal": True,
-            "use_latest": True,
-            "skip_tension_summary": True,
-        },
+        f"{api_base}/api/runtime_v2/answer",
+        json={"question": question, "audit_mode": False, "top_k_claims": 10},
         headers=headers,
         timeout=300,
     )
     resp.raise_for_status()
     data = resp.json()
-
-    # Extraire la reponse (format OSMOSIS: synthesis.synthesized_answer)
-    synthesis = data.get("synthesis", {})
-    if isinstance(synthesis, dict):
-        answer = synthesis.get("synthesized_answer", "")
-    else:
-        answer = data.get("answer", data.get("response", ""))
-
-    sources = []
-    for s in data.get("results", data.get("sources", data.get("chunks", []))):
-        if isinstance(s, dict):
-            src = s.get("source_file", s.get("doc_id", s.get("metadata", {}).get("source_file", "")))
-            if src:
-                sources.append(src)
-
-    return {"answer": answer, "sources_used": sources}
+    answer = data.get("synthesized_answer") or ""
+    sources = list(data.get("authoritative_doc_ids") or [])
+    if not sources:
+        for c in data.get("claims") or []:
+            doc = c.get("doc_id")
+            if doc and doc not in sources:
+                sources.append(doc)
+    return {
+        "answer": answer,
+        "sources_used": sources,
+        "_v2_meta": {
+            "decision": data.get("decision"),
+            "trust_score": data.get("trust_score"),
+            "synthesis_entropy": data.get("synthesis_entropy"),
+            "answer_gap_classification": data.get("answer_gap_classification"),
+            "n_insight_hints": len(data.get("insight_hints") or []),
+            "n_conflicts": len(data.get("conflicts") or []),
+        },
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -647,6 +712,24 @@ def _update_redis_state(redis_url: str, state: dict):
 # Aggregation
 # ═══════════════════════════════════════════════════════════════════════
 
+def _load_gold_set_v4_index() -> dict:
+    """Charge benchmark/questions/gold_set_v4.json et retourne {source_id: gold_item}.
+
+    CH-40.2 — utilisé par Phase 2c (structured_metrics) pour matcher les samples
+    avec les annotations criterion-level du gold-set.
+    """
+    from pathlib import Path
+    p = Path("benchmark/questions/gold_set_v4.json")
+    if not p.exists():
+        return {}
+    try:
+        items = json.loads(p.read_text(encoding="utf-8"))
+        return {it["source_id"]: it for it in items if it.get("source_id")}
+    except Exception as e:
+        logger.warning(f"[ROBUSTESSE] Failed to load gold-set v4: {e}")
+        return {}
+
+
 def aggregate_scores(per_sample: list[dict]) -> dict[str, Any]:
     """Aggrege les scores par categorie."""
     categories: dict[str, list[dict]] = {}
@@ -659,21 +742,81 @@ def aggregate_scores(per_sample: list[dict]) -> dict[str, Any]:
 
     scores: dict[str, Any] = {}
 
-    # Score global
+    # Score global — CH-46 fix : filtrer les None (judge a parfois retourné None pour score)
     all_scores = [s["evaluation"]["score"] for s in per_sample
-                  if "score" in s.get("evaluation", {}) and "error" not in s.get("evaluation", {})]
+                  if "score" in s.get("evaluation", {}) and "error" not in s.get("evaluation", {})
+                  and s["evaluation"]["score"] is not None]
     if all_scores:
         scores["global_score"] = round(sum(all_scores) / len(all_scores), 4)
 
-    # Par categorie
+    # Par categorie — CH-46 fix : filtrer les None
     for cat, evals in sorted(categories.items()):
-        cat_scores = [e["score"] for e in evals if "score" in e]
+        cat_scores = [e["score"] for e in evals if "score" in e and e["score"] is not None]
         if cat_scores:
             scores[f"{cat}_score"] = round(sum(cat_scores) / len(cat_scores), 4)
             scores[f"{cat}_count"] = len(cat_scores)
 
     scores["total_evaluated"] = len([s for s in per_sample if "error" not in s.get("evaluation", {})])
     scores["total_errors"] = len([s for s in per_sample if "error" in s.get("evaluation", {})])
+
+    # ── CH-40.2 — Structured metrics aggregation (anti-overfit garde-fou) ──
+    # Sépare les structured scores des LLM-judge scores (transparence du diagnostic).
+    sm_samples = [
+        {"primary_type": s.get("primary_type"), "structured": s.get("structured_metrics")}
+        for s in per_sample
+        if s.get("structured_metrics") and s["structured_metrics"].get("applicable")
+    ]
+    if sm_samples:
+        from benchmark.evaluators.structured_metrics import aggregate_by_type
+        sm_agg = aggregate_by_type(sm_samples)
+        scores["structured_metrics"] = sm_agg
+
+        # CH-40.6 anticipation — calcul du disagreement judge vs structured
+        disagreements = []
+        for s in per_sample:
+            sm = s.get("structured_metrics")
+            ev = s.get("evaluation", {})
+            if sm and sm.get("applicable") and "score" in ev and sm.get("structured_avg") is not None:
+                judge_score = ev["score"]
+                struct_avg = sm["structured_avg"]
+                disagreement = abs(judge_score - struct_avg)
+                disagreements.append({
+                    "question_id": s.get("question_id"),
+                    "original_id": s.get("original_id"),
+                    "category": s.get("category"),
+                    "primary_type": s.get("primary_type"),
+                    "judge_score": judge_score,
+                    "structured_avg": struct_avg,
+                    "disagreement": round(disagreement, 3),
+                    "dominant_signal": (
+                        "judge_overscored" if judge_score - struct_avg > 0.2
+                        else "judge_underscored" if struct_avg - judge_score > 0.2
+                        else "aligned"
+                    ),
+                })
+                # Stocker aussi sur le sample pour traçabilité
+                s["disagreement"] = {
+                    "value": round(disagreement, 3),
+                    "judge_score": judge_score,
+                    "structured_avg": struct_avg,
+                    "dominant_signal": (
+                        "judge_overscored" if judge_score - struct_avg > 0.2
+                        else "judge_underscored" if struct_avg - judge_score > 0.2
+                        else "aligned"
+                    ),
+                }
+        if disagreements:
+            n_overscored = sum(1 for d in disagreements if d["dominant_signal"] == "judge_overscored")
+            n_underscored = sum(1 for d in disagreements if d["dominant_signal"] == "judge_underscored")
+            n_aligned = sum(1 for d in disagreements if d["dominant_signal"] == "aligned")
+            scores["disagreement_summary"] = {
+                "total": len(disagreements),
+                "judge_overscored": n_overscored,
+                "judge_underscored": n_underscored,
+                "aligned": n_aligned,
+                "overscored_pct": round(100 * n_overscored / len(disagreements), 1),
+                "mean_disagreement": round(sum(d["disagreement"] for d in disagreements) / len(disagreements), 3),
+            }
 
     return scores
 
@@ -692,15 +835,26 @@ def run_benchmark_job(
     job_start = time.time()
     api_base = os.getenv("OSMOSIS_API_URL", "http://localhost:8000")
 
-    questions_file = Path("benchmark/questions/task6_robustness.json")
-    if not questions_file.exists():
-        _update_redis_state(redis_url, {"status": "failed", "error": "Questions file not found"})
+    # CH-30.9 — fichiers V2 (T6 + T7 — T7 traité comme catégorie de robustesse temporelle)
+    files_to_load = [
+        Path("benchmark/questions/aero_t6_robustness.json"),
+        Path("benchmark/questions/aero_t7_v2_anchor.json"),
+    ]
+    all_questions: list[dict] = []
+    for qfile in files_to_load:
+        if not qfile.exists():
+            logger.warning(f"[ROBUSTESSE] Missing: {qfile}")
+            continue
+        loaded = json.loads(qfile.read_text(encoding="utf-8"))
+        # Format flat array (aero V2) ou wrapped {questions:[]} (legacy)
+        items = loaded if isinstance(loaded, list) else loaded.get("questions", [])
+        all_questions.extend(items)
+
+    if not all_questions:
+        _update_redis_state(redis_url, {"status": "failed", "error": "No question files found"})
         return
 
-    data = json.loads(questions_file.read_text(encoding="utf-8"))
-    all_questions = data.get("questions", [])
-
-    logger.info(f"[ROBUSTESSE] Starting benchmark — {len(all_questions)} questions, tag={tag}")
+    logger.info(f"[ROBUSTESSE] Starting benchmark — {len(all_questions)} questions (T6 + T7 V2 anchor), tag={tag}")
 
     _update_redis_state(redis_url, {
         "status": "running",
@@ -729,8 +883,12 @@ def run_benchmark_job(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     is_local_judge = os.getenv("T2T5_JUDGE_PROVIDER") == "ollama"
-    collect_concurrency = int(os.getenv("BENCHMARK_COLLECT_CONCURRENCY", "15"))
-    judge_concurrency = 1 if is_local_judge else int(os.getenv("BENCHMARK_CONCURRENCY", "15"))
+    # CH-35/36 — pipeline V2 plus lent (~50s/q avec rerank+faithfulness+hallu_guard).
+    # Avec 4+ concurrent et RAGAS en parallèle, DeepInfra rate-limit fait grimper
+    # chaque appel à 300s+ → timeouts. Solo (concurrency=1) = ~50s/q × 170 = ~2h30
+    # mais sans timeout. À monter quand l'infra le supporte (vLLM EC2 dédié).
+    collect_concurrency = int(os.getenv("BENCHMARK_COLLECT_CONCURRENCY", "1"))
+    judge_concurrency = 1 if is_local_judge else int(os.getenv("BENCHMARK_CONCURRENCY", "4"))
     logger.info(f"[ROBUSTESSE] Collect concurrency: {collect_concurrency}, Judge concurrency: {judge_concurrency}")
 
     # ══════════════════════════════════════════════════════════════
@@ -760,6 +918,7 @@ def run_benchmark_job(
         question = q_item.get("question", "")
         category = q_item.get("category", "")
         question_id = q_item.get("question_id", f"q_{i}")
+        original_id = q_item.get("id", "")  # CH-40.2 — préserve l'ID source pour gold-set matching
         ground_truth = q_item.get("ground_truth", {})
 
         if i > 0 and i % 50 == 0:
@@ -770,14 +929,40 @@ def run_benchmark_job(
             answer = api_result["answer"]
             sources = api_result["sources_used"]
 
-            # Keyword evaluation (deterministe, pas de LLM)
-            evaluator = KEYWORD_EVALUATORS.get(category)
-            keyword_eval = evaluator(answer, sources, ground_truth) if evaluator else {
-                "category": category, "score": 0.0, "error": f"Unknown category: {category}"
-            }
+            # CH-40.3 — Dépose keyword scorer fallback : si la catégorie est en
+            # LLM_JUDGE_CATEGORIES (toutes les 16 actuelles T6+T7), on skip le pré-scoring
+            # keyword complètement. Le LLM-judge en Phase 2b est l'unique source de score.
+            # Si LLM échoue → marker error (PAS de fallback keyword silencieux).
+            if category in LLM_JUDGE_CATEGORIES:
+                keyword_eval = {
+                    "category": category,
+                    "score": None,  # sera fixé par LLM-judge en Phase 2b
+                    "needs_llm_judge_only": True,
+                }
+            else:
+                # Catégories hors LLM_JUDGE : utilisation du keyword scorer (legacy)
+                # DEPRECATED CH-40.3 — kept pour compat ; à supprimer en V4 S4.
+                evaluator = KEYWORD_EVALUATORS.get(category)
+                mapped_cat = None
+                if evaluator is None:
+                    mapped_cat = T7_TO_T6_KEYWORD_FALLBACK.get(category)
+                    if mapped_cat:
+                        evaluator = KEYWORD_EVALUATORS.get(mapped_cat)
+                if evaluator is not None:
+                    keyword_eval = evaluator(answer, sources, ground_truth)
+                    keyword_eval["category"] = category
+                    if mapped_cat:
+                        keyword_eval["mapped_from_t7_to"] = mapped_cat
+                else:
+                    keyword_eval = {
+                        "category": category,
+                        "score": 0.0,
+                        "needs_llm_judge_only": True,
+                    }
 
             result = {
                 "question_id": question_id,
+                "original_id": original_id,  # CH-40.2 — pour gold-set v4 matching
                 "question": question,
                 "category": category,
                 "answer": answer,
@@ -858,6 +1043,14 @@ def run_benchmark_job(
             llm_eval = evaluate_with_llm_judge(answer, question, category, ground_truth)
             if llm_eval:
                 sample["evaluation"] = llm_eval
+            else:
+                # CH-40.3 — judge unavailable après 3 retries → mark as error.
+                # PAS de fallback keyword (anti-pattern V2 : pollue les agrégations).
+                sample["evaluation"] = {
+                    "category": category,
+                    "error": "judge_unavailable_after_retries",
+                    "score": None,
+                }
 
             judged += 1
             if judged % 10 == 0:
@@ -870,6 +1063,39 @@ def run_benchmark_job(
                 logger.info(f"[ROBUSTESSE] Judge progress: {judged}/{len(per_sample)}")
 
         logger.info(f"[ROBUSTESSE] Phase 2b complete: {judged} samples judged")
+
+    # ── Phase 2c : Structured metrics (CH-40.2 anti-overfit garde-fou) ──
+    # Calcul déterministe item_level_recall, exact_match_identifiers, citation_presence_rate
+    # à partir du gold-set v4. Garde-fou critique contre overfit Claude-juge.
+    gold_index = _load_gold_set_v4_index()
+    if gold_index:
+        from benchmark.evaluators.structured_metrics import compute_all
+        n_with_gold = 0
+        for sample in per_sample:
+            oid = sample.get("original_id")
+            gold = gold_index.get(oid) if oid else None
+            gold_truth = gold.get("ground_truth") if gold else None
+            primary_type = gold.get("primary_type") if gold else None
+            sm = compute_all(
+                answer=sample.get("answer", ""),
+                gold_truth=gold_truth,
+                primary_type=primary_type,
+                predicted_coverage_state=None,  # V3 ne l'émet pas; V4 le fera
+            )
+            sample["structured_metrics"] = sm
+            sample["primary_type"] = primary_type  # pour aggregation par type
+            if sm.get("applicable"):
+                n_with_gold += 1
+        logger.info(
+            f"[ROBUSTESSE] Phase 2c complete: structured_metrics computed on "
+            f"{n_with_gold}/{len(per_sample)} samples (gold-set v4 has {len(gold_index)} entries)"
+        )
+    else:
+        logger.warning(
+            "[ROBUSTESSE] Phase 2c skipped: gold-set v4 not found at "
+            "benchmark/questions/gold_set_v4.json — structured metrics disabled "
+            "(WARNING: anti-overfit guardrails offline)"
+        )
 
     # Cleanup temp fields
     for sample in per_sample:
@@ -924,6 +1150,17 @@ def run_benchmark_job(
     except Exception:
         pass
 
+    # CH-40.3 — judge_stats top-level pour visibilité retry/failure
+    judge_stats = {
+        "success": _judge_success_count,
+        "failures_after_retry": _judge_failure_count,
+        "total_calls": _judge_success_count + _judge_failure_count,
+        "success_rate": (
+            round(100 * _judge_success_count / (_judge_success_count + _judge_failure_count), 1)
+            if (_judge_success_count + _judge_failure_count) > 0 else 0.0
+        ),
+    }
+
     report_data = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "profile": profile,
@@ -933,6 +1170,7 @@ def run_benchmark_job(
         "synthesis_provider": synthesis_provider,
         "judge_model": os.getenv("OSMOSIS_JUDGE_MODEL", os.getenv("OSMOSIS_SYNTHESIS_MODEL", "gpt-4o-mini")),
         "judge_mode": "llm" if _get_llm_judge_client() else "keyword",
+        "judge_stats": judge_stats,  # CH-40.3 — visibilité retry/failure rate
         "duration_s": duration_s,
         "scores": scores,
         "per_sample": per_sample,

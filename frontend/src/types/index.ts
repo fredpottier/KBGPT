@@ -12,6 +12,3 @@ export * from './graph'
 
 // Types pour les concepts
 export * from './concept'
-
-// Types Assertion-Centric (OSMOSE)
-export * from './instrumented'

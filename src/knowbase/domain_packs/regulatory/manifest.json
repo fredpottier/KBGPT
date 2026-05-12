@@ -3,6 +3,13 @@
   "name": "regulatory",
   "display_name": "Regulatory & Legal",
   "description": "NER for legal/regulatory documents. Detects regulations, laws, compliance standards, regulatory bodies via GLiNER zero-shot NER with a regulatory gazetteer.",
+  "classifier_hints": {
+    "context_summary": "Regulatory and legal documents follow well-defined lifecycles : enactment, amendment, repeal, revocation. Successive versions of a regulation form a chain of references with explicit succession clauses.",
+    "succession_patterns": "Regulations are typically superseded via explicit repeal clauses in a successor regulation. A claim verbatim asserting that a prior regulation 'is repealed' or 'shall be repealed' from the perspective of the successor establishes a SUPERSEDES relation between the two documents. Distinguish carefully : an amending act (delegated regulation, implementing regulation, executive order modifying a base law) refines or extends a base regulation but does NOT supersede it — the base regulation remains in force in its amended form. Use EVOLVES_FROM for amending acts, SUPERSEDES only for full replacement.",
+    "transitional_provisions": "Successor regulations frequently include transitional provisions specifying that the predecessor continues to apply for matters initiated before a cut-off date (e.g. 'applications submitted before X shall be processed under the predecessor regulation'). These transitional provisions are claims of EXCEPTION between the predecessor's scope and the successor's effective scope, not CONFLICT.",
+    "cross_references": "Regulations cite other regulations by canonical identifier (e.g. 'Regulation (EC) No 428/2009', 'Directive 2014/24/EU'). When a claim mentions another regulation by canonical identifier, the relationship between this claim and claims of the cited regulation depends on the surrounding semantic — repeal language → SUPERSEDES, amendment language → EVOLVES_FROM, reference for definition → DEFINITION_OF, scoping reference → DISJOINT or OVERLAP.",
+    "annex_correspondence": "Successor regulations often include correlation tables (e.g. 'Annex VI : Correlation Table') mapping articles of the repealed regulation to articles of the new one. A claim about the correspondence table is a claim of REAFFIRMS or EVOLVES_FROM between the matched articles, not their substantive content."
+  },
   "version": "1.0.0",
   "author": "OSMOSE",
   "min_core_version": "2.0.0",

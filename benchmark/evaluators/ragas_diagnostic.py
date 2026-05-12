@@ -37,6 +37,7 @@ import argparse
 import asyncio
 import json
 import logging
+import math
 import os
 import sys
 import time
@@ -150,15 +151,31 @@ def _extract_answer(item: dict) -> str:
 
 
 def _extract_reference(item: dict) -> str:
-    """Extrait la reference (ground truth) si disponible."""
-    gt = item.get("ground_truth", item.get("expected_answer", item.get("reference", "")))
+    """Extrait la reference (ground truth) si disponible.
+
+    Supporte 3 formats :
+    1. Gold-set v4 (CH-40.0) : item['ground_truth']['ground_truth_answer']
+    2. T1 historique : item['ground_truth_answer'] (à la racine)
+    3. V5 chain : item['ground_truth']['chain'][].text
+    4. Legacy : item['expected_answer'] / item['reference']
+    """
+    # Format gold-set v4 : nested ground_truth_answer
+    gt = item.get("ground_truth")
     if isinstance(gt, dict):
+        # Gold-set v4 : ground_truth.ground_truth_answer
+        if gt.get("ground_truth_answer"):
+            return gt["ground_truth_answer"]
         # Format V5 : ground_truth.chain[].text
         chain = gt.get("chain", [])
         if chain:
             return " ".join(c.get("text", "") for c in chain if c.get("text"))
+        # Fallback : ground_truth.text ou ground_truth.answer
         return gt.get("text", gt.get("answer", ""))
-    return gt or ""
+    # Format T1 historique : ground_truth_answer à la racine
+    if item.get("ground_truth_answer"):
+        return item["ground_truth_answer"]
+    # Legacy : expected_answer / reference
+    return item.get("expected_answer", item.get("reference", "")) or ""
 
 
 def _extract_doc_ids(item: dict) -> list[str]:
@@ -232,7 +249,8 @@ def collect_live(questions_path: str, api_base: str = "http://localhost:8000") -
             results = data.get("results", [])
             contexts = [r.get("text", "") for r in results[:10] if r.get("text")]
             answer = data.get("synthesis", {}).get("synthesized_answer", "")
-            reference = q_item.get("expected_answer", q_item.get("ground_truth", ""))
+            # CH-40.1 — utilise _extract_reference() pour supporter gold-set v4 schema
+            reference = _extract_reference(q_item)
 
             samples.append({
                 "question": question,
@@ -273,12 +291,16 @@ def _get_token(api_base: str) -> str:
 def run_ragas_evaluation(
     samples: list[dict],
     label: str = "OSMOSIS",
-    use_reference: bool = False,
+    use_reference: bool | None = None,
 ) -> dict[str, Any]:
     """Execute l'evaluation RAGAS sur les samples.
 
     Utilise le scoring direct par sample (score/batch_score) au lieu de
     evaluate() qui n'est pas compatible avec les collections metrics v0.4.
+
+    CH-40.1 : si `use_reference=None` (default), FactualCorrectness est
+    auto-activé quand au moins 1 sample contient une reference non-vide.
+    Pour forcer ON/OFF, passer `use_reference=True` ou `False`.
     """
     from ragas.metrics.collections import (
         Faithfulness,
@@ -287,6 +309,25 @@ def run_ragas_evaluation(
     )
 
     llm, embeddings = _get_ragas_providers()
+
+    # CH-40.1 — auto-détection FactualCorrectness depuis les références présentes
+    n_with_reference = sum(1 for s in samples if (s.get("reference") or "").strip())
+    if use_reference is None:
+        use_reference = n_with_reference >= 1
+        if use_reference:
+            logger.info(
+                f"[CH-40.1] FactualCorrectness auto-activé : {n_with_reference}/{len(samples)} samples ont une reference"
+            )
+        else:
+            logger.info(
+                "[CH-40.1] FactualCorrectness désactivé : aucun sample avec reference. "
+                "Passe `use_reference=True` ou utilise un fichier de questions avec ground_truth_answer."
+            )
+    elif use_reference and n_with_reference == 0:
+        logger.warning(
+            "[CH-40.1] FactualCorrectness forcé à True mais 0 sample avec reference — "
+            "tous les scores factual_correctness retourneront None"
+        )
 
     # Construire les metrics
     # ContextRelevance : evalue si les chunks retrieves sont pertinents pour la question
@@ -356,8 +397,9 @@ def run_ragas_evaluation(
                     "retrieved_contexts": contexts,
                 })
             elif metric_name == "factual_correctness":
+                # CH-40.1 fix : FactualCorrectness.ascore() prend (response, reference)
+                # uniquement — pas user_input.
                 all_kwargs.append({
-                    "user_input": s["question"],
                     "response": response,
                     "reference": s.get("reference", ""),
                 })
@@ -371,8 +413,10 @@ def run_ragas_evaluation(
         scores = asyncio.run(_eval_metric_parallel(metric, all_kwargs, concurrency, metric_name))
 
         for i, score in enumerate(scores):
-            per_sample[i][metric_name] = round(score, 4) if score is not None else None
-            if score is not None:
+            # CH-30.18 — filtrer NaN/None pour ne pas propager dans la moyenne
+            valid = score is not None and not (isinstance(score, float) and math.isnan(score))
+            per_sample[i][metric_name] = round(score, 4) if valid else None
+            if valid:
                 metric_totals[metric_name].append(score)
 
         ok_count = sum(1 for s in scores if s is not None)
@@ -417,8 +461,9 @@ def run_ragas_evaluation(
         faith_total_values = []
         for j, score in enumerate(total_scores):
             idx = total_indices[j]
-            per_sample[idx]["faithfulness_total"] = round(score, 4) if score is not None else None
-            if score is not None:
+            valid = score is not None and not (isinstance(score, float) and math.isnan(score))
+            per_sample[idx]["faithfulness_total"] = round(score, 4) if valid else None
+            if valid:
                 faith_total_values.append(score)
 
         if faith_total_values:
@@ -564,24 +609,45 @@ _ragas_client = None  # singleton pour eviter l'epuisement du pool de connexions
 def _get_ragas_providers():
     """Configure le LLM et embeddings pour RAGAS v0.4+.
 
-    Supporte deux providers pour le juge :
-    - "openai" (defaut) : gpt-4o-mini via API OpenAI
-    - "ollama" : M-Prometheus-14B via Ollama (API OpenAI-compatible)
+    Providers pour le juge :
+    - "deepinfra" (DEFAUT, CH-09) : Qwen2.5-72B-Instruct via DeepInfra (cohérent avec judge V2)
+    - "openai" : gpt-4o-mini via API OpenAI (legacy, à éviter)
+    - "ollama" : M-Prometheus-14B via Ollama
+    - "llamacpp" : llama.cpp server local
+
+    Embeddings :
+    - DeepInfra/Ollama/llamacpp → multilingual-e5-large local (HF)
+    - OpenAI → text-embedding-3-small
 
     Le client est reutilise entre les evaluations OSMOSIS et RAG pour eviter
     l'epuisement du pool de connexions httpx.
-
-    Les embeddings restent sur OpenAI (text-embedding-3-small) en V1 — cout
-    negligeable (~$0.01/benchmark). Migration vers e5-large local en V2.
     """
     global _ragas_client
     from openai import AsyncOpenAI
     from ragas.llms import llm_factory
     from ragas.embeddings import OpenAIEmbeddings
 
-    judge_provider = os.getenv("RAGAS_JUDGE_PROVIDER", "openai")
+    # CH-09 — défaut DeepInfra pour cohérence avec judge_v2 + éviter OpenAI/Anthropic
+    judge_provider = os.getenv("RAGAS_JUDGE_PROVIDER", "deepinfra")
 
-    if judge_provider == "ollama":
+    if judge_provider == "deepinfra":
+        # CH-09 — DeepInfra (compatible OpenAI API). Modèle juge : Qwen2.5-72B-Instruct
+        # (même que judge_v2.py — cohérent et fail-fast si DEEPINFRA_API_KEY manque).
+        di_key = os.environ.get("DEEPINFRA_API_KEY", "").strip()
+        if not di_key:
+            raise RuntimeError(
+                "DEEPINFRA_API_KEY missing. RAGAS_JUDGE_PROVIDER=deepinfra requires the key."
+            )
+        ragas_model = os.getenv("RAGAS_JUDGE_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+        if _ragas_client is None:
+            _ragas_client = AsyncOpenAI(
+                base_url="https://api.deepinfra.com/v1/openai",
+                api_key=di_key,
+                max_retries=3,
+                timeout=120.0,
+            )
+        logger.info(f"[RAGAS] Using DeepInfra judge: {ragas_model}")
+    elif judge_provider == "ollama":
         # Mode local : Ollama expose une API OpenAI-compatible sur /v1
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         ragas_model = os.getenv("RAGAS_JUDGE_MODEL", "m-prometheus-14b")
@@ -618,8 +684,8 @@ def _get_ragas_providers():
 
     llm = llm_factory(ragas_model, client=_ragas_client)
 
-    # Embeddings : local e5-large en mode local (ollama/llamacpp), OpenAI sinon
-    if judge_provider in ("ollama", "llamacpp"):
+    # Embeddings : local e5-large par défaut (CH-09 — éviter OpenAI), OpenAI uniquement si forcé
+    if judge_provider in ("deepinfra", "ollama", "llamacpp"):
         try:
             from langchain_community.embeddings import HuggingFaceEmbeddings as LCHFEmb
             from ragas.embeddings import LangchainEmbeddingsWrapper
@@ -628,10 +694,18 @@ def _get_ragas_providers():
             embeddings = LangchainEmbeddingsWrapper(hf_emb)
             logger.info(f"[RAGAS] Using local embeddings: {emb_model}")
         except Exception as e:
+            # Fallback : refuser plutôt que retomber sur OpenAI (politique CH-09)
+            if judge_provider == "deepinfra":
+                raise RuntimeError(
+                    f"Local embeddings (multilingual-e5-large) failed: {e}. "
+                    "RAGAS_JUDGE_PROVIDER=deepinfra refuse OpenAI embeddings fallback. "
+                    "Install langchain_community + sentence-transformers, ou utiliser RAGAS_JUDGE_PROVIDER=openai explicitement."
+                )
             logger.warning(f"[RAGAS] Local embeddings failed ({e}), falling back to OpenAI")
             embeddings_client = AsyncOpenAI(max_retries=3, timeout=30.0)
             embeddings = OpenAIEmbeddings(client=embeddings_client, model="text-embedding-3-small")
     else:
+        # judge_provider == "openai" (legacy explicite)
         embeddings = OpenAIEmbeddings(client=_ragas_client, model="text-embedding-3-small")
 
     return llm, embeddings
@@ -846,7 +920,8 @@ def _merge_ground_truth(samples: list[dict], gt_path: str):
     gt_map = {}
     for q in gt_list:
         question = q.get("question", q.get("query", ""))
-        answer = q.get("expected_answer", q.get("ground_truth", ""))
+        # CH-40.1 — utilise _extract_reference() pour supporter gold-set v4
+        answer = _extract_reference(q)
         if question and answer:
             gt_map[question.strip().lower()] = answer
 
@@ -866,46 +941,68 @@ def _merge_ground_truth(samples: list[dict], gt_path: str):
 
 PROFILES: dict[str, dict] = {
     "quick": {
-        "label": "Quick (25q)",
+        "label": "Quick (T1 — 50q)",
         "tasks": [
             {
-                "name": "T5 KG Differentiators",
-                "questions_file": "benchmark/questions/task5_kg_differentiators.json",
+                "name": "T1 Provenance",
+                "questions_file": "benchmark/questions/aero_t1_provenance.json",
                 "api_search": True,
             },
         ],
     },
     "standard": {
-        "label": "Standard (100q)",
+        "label": "Standard (T1 + T5 — 80q)",
         "tasks": [
             {
-                "name": "T1 Human",
-                "questions_file": "benchmark/questions/task1_provenance_human.json",
+                "name": "T1 Provenance",
+                "questions_file": "benchmark/questions/aero_t1_provenance.json",
+                "api_search": True,
+            },
+            {
+                "name": "T5 Cross-doc",
+                "questions_file": "benchmark/questions/aero_t5_cross_doc.json",
                 "api_search": True,
             },
         ],
     },
     "full": {
-        "label": "Full (275q)",
+        "label": "Full (T1 + T2 + T5 + T6 + T7 — 290q)",
         "tasks": [
             {
-                "name": "T1 Human",
-                "questions_file": "benchmark/questions/task1_provenance_human.json",
+                "name": "T1 Provenance",
+                "questions_file": "benchmark/questions/aero_t1_provenance.json",
                 "api_search": True,
             },
             {
                 "name": "T2 Contradictions",
-                "questions_file": "benchmark/questions/task2_contradictions_human_v2.json",
+                "questions_file": "benchmark/questions/aero_t2_contradictions.json",
                 "api_search": True,
             },
             {
-                "name": "T4 Audit",
-                "questions_file": "benchmark/questions/task4_audit_human.json",
+                "name": "T5 Cross-doc",
+                "questions_file": "benchmark/questions/aero_t5_cross_doc.json",
                 "api_search": True,
             },
             {
-                "name": "T1 KG",
-                "questions_file": "benchmark/questions/task1_provenance_kg.json",
+                "name": "T6 Robustness",
+                "questions_file": "benchmark/questions/aero_t6_robustness.json",
+                "api_search": True,
+            },
+            {
+                "name": "T7 V2 anchor",
+                "questions_file": "benchmark/questions/aero_t7_v2_anchor.json",
+                "api_search": True,
+            },
+        ],
+    },
+    # CH-40.1 — gold-set v4 stratifié multilingue avec ground_truth_answer pour
+    # FactualCorrectness. 97 questions stratifiées (cf scripts/build_gold_set_v4.py).
+    "gold_v4": {
+        "label": "Gold-set V4 (S0 calibration — 97q stratifiées)",
+        "tasks": [
+            {
+                "name": "Gold-set V4",
+                "questions_file": "benchmark/questions/gold_set_v4.json",
                 "api_search": True,
             },
         ],
@@ -937,13 +1034,165 @@ def _update_redis_state(redis_url: str, state: dict):
         logger.error(f"[RAGAS:BENCH] Redis update failed: {type(e).__name__}: {e}")
 
 
+def _build_v2_graph_context_text(response_data: dict) -> str:
+    """CH-09 — synthétise un `graph_context_text` à partir de la réponse runtime V2.
+
+    Le but : donner au juge RAGAS un contexte enrichi par le KG (claims supplémentaires,
+    conflicts détectés, evolution lifecycle, insight hints) pour que `faithfulness_total`
+    reflète bien la qualité OSMOSIS V2 sans biais structurel.
+    """
+    parts: list[str] = []
+    claims = response_data.get("claims") or []
+    if claims:
+        parts.append("KG claims (top retrieved):")
+        for c in claims[:5]:
+            text = (c.get("text") or "")[:300]
+            doc_id = c.get("doc_id", "?")
+            pub = c.get("publication_date") or "?"
+            parts.append(f"  - [{doc_id}, {pub}] {text}")
+
+    conflicts = response_data.get("conflicts") or []
+    if conflicts:
+        parts.append("\nKG conflicts (intra-anchor):")
+        for cf in conflicts[:3]:
+            doc_a = cf.get("doc_a_id", "?")
+            doc_b = cf.get("doc_b_id", "?")
+            resolved = cf.get("is_resolved_by_lifecycle")
+            kind = cf.get("lifecycle_resolution_type")
+            tag = f"resolved_by_{kind}" if resolved and kind else "unresolved"
+            parts.append(f"  - {doc_a} vs {doc_b} [{tag}]")
+
+    hints = response_data.get("insight_hints") or []
+    if hints:
+        parts.append("\nKG insights:")
+        for h in hints[:5]:
+            parts.append(f"  - [{h.get('type', '?')}] {h.get('message', '')[:200]}")
+
+    return "\n".join(parts)
+
+
+def _call_runtime_v2_api(
+    question: str,
+    api_base: str,
+    token_mgr,
+    audit_mode: bool = False,
+) -> dict:
+    """CH-09 — Call runtime V2 anchor-driven API.
+    CH-39 — switch sur runtime V3 si env RUNTIME_VERSION=v3.
+
+    Retourne la même structure que `_call_osmosis_api()` pour rester compatible
+    avec le pipeline RAGAS.
+    """
+    runtime_version = os.getenv("RUNTIME_VERSION", "v2").lower()
+    headers = {
+        "Authorization": f"Bearer {token_mgr.get()}",
+        "Content-Type": "application/json",
+    }
+
+    if runtime_version in ("v3", "v4", "v4_2"):
+        # V3 / V4 / V4.2 endpoints partagent le même schéma de réponse (rétro-compatible V3)
+        endpoint_seg = "v4_2" if runtime_version == "v4_2" else runtime_version
+        endpoint_path = f"/api/runtime_{endpoint_seg}/answer"
+        # CH-46 L4 — top_k V4 : 20→12 par défaut, override V4_TOP_K_CLAIMS
+        top_k_v4 = int(os.getenv("V4_TOP_K_CLAIMS", "12"))
+        payload_top_k = top_k_v4 if runtime_version in ("v4", "v4_2") else 10
+        payload = {"question": question, "top_k_claims": payload_top_k}
+        resp = requests.post(
+            f"{api_base}{endpoint_path}",
+            json=payload, headers=headers, timeout=180,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        answer = data.get("answer") or ""
+        doc_ids = data.get("doc_ids_cited") or []
+        # V3/V4 exposent chunks_used (= claims top-K post-rerank, source pour RAGAS contexts)
+        # V4.2 retourne chunks_used vide → fallback : pas de contexts pour RAGAS
+        chunks_used = data.get("chunks_used") or []
+        contexts = [(c.get("text") or "")[:1500] for c in chunks_used[:10] if c.get("text")]
+        return {
+            "question": question,
+            "contexts": contexts,
+            "answer": answer,
+            "graph_context_text": "",  # V3/V4/V4.2 pas de KG context séparé
+            "response_mode": data.get("decision", "ANSWER"),
+            "metadata": {
+                "doc_ids": doc_ids,
+                "decision": data.get("decision"),
+                "confidence": data.get("confidence"),
+                "false_premise_detected": data.get("false_premise_detected"),
+                "faithfulness_score_v3": data.get("faithfulness_score"),
+                "faithfulness_verdict_v3": data.get("faithfulness_verdict"),
+                "regenerated": data.get("regenerated"),
+                "use_kg": True,
+                "runtime": runtime_version,
+                # V4-specific extras
+                "primary_type": data.get("primary_type"),
+                "routing_decision": data.get("routing_decision"),
+                "rerouter_promoted": data.get("rerouter_promoted"),
+                "rerouter_promoted_to": data.get("rerouter_promoted_to"),
+                # V4.2-specific extras
+                "layer": data.get("layer"),
+                "abstention_reason": data.get("abstention_reason"),
+                "abstain_category": data.get("abstain_category"),
+                "qa_alignment": data.get("qa_alignment"),
+                "escalation_reason": data.get("escalation_reason"),
+            },
+        }
+
+    # Default V2
+    payload = {
+        "question": question,
+        "audit_mode": audit_mode,
+        "top_k_claims": 10,
+    }
+    resp = requests.post(
+        f"{api_base}/api/runtime_v2/answer",
+        json=payload, headers=headers, timeout=120,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    # Pour le scoring "chunks-only" classique, on utilise les claims top-K comme contexts
+    # (équivalent V2 des chunks Qdrant — sans le contexte KG dérivé).
+    claims = data.get("claims") or []
+    contexts = [(c.get("text") or "")[:1500] for c in claims[:10] if c.get("text")]
+
+    answer = data.get("synthesized_answer") or ""
+    graph_context_text = _build_v2_graph_context_text(data)
+
+    return {
+        "question": question,
+        "contexts": contexts,
+        "answer": answer,
+        "graph_context_text": graph_context_text,
+        "response_mode": data.get("decision", "ANSWERED"),
+        "metadata": {
+            "doc_ids": list(data.get("authoritative_doc_ids") or []),
+            "anchor_type": (data.get("anchor") or {}).get("anchor_type"),
+            "trust_score": data.get("trust_score"),
+            "synthesis_entropy": data.get("synthesis_entropy"),
+            "answer_gap_classification": data.get("answer_gap_classification"),
+            "n_conflicts": len(data.get("conflicts") or []),
+            "n_insight_hints": len(data.get("insight_hints") or []),
+            "has_kg_context": bool(graph_context_text),
+            "use_kg": True,
+            "runtime": "v2",
+        },
+    }
+
+
 def _call_osmosis_api(
     question: str,
     api_base: str,
     token_mgr,
     use_kg: bool = True,
 ) -> dict:
-    """Call OSMOSIS search API and return {question, contexts, answer, metadata}."""
+    """LEGACY V1.1 — appelle /api/search.
+
+    NOTE CH-30.14 : kept here as the comparative RAG baseline (use_kg=False)
+    used by RAGAS to mesure OSMOSIS V2 vs RAG pur. Pour les calls "OSMOSIS V2",
+    utiliser `_call_runtime_v2_api` à la place.
+    """
     payload = {
         "question": question,
         "use_graph_context": use_kg,
@@ -1030,11 +1279,25 @@ def _collect_api_samples(
 
     total = len(all_questions)
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    api_concurrency = int(os.getenv("BENCHMARK_CONCURRENCY", "15"))
+    api_concurrency = int(os.getenv("BENCHMARK_CONCURRENCY", "3"))
     logger.info(f"[RAGAS:BENCH] Collecting {total} samples via API (use_kg={use_kg}, phase={phase_label}, concurrency={api_concurrency})")
 
     samples = []
     _progress = [0]
+
+    # CH-09 / CH-30.12 — runtime V2 par défaut (anchor-driven). Pour repasser
+    # sur /api/search V1.1, définir RAGAS_USE_RUNTIME_V2=false.
+    use_runtime_v2 = os.getenv("RAGAS_USE_RUNTIME_V2", "true").lower() == "true"
+    runtime_version = os.getenv("RUNTIME_VERSION", "v2").lower()
+    if use_runtime_v2 and use_kg:
+        if runtime_version == "v4_2":
+            logger.info("[RAGAS:BENCH] Using runtime V4.2 API (/api/runtime_v4_2/answer)")
+        elif runtime_version == "v4":
+            logger.info("[RAGAS:BENCH] Using runtime V4 API (/api/runtime_v4/answer)")
+        elif runtime_version == "v3":
+            logger.info("[RAGAS:BENCH] Using runtime V3 API (/api/runtime_v3/answer)")
+        else:
+            logger.info("[RAGAS:BENCH] Using runtime V2 API (/api/runtime_v2/answer)")
 
     def _collect_one(i, q_item):
         question = q_item.get("question", q_item.get("query", ""))
@@ -1042,14 +1305,39 @@ def _collect_api_samples(
             return None
 
         try:
-            sample = _call_osmosis_api(question, api_base, token_mgr, use_kg=use_kg)
-            reference = q_item.get("expected_answer", q_item.get("ground_truth", ""))
+            if use_runtime_v2 and use_kg:
+                sample = _call_runtime_v2_api(question, api_base, token_mgr)
+            else:
+                sample = _call_osmosis_api(question, api_base, token_mgr, use_kg=use_kg)
+            # CH-30.9 / CH-40.1 — supporte aero V2 flat + gold-set v4 nested
+            reference = (
+                q_item.get("ground_truth_answer")
+                or q_item.get("expected_answer")
+                or q_item.get("ground_truth", "")
+                or q_item.get("verbatim_quote", "")
+            )
             if isinstance(reference, dict):
-                chain = reference.get("chain", [])
-                if chain:
-                    reference = " ".join(c.get("text", "") for c in chain if c.get("text"))
+                # CH-40.1 — gold-set v4 : ground_truth.ground_truth_answer (priorité haute)
+                if reference.get("ground_truth_answer"):
+                    reference = reference["ground_truth_answer"]
                 else:
-                    reference = reference.get("text", reference.get("answer", ""))
+                    chain = reference.get("chain", [])
+                    if chain:
+                        reference = " ".join(c.get("text", "") for c in chain if c.get("text"))
+                    else:
+                        # T2 aero format : ground_truth.{claim_a, claim_b}
+                        a = reference.get("claim_a") or reference.get("claim1") or {}
+                        b = reference.get("claim_b") or reference.get("claim2") or {}
+                        if a or b:
+                            reference = " | ".join(
+                                (x.get("text") if isinstance(x, dict) else str(x or "")) for x in [a, b] if x
+                            )
+                        else:
+                            reference = (
+                                reference.get("correct_fact")
+                                or reference.get("text")
+                                or reference.get("answer", "")
+                            )
             sample["reference"] = reference or ""
             sample["_task_name"] = q_item.get("_task_name", "")
 

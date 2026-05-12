@@ -47,6 +47,10 @@ class SubQuery:
     text: str
     scope_filter: dict[str, Any] = field(default_factory=dict)
     rationale: str = ""
+    # CH-31.B — domain-agnostic enrichments
+    answer_shape: str = "narrative"  # factual_value|definition|entity_lookup|relationship|enumeration|narrative|boolean
+    hyde_text: str | None = None  # hypothetical answer text for retrieval augmentation
+    must_contain: list[str] = field(default_factory=list)  # tokens that should appear in evidence (term-lookup)
     # Rempli apres retrieval
     chunk_count: int = 0
     has_results: bool = True
@@ -291,6 +295,132 @@ dates, regions), add them to scope_filter as appropriate. Otherwise leave
 scope_filter empty and rely on semantic matching."""
 
 
+# CH-31.B — Decomposer V2 prompt: always-on, enriched with answer_shape + HyDE + must_contain
+DECOMPOSER_SYSTEM_PROMPT_V2 = """You are a query analysis expert for a domain-agnostic document retrieval system.
+
+Your job is to analyze a user question and produce a structured retrieval plan that helps a vector + symbolic retriever find the precise evidence to answer it.
+
+────────────────────────────────────────
+OUTPUT FORMAT — STRICT JSON ONLY
+────────────────────────────────────────
+
+Return ONLY a JSON object, no markdown, no comments :
+
+{
+  "plan_type": "simple" | "comparison" | "enumeration" | "chronological",
+  "synthesis_strategy": "simple" | "compare" | "aggregate" | "chronological",
+  "reasoning": "short sentence explaining the decision",
+  "sub_queries": [
+    {
+      "id": "q1",
+      "text": "self-contained sub-question",
+      "scope_filter": { "axis_key": "value" } or {},
+      "rationale": "what this targets",
+      "answer_shape": "factual_value" | "definition" | "entity_lookup" | "relationship" | "enumeration" | "narrative" | "boolean",
+      "hyde_text": "1-2 sentence hypothetical answer in the question's language, or null",
+      "must_contain": ["token1", "token2"]
+    }
+  ]
+}
+
+────────────────────────────────────────
+ANSWER SHAPES (domain-agnostic, generic across all corpora)
+────────────────────────────────────────
+
+- factual_value : expects a specific number, threshold, measurement, date, percentage
+- definition    : expects what something IS or means
+- entity_lookup : expects a named entity (person, place, organization, identifier)
+- relationship  : expects how two or more things relate (causal, hierarchical, dependency)
+- enumeration   : expects a list or set of items
+- narrative     : expects a prose explanation of how/why something works
+- boolean       : expects a yes/no with supporting evidence
+
+────────────────────────────────────────
+DECOMPOSITION RULES
+────────────────────────────────────────
+
+1. DECOMPOSE only when the question EXPLICITLY asks to compare, enumerate or contrast
+   multiple identifiable entities (versions, products, options, periods, roles…).
+2. CONSERVATIVE BY DEFAULT : when in doubt, keep "simple" with exactly 1 sub_query.
+3. DOMAIN-AGNOSTIC : do not assume any specific vocabulary, domain, or language pattern.
+4. Sub-questions must be SELF-CONTAINED.
+
+────────────────────────────────────────
+HYDE (Hypothetical Document Embedding) GENERATION
+────────────────────────────────────────
+
+- For answer_shape ∈ {factual_value, entity_lookup, boolean, relationship, definition} :
+  generate `hyde_text` = 1-2 plausible sentences that would APPEAR in a document
+  containing the answer. Use the SAME LANGUAGE as the question.
+- For {narrative, enumeration} : `hyde_text` = null (or omit).
+- HyDE must be statement-shaped, NOT meta ("the answer is…", "according to…").
+- HyDE may include placeholder values (e.g. "the duration is X nanoseconds") if you
+  do not know the actual value — the retriever will use the surrounding wording.
+
+────────────────────────────────────────
+MUST_CONTAIN EXTRACTION (very important)
+────────────────────────────────────────
+
+ALWAYS scan the question for tokens that should resurface verbatim in the
+retrieved evidence and add them to must_contain. This is critical for retrieval
+filtering downstream.
+
+What to include (domain-agnostic — applies to any corpus) :
+- Alphanumeric identifiers / codes : "1A006", "CS-25", "GDPR Art. 17", "Reg. 2021/821"
+- Section / chapter / clause references : "Annex IV", "Part B", "§ 25.1309"
+- Numeric values with units : "100 nanoseconds", "5 kg", "30 days", "EUR 50000"
+- Dates / years : "2021", "January 2024"
+- Proper nouns naming a specific entity : "ETOPS", "GDPR", "NIST 800-53", "ISO 27001"
+- Quoted strings : "verbatim phrase"
+
+What NOT to include :
+- Generic words : "rule", "requirement", "system", "data"
+- Verbs / prepositions / articles
+- Words that describe the answer shape ("list", "explain", "compare")
+
+Empty list ONLY if the question is purely conceptual with no specific identifier
+("What is GDPR ?" → ["GDPR"], "How does authentication work in general ?" → []).
+
+────────────────────────────────────────
+SUBJECT CONTEXT (when provided)
+────────────────────────────────────────
+
+If a "Subject (canonical)" and/or "Subject aliases" are provided alongside the
+question, you MAY use them in sub_query.text to bridge between the user's wording
+and the corpus's canonical form. Do NOT invent subjects — only use what's provided.
+"""
+
+
+def _build_user_prompt_v2(
+    question: str,
+    known_axes: dict[str, list[str]],
+    subject_label: str | None,
+    subject_aliases: list[str] | None,
+) -> str:
+    """Construit le user prompt enrichi (subject context + axes connus)."""
+    sections = [f'Question : "{question}"', ""]
+    if subject_label:
+        sections.append(f"Subject (canonical KG label) : {subject_label}")
+    if subject_aliases:
+        aliases_clean = [a for a in subject_aliases if a and a != subject_label][:5]
+        if aliases_clean:
+            sections.append(f"Subject aliases : {json.dumps(aliases_clean, ensure_ascii=False)}")
+    if subject_label or subject_aliases:
+        sections.append("")
+    if known_axes:
+        sections.append(
+            "Known structured axes in the corpus :\n"
+            + json.dumps(known_axes, indent=2, ensure_ascii=False)
+        )
+        sections.append("")
+    sections.append("Reminders :")
+    sections.append("- Return ONLY valid JSON matching the schema")
+    sections.append("- Be conservative on decomposition")
+    sections.append("- Always provide answer_shape, hyde_text (or null), must_contain (or [])")
+    sections.append("- Domain-agnostic : no vocabulary assumptions")
+    return "\n".join(sections)
+
+
 def _build_user_prompt(question: str, known_axes: dict[str, list[str]]) -> str:
     """Construit le user prompt avec les axes connus du corpus."""
     axes_section = ""
@@ -326,13 +456,32 @@ def _parse_plan_json(raw: str, original_question: str) -> QueryPlan:
         logger.debug(f"[DECOMPOSE] JSON parse error: {e}")
         return QueryPlan(original_question=original_question)
 
+    valid_shapes = {
+        "factual_value", "definition", "entity_lookup", "relationship",
+        "enumeration", "narrative", "boolean",
+    }
     sub_queries = []
     for i, sq in enumerate(data.get("sub_queries", [])):
+        shape = (sq.get("answer_shape") or "narrative").strip().lower()
+        if shape not in valid_shapes:
+            shape = "narrative"
+        hyde = sq.get("hyde_text")
+        if isinstance(hyde, str):
+            hyde = hyde.strip() or None
+        else:
+            hyde = None
+        must = sq.get("must_contain") or []
+        if not isinstance(must, list):
+            must = []
+        must = [str(t).strip() for t in must if t and str(t).strip()][:8]
         sub_queries.append(SubQuery(
             id=sq.get("id", f"q{i+1}"),
             text=sq.get("text", ""),
             scope_filter=sq.get("scope_filter") or {},
             rationale=sq.get("rationale", ""),
+            answer_shape=shape,
+            hyde_text=hyde,
+            must_contain=must,
         ))
 
     plan_type = data.get("plan_type", "simple")
@@ -357,8 +506,30 @@ _stats = {
     "llm_calls": 0,
     "llm_errors": 0,
     "integrity_issues": 0,
+    "cache_hits": 0,
     "by_plan_type": {},  # {"comparison": N, "enumeration": N, ...}
 }
+
+# CH-33 — cache LRU simple keyed by hash(question + subject_label).
+# Évite les re-calls LLM sur replays / questions identiques.
+import hashlib as _hashlib
+from collections import OrderedDict as _OrderedDict
+
+_DECOMPOSER_CACHE: "_OrderedDict[str, QueryPlan]" = _OrderedDict()
+_DECOMPOSER_CACHE_MAX = 256
+
+
+def _cache_key(question: str, subject_label: str | None, subject_aliases: list[str] | None) -> str:
+    h = _hashlib.sha1()
+    h.update(question.strip().lower().encode("utf-8"))
+    h.update(b"|")
+    if subject_label:
+        h.update(subject_label.strip().lower().encode("utf-8"))
+    if subject_aliases:
+        for a in sorted(subject_aliases):
+            h.update(b"|")
+            h.update((a or "").strip().lower().encode("utf-8"))
+    return h.hexdigest()
 
 
 def get_decomposer_stats() -> dict:
@@ -696,6 +867,130 @@ def try_decompose(query: str) -> QueryPlan:
         plan_type="simple",
         sub_queries=[SubQuery(id="q1", text=query)],
     )
+
+
+# ── CH-31.B — Always-on enriched decomposer ──────────────────────────────────
+
+
+FAST_MODEL = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
+
+
+def _decompose_llm_v2(
+    question: str,
+    known_axes: dict[str, list[str]],
+    subject_label: str | None,
+    subject_aliases: list[str] | None,
+) -> QueryPlan:
+    """LLM call avec prompt V2 enrichi (answer_shape + HyDE + must_contain + subject).
+
+    CH-33 : routé sur Mistral-Small-3.1-24B (DeepInfra) via RuntimeLLMClient,
+    bench A/B = 4s vs 85s Qwen3-235B (TaskType.FAST_CLASSIFICATION précédent).
+    """
+    import time
+    user_prompt = _build_user_prompt_v2(question, known_axes, subject_label, subject_aliases)
+
+    _stats["llm_calls"] += 1
+    t0 = time.time()
+    try:
+        from knowbase.runtime_v2.llm_client import get_runtime_llm_client
+        client = get_runtime_llm_client()
+        raw = client.chat_completion(
+            messages=[
+                {"role": "system", "content": DECOMPOSER_SYSTEM_PROMPT_V2},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.0,
+            max_tokens=500,
+            json_mode=True,
+            timeout=60.0,
+            model_override=FAST_MODEL,
+        )
+        elapsed = round(time.time() - t0, 2)
+        logger.info(
+            f"[DECOMPOSE_V2] elapsed={elapsed}s, q_len={len(question)}, "
+            f"resp_len={len(raw)}, subject={subject_label or '-'}"
+        )
+        plan = _parse_plan_json(raw, question)
+        if len(plan.sub_queries) > MAX_SUB_QUERIES:
+            logger.warning(
+                f"[DECOMPOSE_V2] LLM returned {len(plan.sub_queries)} sub-queries, truncating to {MAX_SUB_QUERIES}"
+            )
+            plan.sub_queries = plan.sub_queries[:MAX_SUB_QUERIES]
+        return plan
+    except Exception as e:
+        _stats["llm_errors"] += 1
+        logger.warning(f"[DECOMPOSE_V2] LLM call failed: {e}")
+        return QueryPlan(original_question=question)
+
+
+def decompose_with_context(
+    question: str,
+    subject_label: str | None = None,
+    subject_aliases: list[str] | None = None,
+) -> QueryPlan:
+    """Always-on decomposer V2 (CH-31.B).
+
+    Différences vs `try_decompose` :
+      - LLM call obligatoire (sauf questions ultra-courtes < 15 chars)
+      - Renvoie un QueryPlan avec `answer_shape`, `hyde_text`, `must_contain`
+        sur chaque SubQuery, exploitable downstream par retriever (HyDE) et
+        LLM-filter post-retrieval (term-lookup)
+      - `subject_label` + `subject_aliases` injectés dans le prompt pour
+        bridge canonique sans hardcoder de domaine
+    Strictement domain-agnostic : 7 answer_shapes génériques, pas de regex
+    spécifique au corpus, pas de vocabulaire métier.
+    """
+    import time
+    t0 = time.time()
+    _stats["total_queries"] += 1
+
+    q_stripped = question.strip()
+    if len(q_stripped) < 15:
+        _stats["simple"] += 1
+        return QueryPlan(
+            original_question=question,
+            plan_type="simple",
+            sub_queries=[SubQuery(id="q1", text=question, answer_shape="narrative")],
+        )
+
+    # CH-33 — cache lookup
+    ck = _cache_key(question, subject_label, subject_aliases)
+    cached = _DECOMPOSER_CACHE.get(ck)
+    if cached is not None:
+        _DECOMPOSER_CACHE.move_to_end(ck)
+        _stats["cache_hits"] += 1
+        logger.info("[DECOMPOSE_V2] cache HIT (%s...)", ck[:12])
+        return cached
+
+    known_axes = _get_known_axis_values()
+    plan = _decompose_llm_v2(question, known_axes, subject_label, subject_aliases)
+
+    # Fallback si parser a tout perdu : 1 sub_query brute
+    if not plan.sub_queries:
+        plan.sub_queries = [SubQuery(id="q1", text=question, answer_shape="narrative")]
+        plan.plan_type = "simple"
+
+    if plan.is_decomposed:
+        _stats["decomposed"] += 1
+        _stats["by_plan_type"][plan.plan_type] = _stats["by_plan_type"].get(plan.plan_type, 0) + 1
+    else:
+        _stats["simple"] += 1
+
+    elapsed = round(time.time() - t0, 2)
+    logger.info(
+        f"[DECOMPOSE_V2] plan={plan.plan_type}, n_sub={len(plan.sub_queries)}, "
+        f"shapes={[sq.answer_shape for sq in plan.sub_queries]}, "
+        f"hyde_n={sum(1 for sq in plan.sub_queries if sq.hyde_text)}, "
+        f"must_total={sum(len(sq.must_contain) for sq in plan.sub_queries)}, "
+        f"elapsed={elapsed}s"
+    )
+
+    # CH-33 — store in cache (LRU eviction)
+    _DECOMPOSER_CACHE[ck] = plan
+    if len(_DECOMPOSER_CACHE) > _DECOMPOSER_CACHE_MAX:
+        _DECOMPOSER_CACHE.popitem(last=False)
+
+    return plan
 
 
 # ── V1 compat wrapper ────────────────────────────────────────────────────────

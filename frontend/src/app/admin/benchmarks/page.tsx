@@ -16,6 +16,7 @@ import {
   Progress,
   Collapse,
   SimpleGrid,
+  Spinner,
 } from '@chakra-ui/react'
 import {
   FiActivity,
@@ -41,18 +42,19 @@ import {
 } from '@/components/benchmarks'
 
 // ── Design tokens ─────────────────────────────────────────────────────
-
+// Tokens alignés sur les CSS variables canoniques du thème actif (preset-vars.css).
+// Aucun fallback dark hardcodé : le thème light/dark gère lui-même.
 const T = {
-  bgBase: '#0a0a1a',
-  bgCard: '#12122a',
-  bgElevated: '#1a1a35',
-  borderSubtle: '#1e1e3a',
+  bgBase: 'var(--bg-canvas)',
+  bgCard: 'var(--bg-surface)',
+  bgElevated: 'var(--bg-surface-alt)',
+  borderSubtle: 'var(--border-default)',
   accentRagas: '#5B7FFF',
   accentContra: '#7C3AED',
   accentRobust: '#f97316',
-  textPrimary: '#f8fafc',
-  textSecondary: '#94a3b8',
-  textMuted: '#475569',
+  textPrimary: 'var(--fg-primary)',
+  textSecondary: 'var(--fg-secondary)',
+  textMuted: 'var(--fg-muted)',
   statusOk: '#22c55e',
   statusWarn: '#eab308',
   statusError: '#ef4444',
@@ -124,11 +126,10 @@ const TABS: { key: TabKey; label: string; Icon: React.ElementType; accent: strin
   { key: 'ragas', label: 'RAGAS', Icon: FiBarChart2, accent: T.accentRagas },
   { key: 'contradictions', label: 'Contradictions', Icon: FiAlertTriangle, accent: T.accentContra },
   { key: 'robustness', label: 'Robustesse', Icon: FiShield, accent: T.accentRobust },
-  // Onglet Comparaison supprime — les deltas vs RAG pur sont dans chaque onglet
 ]
 
 const PROFILES = [
-  { key: 'default', label: 'Defaut (100q)' },
+  { key: 'standard', label: 'Standard (100q)' },
   { key: 'quick', label: 'Quick (25q)' },
   { key: 'full', label: 'Full (275q)' },
 ]
@@ -246,33 +247,70 @@ export default function BenchmarksPage() {
     fetchAllLists()
   }, [fetchAllLists])
 
-  // ── Progress polling ────────────────────────────────────────────────
+  // ── Progress polling (CH-30.14) ────────────────────────────────────
+  // Poll les 3 endpoints en permanence pour détecter aussi les benchs lancés
+  // hors-frontend (CLI, autre client, autre onglet). Auto-reconnect aux benchs
+  // déjà en cours quand on charge la page. Détecte aussi les transitions
+  // running → completed pour rafraîchir la liste des rapports.
+  const [activeProgress, setActiveProgress] = useState<Record<string, RunProgress>>({})
 
   useEffect(() => {
-    if (!isRunning || !runType) return
-    const endpoints: Record<string, string> = {
+    let cancelled = false
+    const ALL_ENDPOINTS: Record<string, string> = {
       ragas: '/api/benchmarks/ragas/progress',
       t2t5: '/api/benchmarks/t2t5/progress',
       robustness: '/api/benchmarks/robustness/progress',
     }
-    const url = endpoints[runType]
-    if (!url) return
+    const isActive = (s: string | undefined): boolean =>
+      s === 'running' || s === 'starting'
+    let prevActive: Record<string, boolean> = {}
 
-    const interval = setInterval(async () => {
-      const prog = await apiFetch<RunProgress>(url)
-      if (prog) {
-        setRunProgress(prog)
-        if (prog.phase === 'done' || prog.phase === 'error' || prog.phase === 'idle') {
-          setIsRunning(false)
-          setRunType(null)
-          setRunProgress(null)
-          fetchAllLists()
+    async function pollOnce() {
+      const next: Record<string, RunProgress> = {}
+      const newActive: Record<string, boolean> = {}
+      for (const [type, url] of Object.entries(ALL_ENDPOINTS)) {
+        const p = await apiFetch<RunProgress & { status?: string }>(url)
+        if (p) {
+          next[type] = p
+          newActive[type] = isActive((p as any).status)
         }
       }
-    }, 5000)
+      if (cancelled) return
+      setActiveProgress(next)
 
-    return () => clearInterval(interval)
-  }, [isRunning, runType, fetchAllLists])
+      // Auto-reconnect si un bench est déjà en cours et qu'on n'avait pas runType set
+      const firstActive = Object.entries(newActive).find(([_, a]) => a)?.[0]
+      if (firstActive && !isRunning) {
+        setIsRunning(true)
+        setRunType(firstActive)
+        setRunProgress(next[firstActive])
+      } else if (isRunning && runType && !newActive[runType]) {
+        // Le bench tracké explicitement vient de finir
+        setIsRunning(false)
+        setRunType(null)
+        setRunProgress(null)
+        fetchAllLists()
+      } else if (isRunning && runType) {
+        setRunProgress(next[runType])
+      }
+
+      // Refresh la liste des rapports dès qu'un bench passe de actif → fini
+      const justFinished = Object.keys(prevActive).some(
+        k => prevActive[k] && !newActive[k],
+      )
+      if (justFinished) {
+        fetchAllLists()
+      }
+      prevActive = newActive
+    }
+
+    pollOnce()
+    const interval = setInterval(pollOnce, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [fetchAllLists, isRunning, runType])
 
   // ── Launch callback ─────────────────────────────────────────────────
 
@@ -429,6 +467,68 @@ export default function BenchmarksPage() {
         })}
       </HStack>
 
+      {/* CH-30.14 — Bandeau benchs actifs (détectés via polling permanent
+          des 3 endpoints, peu importe d'où le bench a été lancé) */}
+      {(() => {
+        const active = Object.entries(activeProgress).filter(
+          ([_, p]) => (p as any).status === 'running' || (p as any).status === 'starting',
+        )
+        if (active.length === 0) return null
+        const labelMap: Record<string, { label: string; color: string }> = {
+          ragas: { label: 'RAGAS', color: T.accentRagas },
+          t2t5: { label: 'Contradictions (T2/T5)', color: T.accentContra },
+          robustness: { label: 'Robustesse', color: T.accentRobust },
+        }
+        return (
+          <Box mb={5} p={3} bg={T.bgCard} border="1px solid" borderColor={T.borderSubtle} rounded="lg">
+            <HStack mb={2} spacing={2}>
+              <Spinner size="xs" color={T.accentRagas} />
+              <Text fontSize="13px" fontWeight="700" color={T.textPrimary}>
+                {active.length} benchmark{active.length > 1 ? 's' : ''} en cours
+              </Text>
+            </HStack>
+            <VStack spacing={2} align="stretch">
+              {active.map(([type, p]) => {
+                const cfg = labelMap[type] || { label: type, color: T.textMuted }
+                const total = (p as any).total ?? 0
+                const progress = (p as any).progress ?? 0
+                const phase = (p as any).phase ?? ''
+                const pct = total > 0 ? Math.round((progress / total) * 100) : 0
+                return (
+                  <Box key={type}>
+                    <HStack justify="space-between" mb={1}>
+                      <HStack spacing={2}>
+                        <Badge fontSize="10px" bg={`${cfg.color}22`} color={cfg.color} px={1.5} rounded="sm">
+                          {cfg.label}
+                        </Badge>
+                        <Text fontSize="11px" color={T.textMuted} fontFamily="'Fira Code', monospace">
+                          {phase} · {progress}/{total}
+                        </Text>
+                      </HStack>
+                      <Text fontSize="11px" fontWeight="700" color={cfg.color} fontFamily="'Fira Code', monospace">
+                        {pct}%
+                      </Text>
+                    </HStack>
+                    <Progress
+                      value={pct}
+                      size="xs"
+                      rounded="full"
+                      bg={T.borderSubtle}
+                      sx={{ '& > div': { background: cfg.color } }}
+                    />
+                    {(p as any).current_question && (
+                      <Text fontSize="10px" color={T.textMuted} mt={1} noOfLines={1}>
+                        {(p as any).current_question}
+                      </Text>
+                    )}
+                  </Box>
+                )
+              })}
+            </VStack>
+          </Box>
+        )
+      })()}
+
       {/* Tab content */}
       {activeTab === 'overview' && (
         <OverviewTab
@@ -497,7 +597,7 @@ function RagasTab({
   isRunning: boolean
   runProgress: RunProgress | null
 }) {
-  const [profile, setProfile] = useState('default')
+  const [profile, setProfile] = useState('standard')
   const [tag, setTag] = useState('')
   const [desc, setDesc] = useState('')
   const [expandedQ, setExpandedQ] = useState<number | null>(null)
@@ -793,13 +893,40 @@ const CONTRA_T5_METRICS = [
   { key: 'proactive_detection', label: 'Detection proactive' },
 ] as const
 
-const CONTRA_CATEGORIES = [
-  { key: 'cross_doc_chain', label: 'Chaine cross-doc' },
-  { key: 'proactive_contradiction', label: 'Contradiction proactive' },
-  { key: 'multi_source_synthesis', label: 'Synthese multi-source' },
-] as const
+// Sub-métriques candidates pour chaque catégorie T5 (toutes ne sont pas pertinentes
+// selon la catégorie — on filtre dynamiquement en regardant si la key existe dans scores).
+const CONTRA_CAT_SUB_METRICS = ['chain_coverage', 'multi_doc_cited', 'proactive_detection'] as const
 
-const CONTRA_CAT_SUB_METRICS = ['chain_coverage', 'multi_doc_cited'] as const
+/** Format un slug `evolution_chronological` ou `cross_doc_chain` en label affichable. */
+function _humanizeCategoryKey(key: string): string {
+  if (!key) return ''
+  const s = key.replace(/_/g, ' ').toLowerCase().trim()
+  // Capitalize first letter only
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+/**
+ * Extrait dynamiquement les catégories T5 présentes dans le rapport.
+ * Cherche les keys de la forme `t5_<category>_count` (avec count > 0).
+ * Retourne triées par count décroissant.
+ */
+function extractT5Categories(scores: Record<string, any> | null | undefined): { key: string; label: string; count: number }[] {
+  if (!scores) return []
+  const seen: { key: string; label: string; count: number }[] = []
+  for (const k of Object.keys(scores)) {
+    // Pattern: t5_<cat>_count — exclure les sub-métriques (`_chain_coverage`, `_multi_doc_cited`, `_proactive_detection`)
+    const m = k.match(/^t5_(.+)_count$/)
+    if (!m) continue
+    const cat = m[1]
+    // Exclure les keys qui ressemblent à des sub-métriques
+    if (/_(chain_coverage|multi_doc_cited|proactive_detection)$/.test(cat)) continue
+    const count = scores[k]
+    if (typeof count !== 'number' || count <= 0) continue
+    seen.push({ key: cat, label: _humanizeCategoryKey(cat), count })
+  }
+  seen.sort((a, b) => b.count - a.count)
+  return seen
+}
 
 function ContradictionsTab({
   reports,
@@ -812,7 +939,7 @@ function ContradictionsTab({
   isRunning: boolean
   runProgress: RunProgress | null
 }) {
-  const [profile, setProfile] = useState('default')
+  const [profile, setProfile] = useState('standard')
   const [tag, setTag] = useState('')
   const [desc, setDesc] = useState('')
 
@@ -831,23 +958,37 @@ function ContradictionsTab({
   const baseScores = baseline?.scores ?? {}
   const ragScores = latest?.scores_rag ?? null
 
-  // Radar data: combine T2 + T5 metrics — OSMOSIS + RAG overlay
+  // CH-30.13 — métriques applicables : exclure proactive_detection si aucune
+  // question proactive_contradiction n'a été évaluée (count=0) — sinon le 0%
+  // tire la moyenne globale vers le bas artificiellement.
+  const proactiveCount = (scores.proactive_count as number | undefined) ?? 0
+  const includeProactive = proactiveCount > 0
+
+  const applicableT5Metrics = useMemo(
+    () => CONTRA_T5_METRICS.filter(m => m.key !== 'proactive_detection' || includeProactive),
+    [includeProactive],
+  )
+  const applicableMetrics = useMemo(
+    () => [...CONTRA_T2_METRICS, ...applicableT5Metrics],
+    [applicableT5Metrics],
+  )
+
+  // Radar data: combine T2 + T5 applicable metrics
   const radarData = useMemo(() => {
-    const allMetrics = [...CONTRA_T2_METRICS, ...CONTRA_T5_METRICS]
-    return allMetrics.map(m => ({
+    return applicableMetrics.map(m => ({
       label: m.label,
       value: scores[m.key] ?? 0,
     }))
-  }, [scores])
+  }, [scores, applicableMetrics])
 
-  // Score global T2/T5 (moyenne des 6 metriques)
-  const allMetricValues = [...CONTRA_T2_METRICS, ...CONTRA_T5_METRICS].map(m => scores[m.key] ?? 0)
+  // Score global T2/T5 — moyenne des métriques applicables uniquement
+  const allMetricValues = applicableMetrics.map(m => scores[m.key] ?? 0)
   const globalScore = allMetricValues.length > 0 ? allMetricValues.reduce((a, b) => a + b, 0) / allMetricValues.length : 0
-  const baseAllValues = [...CONTRA_T2_METRICS, ...CONTRA_T5_METRICS].map(m => baseScores[m.key] ?? 0)
+  const baseAllValues = applicableMetrics.map(m => baseScores[m.key] ?? 0)
   const baseGlobal = baseAllValues.length > 0 ? baseAllValues.reduce((a, b) => a + b, 0) / baseAllValues.length : 0
 
-  // RAG global score
-  const ragAllValues = ragScores ? [...CONTRA_T2_METRICS, ...CONTRA_T5_METRICS].map(m => ragScores[m.key] ?? 0) : []
+  // RAG global score (mêmes métriques applicables pour comparaison cohérente)
+  const ragAllValues = ragScores ? applicableMetrics.map(m => ragScores[m.key] ?? 0) : []
   const ragGlobal = ragAllValues.length > 0 ? ragAllValues.reduce((a, b) => a + b, 0) / ragAllValues.length : null
 
   return (
@@ -876,7 +1017,7 @@ function ContradictionsTab({
             OSMOSIS vs RAG pur
           </Text>
           <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-            {[...CONTRA_T2_METRICS, ...CONTRA_T5_METRICS].map(m => {
+            {applicableMetrics.map(m => {
               const osmVal = scores[m.key] ?? 0
               const ragVal = ragScores[m.key] ?? 0
               const diff = Math.round((osmVal - ragVal) * 100)
@@ -956,15 +1097,17 @@ function ContradictionsTab({
               T5 — Chaines documentaires
             </Text>
             {CONTRA_T5_METRICS.map(m => {
+              const isProactive = m.key === 'proactive_detection'
+              const naForProactive = isProactive && !includeProactive
               const val = scores[m.key] ?? 0
               const baseVal = baseScores[m.key]
               const delta = baseVal != null ? Math.round((val - baseVal) * 100) : null
               return (
                 <MetricBar
                   key={m.key}
-                  label={m.label}
-                  value={val}
-                  delta={delta !== 0 ? delta : null}
+                  label={naForProactive ? `${m.label} (N/A — pas de question proactive)` : m.label}
+                  value={naForProactive ? null : val}
+                  delta={naForProactive ? null : (delta !== 0 ? delta : null)}
                 />
               )
             })}
@@ -972,44 +1115,63 @@ function ContradictionsTab({
         </VStack>
       </HStack>
 
-      {/* Category breakdown with sub-metrics */}
-      <Card>
-        <Text fontSize="sm" fontWeight="700" color={T.textPrimary} mb={4}>
-          Par categorie (T5)
-        </Text>
-        {CONTRA_CATEGORIES.map(cat => {
-          // Filtrer les sub-metrics N/A (ex: chain_coverage pour proactive_contradiction)
-          const subMetrics = CONTRA_CAT_SUB_METRICS.filter(sub => {
-            const scoreKey = `t5_${cat.key}_${sub}`
-            // Exclure si le score est 0 ET que c'est un cas connu N/A
-            if (cat.key === 'proactive_contradiction' && sub === 'chain_coverage') return false
-            return true
-          })
-          if (subMetrics.length === 0) return null
-
-          return (
-            <Box key={cat.key} mb={4}>
-              <Text fontSize="12px" fontWeight="700" color={T.textSecondary} mb={2}>
-                {cat.label}
+      {/* Category breakdown with sub-metrics — domain-agnostic, lit dynamiquement
+           les catégories T5 présentes dans le report (ex: aero V2 a 28 catégories
+           comme `evolution_chronological`, SAP avait 3 canoniques). */}
+      {(() => {
+        const dynamicCats = extractT5Categories(scores)
+        if (dynamicCats.length === 0) return null
+        return (
+          <Card>
+            <HStack justify="space-between" align="baseline" mb={4}>
+              <Text fontSize="sm" fontWeight="700" color={T.textPrimary}>
+                Par catégorie (T5)
               </Text>
-              {subMetrics.map(sub => {
-                const scoreKey = `t5_${cat.key}_${sub}`
-                const val = scores[scoreKey] ?? 0
-                const baseVal = baseScores[scoreKey]
-                const delta = baseVal != null ? Math.round((val - baseVal) * 100) : null
-                return (
-                  <MetricBar
-                    key={scoreKey}
-                    label={sub.replace(/_/g, ' ')}
-                    value={val}
-                    delta={delta !== 0 ? delta : null}
-                  />
-                )
-              })}
-            </Box>
-          )
-        })}
-      </Card>
+              <Text fontSize="11px" color={T.textMuted}>
+                {dynamicCats.length} catégorie{dynamicCats.length > 1 ? 's' : ''} · {dynamicCats.reduce((a, c) => a + c.count, 0)} questions
+              </Text>
+            </HStack>
+            {dynamicCats.map(cat => {
+              // Pour chaque catégorie, ne montrer que les sub-métriques qui ont une key
+              // non-undefined dans le report (filtre les métriques N/A pour cette catégorie).
+              const presentSubs = CONTRA_CAT_SUB_METRICS.filter(sub => {
+                const v = scores[`t5_${cat.key}_${sub}`]
+                return typeof v === 'number'
+              })
+              if (presentSubs.length === 0) return null
+
+              return (
+                <Box key={cat.key} mb={4}>
+                  <HStack justify="space-between" align="baseline" mb={2}>
+                    <Text fontSize="12px" fontWeight="700" color={T.textSecondary}>
+                      {cat.label}
+                    </Text>
+                    <Text fontSize="10px" color={T.textMuted} fontFamily="'Fira Code', monospace">
+                      n={cat.count}
+                    </Text>
+                  </HStack>
+                  {presentSubs.map(sub => {
+                    const scoreKey = `t5_${cat.key}_${sub}`
+                    const val = scores[scoreKey] ?? 0
+                    const baseVal = baseScores[scoreKey]
+                    const delta = baseVal != null && typeof baseVal === 'number'
+                      ? Math.round((val - baseVal) * 100)
+                      : null
+                    return (
+                      <MetricBar
+                        key={scoreKey}
+                        label={sub.replace(/_/g, ' ')}
+                        value={val}
+                        delta={delta !== 0 ? delta : null}
+                      />
+                    )
+                  })}
+                </Box>
+              )
+            })}
+          </Card>
+        )
+      })()}
 
       {/* History table */}
       {sorted.length > 0 && (

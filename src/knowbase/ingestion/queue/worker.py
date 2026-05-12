@@ -86,6 +86,39 @@ def _restore_burst_state() -> None:
         logger.warning(f"[WORKER:STARTUP] Failed to restore burst state: {e}")
 
 
+def _recover_interrupted_jobs() -> None:
+    """Re-enqueue les jobs ClaimFirst interrompus par un crash/restart.
+
+    Scanne Redis (clés `osmose:ingest:job:*`) pour détecter les jobs en état
+    {pending, processing, post_import, paused} et les re-enqueue dans RQ. Les
+    checkpoints Cypher MERGE assurent l'idempotence : un doc partiellement
+    traité sera repris sans dupliquer ses claims.
+
+    Garde-fous (déjà dans recover_all) :
+    - retries < 3 (anti-loop)
+    - updated_at < 24h (sinon considéré abandonné)
+
+    Non-bloquant : toute erreur (Redis down, recovery bug) est loguée mais ne
+    bloque pas le boot du worker — un crash recovery doit être best-effort.
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        from knowbase.ingestion.resilience.recovery import recover_all
+
+        stats = recover_all(dry_run=False, max_age_hours=24)
+        if stats["n_candidates"] == 0:
+            logger.info("[WORKER:STARTUP] No interrupted jobs to recover")
+            return
+
+        logger.info(
+            f"[WORKER:STARTUP] Recovery: {stats['n_candidates']} candidates, "
+            f"{stats['n_requeued']} re-enqueued, {stats['n_skipped']} skipped, "
+            f"strategies={stats['by_strategy']}"
+        )
+    except Exception as e:
+        logger.warning(f"[WORKER:STARTUP] Failed to recover interrupted jobs: {e}")
+
+
 def warm_clients() -> None:
     """Preload shared heavy clients so all jobs reuse the same instances.
 
@@ -95,6 +128,7 @@ def warm_clients() -> None:
     get_qdrant_client()
     get_sentence_transformer()  # Safe with SimpleWorker (no fork)
     _restore_burst_state()
+    _recover_interrupted_jobs()
 
 
 def run_worker(*, queue_name: str | None = None, with_scheduler: bool = True) -> None:

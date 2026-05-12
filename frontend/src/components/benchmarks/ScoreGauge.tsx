@@ -44,7 +44,7 @@ export function ScoreGauge({ value, label, color = '#5B7FFF', size = 120, target
     g.append('path')
       .datum({ endAngle })
       .attr('d', arc as any)
-      .attr('fill', '#1e1e3a')
+      .style('fill', 'var(--border-default)')
 
     // Value arc (animated)
     const valueAngle = startAngle + totalAngle * Math.min(value, 1)

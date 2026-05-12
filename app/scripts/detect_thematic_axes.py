@@ -77,11 +77,61 @@ def load_perspective_embeddings(driver, tenant_id: str) -> list[dict]:
     return perspectives
 
 
-def cluster_themes(perspectives: list[dict], n_themes: int) -> list[ThematicAxis]:
+def auto_select_k_themes(embeddings_norm: np.ndarray, k_min: int = 3, k_max: int = 15) -> int:
+    """Determine le K optimal pour KMeans via silhouette score.
+
+    Essaie K dans [k_min, k_max] borne par n_samples / 3 (eviter clusters
+    de taille 1-2 sans valeur narrative), et garde le K qui maximise le
+    silhouette score (separation/compacite des clusters).
+
+    Tie-break : a score equivalent (delta < 0.005), preferer le K plus eleve
+    pour une vue plus granulaire — sauf si la difference est triviale.
+    """
+    from sklearn.cluster import KMeans
+    from sklearn.metrics import silhouette_score
+
+    n_samples = len(embeddings_norm)
+    k_max_eff = min(k_max, max(k_min, n_samples // 3))
+    if k_max_eff <= k_min:
+        return k_min
+
+    scores: list[tuple[int, float]] = []
+    for k in range(k_min, k_max_eff + 1):
+        try:
+            km = KMeans(n_clusters=k, random_state=42, n_init=10)
+            lbls = km.fit_predict(embeddings_norm)
+            # silhouette necessite >=2 clusters distincts
+            if len(set(lbls)) < 2:
+                continue
+            score = silhouette_score(embeddings_norm, lbls, metric="cosine")
+            scores.append((k, float(score)))
+        except Exception as e:
+            logger.warning(f"  silhouette K={k} failed: {e}")
+
+    if not scores:
+        return k_min
+
+    # Choisir le K avec meilleur score, tie-break = K plus eleve
+    best_score = max(s for _, s in scores)
+    candidates = [k for k, s in scores if abs(s - best_score) < 0.005]
+    chosen = max(candidates)
+
+    logger.info(f"  silhouette scan K={k_min}..{k_max_eff}:")
+    for k, s in scores:
+        marker = " <-- chosen" if k == chosen else ""
+        logger.info(f"    K={k:2d}: score={s:.4f}{marker}")
+    return chosen
+
+
+def cluster_themes(perspectives: list[dict], n_themes) -> list[ThematicAxis]:
     """Clustering KMeans sur les embeddings des Perspectives.
 
-    KMeans est prefere a HDBSCAN ici car on veut un nombre fixe de themes
-    (axes de lecture) plutot qu'une detection de densite.
+    Args:
+        perspectives: liste de {pid, label, claims, embedding}
+        n_themes: int (K fixe) OR "auto"/None (silhouette scan K=3..15)
+
+    KMeans est prefere a HDBSCAN car on veut des clusters denses pour la
+    visualisation atlas, pas une detection avec noise points.
     """
     from sklearn.cluster import KMeans
 
@@ -92,7 +142,14 @@ def cluster_themes(perspectives: list[dict], n_themes: int) -> list[ThematicAxis
     norms[norms == 0] = 1
     embeddings_norm = embeddings / norms
 
-    kmeans = KMeans(n_clusters=n_themes, random_state=42, n_init=10)
+    # Resoudre n_themes
+    if n_themes is None or (isinstance(n_themes, str) and n_themes.lower() == "auto"):
+        n_themes_eff = auto_select_k_themes(embeddings_norm)
+        logger.info(f"  auto-K selected: {n_themes_eff}")
+    else:
+        n_themes_eff = int(n_themes)
+
+    kmeans = KMeans(n_clusters=n_themes_eff, random_state=42, n_init=10)
     labels = kmeans.fit_predict(embeddings_norm)
 
     # Construire les ThematicAxes

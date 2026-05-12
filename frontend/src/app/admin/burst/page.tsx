@@ -43,6 +43,7 @@ import {
 } from '@chakra-ui/react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, useEffect } from 'react'
+import { BurstMetricsWidget } from '@/components/admin/BurstMetricsWidget'
 import {
   FiCloud,
   FiPlay,
@@ -544,6 +545,11 @@ export default function BurstAdminPage() {
           <IconButton aria-label="Refresh" icon={<FiRefreshCw />} size="sm" variant="ghost" onClick={() => refetchStatus()} />
         </HStack>
       </Flex>
+
+      {/* P5.3 — Widget vLLM live (cockpit burst local) */}
+      <Box mb={3}>
+        <BurstMetricsWidget />
+      </Box>
 
       {/* Config Warning */}
       {config && !config.enabled && (

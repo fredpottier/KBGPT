@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "name": "aerospace_compliance",
+  "display_name": "Aerospace Certification & Dual-Use Export Control",
+  "description": "NER for aerospace certification (EASA CS-25, FAR Part 25) and dual-use export control (Regulation 2021/821, predecessor 428/2009, Annex I delegated regulations). Detects certification standards, amendments, regulatory bodies, dual-use items, export control regimes, jurisdictions via GLiNER zero-shot NER with an aerospace + export-control gazetteer.",
+  "classifier_hints": {
+    "context_summary": "This corpus mixes EASA Certification Specifications (CS-25 amendments) and EU dual-use export control regulations (base regulation 2021/821, predecessor 428/2009, and successive delegated acts amending Annex I).",
+    "succession_patterns": "EASA CS-25 documents are issued as numbered Amendments (CS-25 Amendment N). Each Amendment is published via an ED Decision and accumulates changes from prior amendments. The relationship between two AMC/CS claims drawn from different Amendments is typically: REAFFIRMS when text is byte-identical (the rule is carried forward unchanged); EVOLVES_FROM when the substance is preserved but wording is refined or a sub-paragraph is added; SUPERSEDES when the newer Amendment explicitly replaces the older rule with a different threshold, scope, or obligation. EU dual-use regulations follow a similar pattern: a successor base regulation (e.g. 2021/821) repeals a predecessor (e.g. 428/2009) explicitly via a repeal clause, establishing SUPERSEDES at the document level. Delegated acts that amend Annex I of a base regulation are EVOLVES_FROM relative to the base, not SUPERSEDES (they refine the base, they do not replace it).",
+    "graduated_schemes_warning": "Aerospace and export-control texts use graduated category schemes extensively (severity tiers like minor/major/hazardous/catastrophic in CS-25 §1309; ETOPS time categories 60min/120min/180min/207min; export-control list categories like 6A005.a.1 vs 6A005.a.6; control list entry numbering with letters and digits). Different categorical entries within such a graduated scheme define INDEPENDENT applicability rules and must NOT be classified as CONFLICT. Prefer OVERLAP or DISJOINT for distinct entries.",
+    "enumerated_entries_warning": "EU export-control Annex I entries (3A001, 3A225, 6A005, 9A610...) are individually-numbered control items. Two claims describing different control list entries — even if syntactically similar — describe distinct items. They are not in conflict; they are DISJOINT.",
+    "repeal_evidence": "When a claim contains explicit textual evidence of repeal (verbatim phrases such as 'is repealed', 'is hereby repealed', 'shall be repealed', 'ceases to apply', 'is replaced by') paired with an identifier of the older document, this constitutes a SUPERSEDES signal between the new document (where the claim resides) and the older document being repealed. The matching counterpart claim in the older document is the one establishing its own scope and applicability.",
+    "lifecycle_extraction": "EU regulatory texts (regulations, directives, delegated acts) typically declare lifecycle relationships in two locations: (1) the recitals or preamble at the beginning of the document, where the legislator explains the legislative context including which prior acts the new act builds upon or replaces; (2) the final dispositions at the end of the document, where explicit clauses such as 'This Regulation repeals Regulation X', 'Article Y is amended as follows', or 'This Decision shall apply from DATE' formally establish succession. EASA Certification Specifications (CS-25 amendments) state evolution relationships less formally: the cover page and ED Decision often state which prior amendment is superseded, while individual rule changes are described in the Notice of Proposed Amendment (NPA) preamble. When extracting, prefer the explicit final-disposition clauses over recital language because they carry binding legal effect; recital language describes intent but may be paraphrased. Always extract the verbatim quote — even if the wording is repetitive across regulatory texts."
+  },
+  "version": "1.0.0",
+  "author": "OSMOSE",
+  "min_core_version": "2.0.0",
+  "container": {
+    "port": 9103,
+    "health_endpoint": "/health",
+    "extract_endpoint": "/extract",
+    "memory_limit": "1g",
+    "build_args": {}
+  },
+  "provides": {
+    "entity_types": [
+      "REGULATION",
+      "CERTIFICATION_STANDARD",
+      "AMENDMENT",
+      "ARTICLE_REFERENCE",
+      "AIRCRAFT_COMPONENT",
+      "DUAL_USE_ITEM",
+      "REGULATORY_BODY",
+      "EXPORT_CONTROL_REGIME",
+      "JURISDICTION",
+      "INTERNATIONAL_AGREEMENT"
+    ],
+    "ner_model": "urchade/gliner_medium-v2.1",
+    "ner_model_size_mb": 209
+  }
+}

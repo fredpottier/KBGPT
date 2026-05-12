@@ -14,8 +14,9 @@ task_models:
   metadata: "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
   # Résumés de textes longs (>10k tokens)
-  # DeepInfra Qwen3-235B : MoE 235B, $0.071/$0.10 per M tokens — meilleur rapport qualite/prix
-  long_summary: "Qwen/Qwen3-235B-A22B-Instruct-2507"
+  # DeepInfra DeepSeek-V4-Pro : flagship 2026, $1.74/$3.48 per M tokens, 1M context, niveau Sonnet 4
+  # Précédent défaut Qwen3-235B-A22B-Instruct-2507 ($0.071/$0.10) — basculer si on veut économique
+  long_summary: "deepseek-ai/DeepSeek-V4-Pro"
 
   # Enrichissement de contenu court (table summaries, slot enrichment)
   # Migré du Qwen3-14B vers Qwen3-235B (moins cher de -41%/-58% in/out, context 6x plus grand)
@@ -114,6 +115,8 @@ providers:
     api_key_env: "DEEPINFRA_API_KEY"
     base_url: "https://api.deepinfra.com/v1/openai"
     models:
+      - "deepseek-ai/DeepSeek-V4-Pro"             # Flagship 2026 — $1.74 in / $3.48 out, 1M ctx, niveau Sonnet 4
+      - "Qwen/Qwen3-Max"                          # Flagship Qwen 2026 — $1.20 in / $6.00 out, 250k ctx
       - "Qwen/Qwen3-235B-A22B-Instruct-2507"    # MoE 235B — $0.071 in / $0.10 out
       - "Qwen/Qwen3-32B"                          # Dense 32B — $0.08 in / $0.28 out
       - "Qwen/Qwen3.5-27B"                        # Dense 27B — $0.195 in / $0.90 out

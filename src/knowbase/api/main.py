@@ -13,9 +13,11 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics, markers, claimfirst, verify, gpu, backup, wiki, kg_hygiene, domain_packs, post_import, corpus_intelligence, atlas, kg_health
-# Pipeline V2 - Stratified Reading Model
-from knowbase.stratified.api import router as stratified_v2_router
+from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics, markers, claimfirst, verify, gpu, backup, wiki, kg_hygiene, domain_packs, post_import, corpus_intelligence, atlas, kg_health, relations_explorer, runtime_v2, runtime_v3, runtime_v4, runtime_v4_poc, runtime_v4_2
+# Pipeline Stratified V2 — DEPRECATED 2026-05-01 (cf project_dispatcher_docs_in_stale.md).
+# Le pipeline productif est ClaimFirst. Stratified V2 produisait concepts=0/osmose_s=0
+# systématiquement. Router non inclus mais le code reste (utilities pass0/pass1 utilisées par ClaimFirst).
+# from knowbase.stratified.api import router as stratified_v2_router
 # MVP V1 - Challenge de Texte (Usage B)
 from knowbase.api.routers import challenge as challenge_router
 # living_ontology désactivé - génère trop de bruit en mode domain-agnostic (voir OSMOSE_STATUS_ACTUEL.md)
@@ -253,6 +255,13 @@ def create_app() -> FastAPI:
     app.include_router(markers.router, prefix="/api")  # 🏷️ Markers API - Liste markers pour diff queries (PR3)
     app.include_router(corpus_intelligence.router, prefix="/api")  # 🧠 Corpus Intelligence - Heatmap, Bubble, Audit, Contradictions
     app.include_router(kg_health.router, prefix="/api")  # 🩺 KG Health Score - Diagnostic intrinseque qualite du graphe
+    app.include_router(relations_explorer.router, prefix="/api")  # 🔗 Relations Explorer V3.3 - Mini-runtime LOGICAL_RELATION (S3.E)
+    # Runtime V1.1 supprimé 30/04/2026 (P1) — voir runtime_v2 ci-dessous
+    app.include_router(runtime_v2.router, prefix="/api")  # 🌟 Runtime V2 — Pipeline anchor-driven (Vision recentrée 30/04/2026)
+    app.include_router(runtime_v3.router, prefix="/api")  # 🌟 Runtime V3 — Refonte minimaliste 5 stages (CH-39, 2026-05-05)
+    app.include_router(runtime_v4.router, prefix="/api")  # 🌟 Runtime V4 — Pipeline Facts-First (CH-41 + CH-42 leviers, 2026-05-07)
+    app.include_router(runtime_v4_poc.router, prefix="/api")  # 🧪 Runtime V4 POC — Tiered Architecture (CH-49.POC, 2026-05-09)
+    app.include_router(runtime_v4_2.router, prefix="/api")  # 🌟 Runtime V4.2 — Tiered Pipeline production (CH-49 Phase 1, 2026-05-10)
 
     # 🖥️ OSMOSE GPU Infrastructure - Health check & restart services EC2
     app.include_router(gpu.router)  # Endpoints: /api/gpu/health, /api/gpu/restart-service
@@ -260,8 +269,9 @@ def create_app() -> FastAPI:
     # 🔥 OSMOSE Pipeline Claim-First (Pivot Épistémique)
     app.include_router(claimfirst.router)  # Endpoints: /api/claimfirst/status, /api/claimfirst/jobs, etc.
 
-    # 🌊 OSMOSE Pipeline V2 - Stratified Reading Model (Phase 2)
-    app.include_router(stratified_v2_router, prefix="/api")  # Endpoints: /api/v2/ingest, /api/v2/enrich, etc.
+    # 🌊 Stratified V2 router DÉPRECATED 2026-05-01 — endpoints retournent 404.
+    # Voir project_dispatcher_docs_in_stale.md. Pipeline productif = ClaimFirst.
+    # app.include_router(stratified_v2_router, prefix="/api")
 
     # 🌊 OSMOSE MVP V1 - Challenge de Texte (Usage B)
     app.include_router(challenge_router.router)  # Endpoint: /api/v2/challenge

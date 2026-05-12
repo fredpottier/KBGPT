@@ -57,24 +57,56 @@ class AtlasArticle(BaseModel):
 class AtlasRoot(BaseModel):
     root_id: str
     name: str
+    description: str = ""
     topics: List[AtlasTopic] = []
     claim_count: int = 0
 
 
-class AtlasTheme(BaseModel):
-    label: str
+class AtlasDomain(BaseModel):
+    """Niveau hiérarchique au-dessus des AtlasRoots (Domain → Root → Topic)."""
+    domain_id: str
+    name: str
+    description: str = ""
     claim_count: int = 0
+    roots: List[AtlasRoot] = []
+
+
+class AtlasTheme(BaseModel):
+    theme_id: str = ""
+    label: str
+    description: str = ""
+    claim_count: int = 0
+    topic_count: int = 0
     topic_ids: List[str] = []
     topic_labels: List[str] = []
 
 
 class AtlasHomepage(BaseModel):
     introduction: str = ""
-    roots: List[AtlasRoot] = []
+    domains: List[AtlasDomain] = []
+    roots: List[AtlasRoot] = []  # Conservé pour rétrocompat (vue plate)
     themes: List[AtlasTheme] = []
     total_docs: int = 0
     total_claims: int = 0
     total_topics: int = 0
+
+
+class AtlasThemePerspective(BaseModel):
+    perspective_id: str
+    label: str
+    claim_count: int = 0
+    parent_topic_id: str = ""
+    parent_topic_label: str = ""
+
+
+class AtlasThemeDetail(BaseModel):
+    theme_id: str
+    label: str
+    description: str = ""
+    claim_count: int = 0
+    topic_count: int = 0
+    related_topics: List[AtlasTopic] = []
+    perspectives: List[AtlasThemePerspective] = []
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -86,6 +118,69 @@ def _get_driver():
 
 def _get_tenant():
     return "default"
+
+
+# ── P5.2 — POC Atlas narratif from Perspectives ──────────────────────────────
+
+
+class PerspectiveTopic(BaseModel):
+    """POC P5.2 : représente une Perspective V2 comme topic narratif Atlas."""
+
+    perspective_id: str
+    label: str
+    description: str = ""
+    subjects: List[str] = []
+    facets: List[str] = []
+    keywords: List[str] = []
+    claim_count: int = 0
+    doc_count: int = 0
+    importance_score: float = 0.0
+
+
+@router.get("/perspective_topics", response_model=List[PerspectiveTopic])
+async def list_perspective_topics(limit: int = 100):
+    """POC P5.2 — Atlas narratif basé sur les Perspectives V2 existantes.
+
+    Au lieu de générer des nodes AtlasHomepage/AtlasRoot/NarrativeTopic via un
+    pipeline complet (1-2 sem), on expose les Perspectives V2 (60 nodes Neo4j)
+    comme "topics narratifs" du POC Atlas. Tri par importance_score décroissant.
+
+    Limite : pas de structure hiérarchique (roots/themes), pas de contenu prose
+    rédigé. À enrichir avec un pipeline génération en sessions dédiées.
+    """
+    driver = _get_driver()
+    tenant = _get_tenant()
+    cypher = """
+    MATCH (p:Perspective)
+    WHERE p.tenant_id = $tenant
+    RETURN p.perspective_id AS perspective_id,
+           coalesce(p.label, '') AS label,
+           coalesce(p.description, '') AS description,
+           coalesce(p.linked_subject_names, []) AS subjects,
+           coalesce(p.dominant_facet_names, []) AS facets,
+           coalesce(p.keywords, []) AS keywords,
+           coalesce(p.claim_count, 0) AS claim_count,
+           coalesce(p.doc_count, 0) AS doc_count,
+           coalesce(p.importance_score, 0.0) AS importance_score
+    ORDER BY p.importance_score DESC
+    LIMIT $limit
+    """
+    with driver.session() as session:
+        rows = session.run(cypher, tenant=tenant, limit=limit).data()
+    return [
+        PerspectiveTopic(
+            perspective_id=row["perspective_id"],
+            label=row["label"],
+            description=row["description"],
+            subjects=(row["subjects"] or [])[:10],
+            facets=(row["facets"] or [])[:5],
+            keywords=(row["keywords"] or [])[:10],
+            claim_count=int(row["claim_count"]),
+            doc_count=int(row["doc_count"]),
+            importance_score=float(row["importance_score"]),
+        )
+        for row in rows
+    ]
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -112,7 +207,9 @@ async def get_homepage():
         result = session.run("""
             MATCH (ar:AtlasRoot {tenant_id: $tenant})
             OPTIONAL MATCH (ar)-[hc:HAS_CHAPTER]->(nt:NarrativeTopic)
-            RETURN ar.root_id AS rid, ar.canonical_name AS name, ar.claim_count AS claims,
+            RETURN ar.root_id AS rid, ar.canonical_name AS name,
+                   coalesce(ar.description, '') AS description,
+                   ar.claim_count AS claims,
                    collect({
                        topic_id: nt.topic_id, title: nt.narrative_label,
                        summary: nt.executive_summary, claims: nt.claim_count,
@@ -137,7 +234,32 @@ async def get_homepage():
             root_topics.sort(key=lambda t: t.reading_order)
             homepage.roots.append(AtlasRoot(
                 root_id=rec["rid"], name=rec["name"],
+                description=rec.get("description") or "",
                 topics=root_topics, claim_count=rec["claims"] or 0,
+            ))
+
+        # Domains — niveau hiérarchique au-dessus des Roots (Domain → Root → Topic).
+        # Si aucun AtlasDomain n'est persisté, homepage.domains reste vide et le
+        # frontend retombe sur la vue plate homepage.roots.
+        roots_by_id = {r.root_id: r for r in homepage.roots}
+        domain_rows = session.run("""
+            MATCH (d:AtlasDomain {tenant_id: $tenant})
+            OPTIONAL MATCH (d)-[:CONTAINS_ROOT]->(ar:AtlasRoot)
+            WITH d, collect(ar.root_id) AS root_ids
+            RETURN d.domain_id AS did, d.name AS name,
+                   coalesce(d.description, '') AS description,
+                   coalesce(d.claim_count, 0) AS claims,
+                   root_ids
+            ORDER BY d.claim_count DESC
+        """, tenant=tenant)
+        for rec in domain_rows:
+            dom_roots = [roots_by_id[rid] for rid in (rec["root_ids"] or []) if rid in roots_by_id]
+            homepage.domains.append(AtlasDomain(
+                domain_id=rec["did"] or "",
+                name=rec["name"] or "",
+                description=rec["description"] or "",
+                claim_count=rec["claims"] or 0,
+                roots=dom_roots,
             ))
 
         # Stats
@@ -151,25 +273,48 @@ async def get_homepage():
             tenant=tenant,
         ).single()["cnt"]
 
-    # Themes (from Perspective embeddings — cached or computed)
-    try:
-        # Quick theme detection if available
-        from knowbase.perspectives.orchestrator import _get_neo4j_driver
-        import sys
-        sys.path.insert(0, "/app")
-        from scripts.detect_thematic_axes import load_perspective_embeddings, cluster_themes, label_axes_llm
-
-        perspectives = load_perspective_embeddings(driver, tenant)
-        axes = cluster_themes(perspectives, min(8, len(perspectives) // 3))
-        label_axes_llm(axes, skip_llm=True)  # fast fallback labels
-
-        for ax in axes:
+    # Themes — lis les AtlasTheme persistes (genere par generate_atlas_content.py --enrich-metadata)
+    with driver.session() as session:
+        result = session.run("""
+            MATCH (t:AtlasTheme {tenant_id: $tenant})
+            RETURN t.theme_id AS tid, t.label AS label,
+                   coalesce(t.description, '') AS description,
+                   coalesce(t.claim_count, 0) AS claims,
+                   coalesce(t.topic_coverage, 0) AS topic_count,
+                   coalesce(t.topic_ids, []) AS topic_ids,
+                   coalesce(t.perspective_labels, []) AS persp_labels
+            ORDER BY t.claim_count DESC
+        """, tenant=tenant)
+        for rec in result:
             homepage.themes.append(AtlasTheme(
-                label=ax.label, claim_count=ax.claim_count,
-                topic_ids=[], topic_labels=ax.perspective_labels[:5],
+                theme_id=rec["tid"] or "",
+                label=rec["label"] or "",
+                description=rec["description"] or "",
+                claim_count=rec["claims"] or 0,
+                topic_count=rec["topic_count"] or 0,
+                topic_ids=list(rec["topic_ids"] or []),
+                topic_labels=list(rec["persp_labels"] or [])[:5],
             ))
-    except Exception as e:
-        logger.debug(f"[ATLAS] Theme detection failed: {e}")
+
+    # Fallback : si aucun AtlasTheme persiste, fait un quick clustering avec labels concatenes
+    if not homepage.themes:
+        try:
+            import sys
+            sys.path.insert(0, "/app")
+            from scripts.detect_thematic_axes import load_perspective_embeddings, cluster_themes, label_axes_llm
+
+            perspectives = load_perspective_embeddings(driver, tenant)
+            axes = cluster_themes(perspectives, min(8, max(2, len(perspectives) // 3)))
+            label_axes_llm(axes, skip_llm=True)
+
+            for ax in axes:
+                homepage.themes.append(AtlasTheme(
+                    theme_id=ax.axis_id, label=ax.label,
+                    claim_count=ax.claim_count,
+                    topic_labels=ax.perspective_labels[:5],
+                ))
+        except Exception as e:
+            logger.debug(f"[ATLAS] Theme fallback failed: {e}")
 
     return homepage
 
@@ -264,3 +409,83 @@ async def get_article(topic_id: str):
             })
 
     return article
+
+
+@router.get("/theme/{theme_id}", response_model=AtlasThemeDetail)
+async def get_theme_detail(theme_id: str):
+    """Detail d'un AtlasTheme : description, NarrativeTopics relies, Perspectives membres."""
+    driver = _get_driver()
+    tenant = _get_tenant()
+
+    with driver.session() as session:
+        # Theme metadata
+        rec = session.run("""
+            MATCH (t:AtlasTheme {theme_id: $tid, tenant_id: $tenant})
+            RETURN t.label AS label,
+                   coalesce(t.description, '') AS description,
+                   coalesce(t.claim_count, 0) AS claims,
+                   coalesce(t.topic_coverage, 0) AS topic_count,
+                   coalesce(t.topic_ids, []) AS topic_ids
+        """, tid=theme_id, tenant=tenant).single()
+
+        if not rec:
+            return AtlasThemeDetail(theme_id=theme_id, label="Theme introuvable")
+
+        detail = AtlasThemeDetail(
+            theme_id=theme_id,
+            label=rec["label"] or "",
+            description=rec["description"] or "",
+            claim_count=rec["claims"] or 0,
+            topic_count=rec["topic_count"] or 0,
+        )
+
+        # NarrativeTopics qui contiennent au moins une Perspective de ce thème
+        topic_rows = session.run("""
+            MATCH (t:AtlasTheme {theme_id: $tid, tenant_id: $tenant})-[:GROUPS_PERSPECTIVE]->(p:Perspective)
+                  <-[:INCLUDES_PERSPECTIVE]-(nt:NarrativeTopic {tenant_id: $tenant})
+            OPTIONAL MATCH (ar:AtlasRoot)-[hc:HAS_CHAPTER]->(nt)
+            WITH nt, ar, hc, count(DISTINCT p) AS shared_persp_count
+            RETURN nt.topic_id AS topic_id,
+                   nt.narrative_label AS title,
+                   coalesce(nt.executive_summary, '') AS summary,
+                   coalesce(nt.subject_names, []) AS subjects,
+                   coalesce(nt.claim_count, 0) AS claims,
+                   coalesce(nt.perspective_count, 0) AS persp_count,
+                   coalesce(hc.reading_order, 0) AS reading_order,
+                   coalesce(ar.canonical_name, '') AS root_name,
+                   shared_persp_count
+            ORDER BY shared_persp_count DESC, claims DESC
+        """, tid=theme_id, tenant=tenant)
+        for r in topic_rows:
+            detail.related_topics.append(AtlasTopic(
+                topic_id=r["topic_id"],
+                title=r["title"] or "",
+                executive_summary=r["summary"] or "",
+                subjects=list(r["subjects"] or []),
+                claim_count=r["claims"] or 0,
+                perspective_count=r["persp_count"] or 0,
+                reading_order=r["reading_order"] or 0,
+                atlas_root=r["root_name"] or "",
+            ))
+
+        # Perspectives membres
+        persp_rows = session.run("""
+            MATCH (t:AtlasTheme {theme_id: $tid, tenant_id: $tenant})-[:GROUPS_PERSPECTIVE]->(p:Perspective)
+            OPTIONAL MATCH (nt:NarrativeTopic {tenant_id: $tenant})-[:INCLUDES_PERSPECTIVE]->(p)
+            RETURN p.perspective_id AS pid,
+                   coalesce(p.label, '') AS label,
+                   coalesce(p.claim_count, 0) AS claims,
+                   coalesce(nt.topic_id, '') AS parent_topic_id,
+                   coalesce(nt.narrative_label, '') AS parent_topic_label
+            ORDER BY p.claim_count DESC
+        """, tid=theme_id, tenant=tenant)
+        for r in persp_rows:
+            detail.perspectives.append(AtlasThemePerspective(
+                perspective_id=r["pid"],
+                label=r["label"] or "",
+                claim_count=r["claims"] or 0,
+                parent_topic_id=r["parent_topic_id"] or "",
+                parent_topic_label=r["parent_topic_label"] or "",
+            ))
+
+    return detail

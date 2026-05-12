@@ -1,0 +1,85 @@
+# OSMOSIS Response Modes — Thresholds calibrables par corpus
+#
+# Tous les seuils utilisés par signal_policy.py pour décider du response mode
+# (DIRECT / AUGMENTED / TENSION / STRUCTURED_FACT / PERSPECTIVE).
+#
+# Defaults : valeurs calibrées empiriquement sur le corpus aerospace_compliance
+# (commit 8632371 — réactivation AUGMENTED 2026-05-01). Sur un autre corpus
+# (médical, juridique, IT, etc.), ces seuils peuvent nécessiter recalibration
+# (cf. CH-04.2 Calibration auto + CH-04.4 Dashboard observabilité).
+#
+# Override possible via :
+#   - tenant_overrides (clé tenant_id) — pour multi-tenant
+#   - tenant_settings Postgres (CH-11 admin UI) — pour live editing
+#   - variables d'env legacy (`MODE_AUGMENTED_ENABLED`, `OSMOSIS_RESPONSE_MODES`)
+#     conservées pour rétrocompatibilité (non listées ici)
+
+global:
+  # Limite tokens KG injectés dans le prompt synthèse (leçon Sprint 0 test v2)
+  max_kg_injection_tokens: 150
+
+# ── Étage A : seuils de déclenchement candidat ─────────────────────────────
+# La QUESTION (via mode_classifier) propose un mode candidat si ces seuils
+# sont franchis sur les signaux KG. DIRECT par défaut sinon.
+stage_a_triggers:
+  tension:
+    min_strength: 0.6
+    min_texts: 3
+  structured_fact:
+    min_strength: 0.5  # exactness signal
+  augmented:
+    min_new_docs: 3    # docs distincts dans claims KG mais hors RAG retrieval
+
+# ── Étage B : gates de qualité (autoriser ou fallback DIRECT) ───────────────
+# Une fois le mode candidat fixé, on valide qu'il y a assez de preuves.
+stage_b_gates:
+  tension:
+    min_distinct_docs: 2       # docs distincts impliqués dans la tension
+    min_kg_trust: 0.4          # kg_trust score (4-facteurs : doc/bridge/overlap/specificity)
+  structured_fact:
+    min_comparable_facts: 2    # axes QS comparables cross-doc
+    min_kg_trust: 0.5
+  augmented:
+    min_new_docs: 3            # cohérent avec trigger Étage A
+    min_kg_trust: 0.5          # anti-permissif (pas 0.3 — éviter docs faiblement liés)
+
+# ── Étage B' : KG Override DIRECT → TENSION (forcer tension si forte preuve)
+# Le KG ne doit pas enrichir une réponse simple. Il doit empêcher qu'elle soit
+# fausse si une contradiction forte existe avec doc(s) absent(s) du RAG.
+stage_b_override:
+  direct_to_tension:
+    min_confidence: 0.85       # tension.strength minimum pour override
+
+# ── Stop-list pour tension paired evidence ─────────────────────────────────
+# Entités trop génériques qui matchent presque tout claim → ne servent pas
+# à valider que 2 claims partagent une entité spécifique.
+# CORPUS-SPECIFIC : à recalibrer pour chaque corpus (ex: médical → "patient"
+# n'est pas spécifique, juridique → "law" n'est pas spécifique, etc.).
+generic_entities:
+  - "sap"
+  - "sap s/4hana"
+  - "s/4hana"
+  - "sap s/4hana cloud"
+  - "sap s/4hana cloud private edition"
+  - "sap cloud erp"
+  - "abap"
+  - "abap platform"
+  - "fiori"
+  - "sap fiori"
+  - "hana"
+  - "sap hana"
+
+# ── Tenant-specific overrides (optionnel) ──────────────────────────────────
+# Permet d'avoir des seuils différents par tenant. Le tenant lookup se fait
+# via TENANT_ID env var au load. Si un tenant n'a pas d'override, defaults
+# globaux ci-dessus s'appliquent.
+tenant_overrides:
+  # Exemple — décommenter pour activer :
+  # default:
+  #   stage_a_triggers:
+  #     augmented:
+  #       min_new_docs: 2  # corpus moins dense → seuil plus bas
+  #   generic_entities:
+  #     - "patient"
+  #     - "doctor"
+  pass: ~

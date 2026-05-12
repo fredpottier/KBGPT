@@ -24,18 +24,32 @@ interface AtlasTopic {
 interface AtlasRoot {
   root_id: string
   name: string
+  description: string
   topics: AtlasTopic[]
   claim_count: number
 }
 
-interface AtlasTheme {
-  label: string
+interface AtlasDomain {
+  domain_id: string
+  name: string
+  description: string
   claim_count: number
+  roots: AtlasRoot[]
+}
+
+interface AtlasTheme {
+  theme_id: string
+  label: string
+  description: string
+  claim_count: number
+  topic_count: number
+  topic_ids: string[]
   topic_labels: string[]
 }
 
 interface AtlasHomepage {
   introduction: string
+  domains: AtlasDomain[]
   roots: AtlasRoot[]
   themes: AtlasTheme[]
   total_docs: number
@@ -114,15 +128,46 @@ export default function AtlasPage() {
             </Badge>
           </HStack>
 
-          {/* Introduction */}
-          {data.introduction && (
-            <Text
-              color="var(--fg-secondary)" fontSize="md" maxW="800px"
-              lineHeight="1.7" px={4} textAlign="left"
-            >
-              {data.introduction}
-            </Text>
-          )}
+          {/* Introduction structurée — paragraphes hiérarchisés */}
+          {data.introduction && (() => {
+            const paragraphs = data.introduction.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
+            const isReaderGuide = (p: string) => /^Si vous (d[ée]couvrez|connaissez)/i.test(p)
+            const isVolume = (p: string) => /^\s*\d+\s+(textes?|documents?)\s+analys/i.test(p)
+            return (
+              <VStack maxW="800px" spacing={4} align="stretch" px={4} w="full">
+                {paragraphs.map((p, i) => {
+                  if (isVolume(p)) {
+                    return (
+                      <Text key={i} color="var(--fg-muted)" fontSize="sm" fontStyle="italic" textAlign="center" mt={2}>
+                        {p}
+                      </Text>
+                    )
+                  }
+                  if (isReaderGuide(p)) {
+                    return (
+                      <Box
+                        key={i}
+                        bg="var(--bg-surface-alt)"
+                        borderLeftWidth="3px"
+                        borderLeftColor="var(--accent)"
+                        rounded="md"
+                        px={4} py={3}
+                      >
+                        <Text color="var(--fg-secondary)" fontSize="md" lineHeight="1.65">
+                          {p}
+                        </Text>
+                      </Box>
+                    )
+                  }
+                  return (
+                    <Text key={i} color="var(--fg-secondary)" fontSize="md" lineHeight="1.7" textAlign="left">
+                      {p}
+                    </Text>
+                  )
+                })}
+              </VStack>
+            )
+          })()}
         </VStack>
 
         <Divider borderColor="var(--border-default)" mb={8} />
@@ -134,74 +179,180 @@ export default function AtlasPage() {
               _selected={{ bg: 'rgba(99,102,241,0.15)', color: 'var(--accent)' }}
               color="var(--fg-secondary)" fontWeight="600"
             >
-              <HStack spacing={2}><Icon as={FiLayers} /><Text>Par produit</Text></HStack>
+              <HStack spacing={2}><Icon as={FiLayers} /><Text>Par dossier</Text></HStack>
             </Tab>
             <Tab
               _selected={{ bg: 'rgba(16,185,129,0.15)', color: '#10B981' }}
               color="var(--fg-secondary)" fontWeight="600"
             >
-              <HStack spacing={2}><Icon as={FiGrid} /><Text>Par theme</Text></HStack>
+              <HStack spacing={2}><Icon as={FiGrid} /><Text>Par thème</Text></HStack>
             </Tab>
           </TabList>
 
           <TabPanels>
-            {/* Tab 1: Par Produit */}
+            {/* Tab 1: Par Dossier (avec hiérarchie Domain > Dossier > Chapitre si domains présents) */}
             <TabPanel px={0}>
-              <VStack spacing={8} align="stretch">
-                {data.roots.map(root => (
-                  <Box key={root.root_id}>
-                    <HStack mb={4} spacing={3}>
-                      <Heading size="md" color="var(--fg-primary)">
-                        {root.name}
-                      </Heading>
-                      <Badge colorScheme="purple" variant="subtle" fontSize="xs">
-                        {root.claim_count.toLocaleString()} claims
-                      </Badge>
-                    </HStack>
-                    <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                      {root.topics.map(topic => (
-                        <TopicCard key={topic.topic_id} topic={topic} />
-                      ))}
-                    </SimpleGrid>
-                  </Box>
-                ))}
+              <VStack spacing={12} align="stretch">
+                {data.domains && data.domains.length > 0 ? (
+                  // Vue hiérarchique : Domain > Dossier > Chapitre
+                  data.domains.map(domain => (
+                    <Box key={domain.domain_id}>
+                      <Box mb={6} pb={4} borderBottomWidth="2px" borderBottomColor="var(--accent)">
+                        <HStack mb={2} spacing={3} flexWrap="wrap">
+                          <Heading size="lg" color="var(--accent)">
+                            {domain.name}
+                          </Heading>
+                          <Badge colorScheme="blue" variant="solid" fontSize="xs">
+                            {domain.claim_count.toLocaleString()} faits
+                          </Badge>
+                          <Badge variant="outline" fontSize="xs" color="var(--fg-muted)">
+                            {domain.roots.length} dossier{domain.roots.length > 1 ? 's' : ''}
+                          </Badge>
+                        </HStack>
+                        {domain.description && (
+                          <Text color="var(--fg-secondary)" fontSize="sm" lineHeight="1.65" maxW="900px">
+                            {domain.description}
+                          </Text>
+                        )}
+                      </Box>
+                      <VStack spacing={10} align="stretch" pl={{ base: 0, md: 4 }}>
+                        {domain.roots.map(root => (
+                          <Box key={root.root_id}>
+                            <HStack mb={2} spacing={3} flexWrap="wrap">
+                              <Heading size="md" color="var(--fg-primary)">
+                                {root.name}
+                              </Heading>
+                              <Badge colorScheme="purple" variant="subtle" fontSize="xs">
+                                {root.claim_count.toLocaleString()} faits
+                              </Badge>
+                              <Badge variant="outline" fontSize="xs" color="var(--fg-muted)">
+                                {root.topics.length} chapitre{root.topics.length > 1 ? 's' : ''}
+                              </Badge>
+                            </HStack>
+                            {root.description && (
+                              <Text color="var(--fg-secondary)" fontSize="sm" lineHeight="1.65" mb={4} maxW="900px">
+                                {root.description}
+                              </Text>
+                            )}
+                            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+                              {root.topics.map((topic, i) => (
+                                <TopicCard
+                                  key={topic.topic_id}
+                                  topic={topic}
+                                  chapterNumber={i + 1}
+                                  totalChapters={root.topics.length}
+                                />
+                              ))}
+                            </SimpleGrid>
+                          </Box>
+                        ))}
+                      </VStack>
+                    </Box>
+                  ))
+                ) : (
+                  // Fallback : vue plate par dossier (rétrocompat si aucun AtlasDomain persisté)
+                  data.roots.map(root => (
+                    <Box key={root.root_id}>
+                      <HStack mb={2} spacing={3} flexWrap="wrap">
+                        <Heading size="md" color="var(--fg-primary)">
+                          {root.name}
+                        </Heading>
+                        <Badge colorScheme="purple" variant="subtle" fontSize="xs">
+                          {root.claim_count.toLocaleString()} faits
+                        </Badge>
+                        <Badge variant="outline" fontSize="xs" color="var(--fg-muted)">
+                          {root.topics.length} chapitre{root.topics.length > 1 ? 's' : ''}
+                        </Badge>
+                      </HStack>
+                      {root.description && (
+                        <Text color="var(--fg-secondary)" fontSize="sm" lineHeight="1.65" mb={4} maxW="900px">
+                          {root.description}
+                        </Text>
+                      )}
+                      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+                        {root.topics.map((topic, i) => (
+                          <TopicCard
+                            key={topic.topic_id}
+                            topic={topic}
+                            chapterNumber={i + 1}
+                            totalChapters={root.topics.length}
+                          />
+                        ))}
+                      </SimpleGrid>
+                    </Box>
+                  ))
+                )}
               </VStack>
             </TabPanel>
 
-            {/* Tab 2: Par Theme */}
+            {/* Tab 2: Par Thème */}
             <TabPanel px={0}>
               <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                {data.themes.map((theme, i) => (
-                  <Box
-                    key={i}
-                    p={5} rounded="xl"
-                    bg="var(--bg-surface)"
-                    borderWidth="1px" borderColor="var(--border-default)"
-                    _hover={{ borderColor: '#10B981', transform: 'translateY(-2px)' }}
-                    transition="all 0.2s"
-                  >
-                    <HStack justify="space-between" mb={3}>
-                      <Heading size="sm" color="var(--fg-primary)">
-                        {theme.label}
-                      </Heading>
-                      <Badge colorScheme="green" variant="subtle" fontSize="xs">
-                        {theme.claim_count} claims
-                      </Badge>
-                    </HStack>
-                    <VStack align="start" spacing={1}>
-                      {theme.topic_labels.slice(0, 3).map((label, j) => (
-                        <Text key={j} fontSize="xs" color="var(--fg-muted)" noOfLines={1}>
-                          {label}
-                        </Text>
-                      ))}
-                      {theme.topic_labels.length > 3 && (
-                        <Text fontSize="xs" color="var(--fg-muted)" fontStyle="italic">
-                          +{theme.topic_labels.length - 3} perspectives
+                {data.themes.map((theme, i) => {
+                  const card = (
+                    <Box
+                      p={5} rounded="xl"
+                      cursor={theme.theme_id ? 'pointer' : 'default'}
+                      bg="var(--bg-surface)"
+                      borderWidth="1px" borderColor="var(--border-default)"
+                      _hover={theme.theme_id ? { borderColor: '#10B981', transform: 'translateY(-2px)', shadow: 'md' } : {}}
+                      transition="all 0.2s"
+                      h="full"
+                    >
+                      <HStack justify="space-between" mb={3} flexWrap="wrap" gap={2}>
+                        <Heading size="sm" color="var(--fg-primary)" flex={1}>
+                          {theme.label}
+                        </Heading>
+                        <HStack spacing={1}>
+                          <Badge colorScheme="green" variant="subtle" fontSize="xs">
+                            {theme.claim_count.toLocaleString()} faits
+                          </Badge>
+                          {theme.topic_count > 0 && (
+                            <Badge variant="outline" fontSize="xs" color="var(--fg-muted)">
+                              {theme.topic_count} chapitre{theme.topic_count > 1 ? 's' : ''}
+                            </Badge>
+                          )}
+                        </HStack>
+                      </HStack>
+                      {theme.description && (
+                        <Text fontSize="sm" color="var(--fg-secondary)" lineHeight="1.6" mb={3}>
+                          {theme.description}
                         </Text>
                       )}
-                    </VStack>
-                  </Box>
-                ))}
+                      {theme.topic_labels.length > 0 && (
+                        <VStack align="start" spacing={1} mt={2}>
+                          <Text fontSize="xs" color="var(--fg-muted)" fontWeight="600" textTransform="uppercase" letterSpacing="wider">
+                            Perspectives membres
+                          </Text>
+                          {theme.topic_labels.slice(0, 3).map((label, j) => (
+                            <Text key={j} fontSize="xs" color="var(--fg-muted)" noOfLines={1}>
+                              • {label}
+                            </Text>
+                          ))}
+                          {theme.topic_labels.length > 3 && (
+                            <Text fontSize="xs" color="var(--fg-muted)" fontStyle="italic">
+                              +{theme.topic_labels.length - 3} autres
+                            </Text>
+                          )}
+                        </VStack>
+                      )}
+                      {theme.theme_id && (
+                        <HStack mt={3} justify="flex-end">
+                          <Text fontSize="xs" color="#10B981" fontWeight="600">
+                            Explorer <Icon as={FiArrowRight} boxSize={3} />
+                          </Text>
+                        </HStack>
+                      )}
+                    </Box>
+                  )
+                  return theme.theme_id ? (
+                    <NextLink key={theme.theme_id} href={`/atlas/theme/${theme.theme_id}`} passHref>
+                      {card}
+                    </NextLink>
+                  ) : (
+                    <Box key={i}>{card}</Box>
+                  )
+                })}
               </SimpleGrid>
             </TabPanel>
           </TabPanels>
@@ -211,7 +362,22 @@ export default function AtlasPage() {
   )
 }
 
-function TopicCard({ topic }: { topic: AtlasTopic }) {
+function TopicCard({
+  topic,
+  chapterNumber,
+  totalChapters,
+}: {
+  topic: AtlasTopic
+  chapterNumber?: number
+  totalChapters?: number
+}) {
+  // Fallback : si title est vide, prendre les 60 premiers caracteres du summary
+  const displayTitle =
+    topic.title?.trim() ||
+    (topic.executive_summary
+      ? topic.executive_summary.split(/[.!?]/)[0].trim().slice(0, 70) + '…'
+      : 'Chapitre sans titre')
+
   return (
     <NextLink href={`/atlas/topic/${topic.topic_id}`} passHref>
       <Box
@@ -220,17 +386,24 @@ function TopicCard({ topic }: { topic: AtlasTopic }) {
         borderWidth="1px" borderColor="var(--border-default)"
         _hover={{ borderColor: 'var(--accent)', transform: 'translateY(-2px)', shadow: 'md' }}
         transition="all 0.2s"
+        h="full"
       >
         <HStack justify="space-between" mb={2}>
-          <Badge colorScheme="blue" variant="subtle" fontSize="xs">
-            {topic.perspective_count}P
-          </Badge>
+          {chapterNumber && totalChapters ? (
+            <Badge colorScheme="purple" variant="subtle" fontSize="xs">
+              Chapitre {chapterNumber}/{totalChapters}
+            </Badge>
+          ) : (
+            <Badge colorScheme="blue" variant="subtle" fontSize="xs">
+              {topic.perspective_count}P
+            </Badge>
+          )}
           <Badge variant="outline" fontSize="xs" color="var(--fg-muted)">
-            {topic.claim_count} claims
+            {topic.claim_count.toLocaleString()} faits
           </Badge>
         </HStack>
         <Heading size="sm" color="var(--fg-primary)" mb={2} noOfLines={2}>
-          {topic.title}
+          {displayTitle}
         </Heading>
         {topic.executive_summary && (
           <Text fontSize="xs" color="var(--fg-secondary)" noOfLines={3} lineHeight="1.5">

@@ -90,6 +90,101 @@ router = APIRouter(prefix="/api/burst", tags=["burst"])
 
 
 # ============================================================================
+# P5.3 — vLLM live metrics (cockpit widget burst local)
+# ============================================================================
+
+class VllmMetricsResponse(BaseModel):
+    """Snapshot métriques vLLM live pour le cockpit widget."""
+    available: bool = Field(..., description="True si vLLM répond")
+    vllm_url: Optional[str] = None
+    model: Optional[str] = None
+    # Throughput
+    prompt_throughput_toks_per_s: float = 0.0
+    generation_throughput_toks_per_s: float = 0.0
+    total_throughput_toks_per_s: float = 0.0
+    # Cache
+    gpu_cache_usage_perc: float = 0.0
+    cpu_cache_usage_perc: float = 0.0
+    gpu_prefix_cache_hit_rate: float = 0.0
+    # Queue
+    num_requests_running: int = 0
+    num_requests_waiting: int = 0
+    num_requests_swapped: int = 0
+    # Diag
+    error: Optional[str] = None
+
+
+@router.get("/vllm_metrics", response_model=VllmMetricsResponse)
+async def get_vllm_metrics() -> VllmMetricsResponse:
+    """Scrape les métriques live vLLM /metrics et expose en JSON pour le cockpit.
+
+    Source : vLLM Prometheus endpoint. URL résolue depuis Redis burst state si
+    disponible, sinon env VLLM_URL, sinon fallback default.
+    """
+    import re as _re
+    import httpx
+
+    # Résoudre URL via Redis burst state
+    vllm_url = None
+    vllm_model = None
+    try:
+        import redis as _redis
+        import json as _json
+        r = _redis.Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, password=os.getenv("REDIS_PASSWORD") or None, decode_responses=True)
+        raw = r.get("osmose:burst:state")
+        if raw:
+            state = _json.loads(raw)
+            if state.get("active"):
+                vllm_url = state.get("vllm_url")
+                vllm_model = state.get("vllm_model")
+    except Exception:
+        pass
+
+    if not vllm_url:
+        vllm_url = os.getenv("VLLM_URL")
+
+    if not vllm_url:
+        return VllmMetricsResponse(available=False, error="No vLLM URL configured (Redis burst state empty + VLLM_URL not set)")
+
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.get(f"{vllm_url.rstrip('/')}/metrics")
+            resp.raise_for_status()
+            text = resp.text
+    except Exception as exc:
+        return VllmMetricsResponse(available=False, vllm_url=vllm_url, error=str(exc))
+
+    # Parser Prometheus text format pour extraire les valeurs
+    def _extract(metric: str) -> float:
+        # Match : "metric_name{labels} VALUE" sur une ligne
+        pattern = _re.compile(rf"^{_re.escape(metric)}(?:\{{[^}}]*\}})?\s+([0-9.eE+-]+)$", _re.MULTILINE)
+        m = pattern.search(text)
+        if m:
+            try:
+                return float(m.group(1))
+            except ValueError:
+                return 0.0
+        return 0.0
+
+    prompt_tps = _extract("vllm:avg_prompt_throughput_toks_per_s")
+    gen_tps = _extract("vllm:avg_generation_throughput_toks_per_s")
+    return VllmMetricsResponse(
+        available=True,
+        vllm_url=vllm_url,
+        model=vllm_model,
+        prompt_throughput_toks_per_s=round(prompt_tps, 2),
+        generation_throughput_toks_per_s=round(gen_tps, 2),
+        total_throughput_toks_per_s=round(prompt_tps + gen_tps, 2),
+        gpu_cache_usage_perc=round(_extract("vllm:gpu_cache_usage_perc") * 100, 2),
+        cpu_cache_usage_perc=round(_extract("vllm:cpu_cache_usage_perc") * 100, 2),
+        gpu_prefix_cache_hit_rate=round(_extract("vllm:gpu_prefix_cache_hit_rate") * 100, 2),
+        num_requests_running=int(_extract("vllm:num_requests_running")),
+        num_requests_waiting=int(_extract("vllm:num_requests_waiting")),
+        num_requests_swapped=int(_extract("vllm:num_requests_swapped")),
+    )
+
+
+# ============================================================================
 # Schemas Pydantic
 # ============================================================================
 

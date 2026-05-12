@@ -7,7 +7,9 @@ Phase 1 - Semaine 4 : APIs REST Documents
 - GET /documents/{id}/versions : Historique complet versions
 - GET /documents/{id}/lineage : Graphe modifications (format D3.js)
 - POST /documents/{id}/versions : Upload nouvelle version
+- GET /documents/source-file : Sert le fichier source par doc_id (CH-05.3)
 """
+import re
 from typing import List, Optional
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +18,7 @@ import tempfile
 import shutil
 
 from fastapi import APIRouter, HTTPException, Query, Depends, UploadFile, File
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from knowbase.api.schemas.documents import (
@@ -238,6 +241,78 @@ async def list_documents(
 
     finally:
         service.close()
+
+
+# ===================================
+# CH-05.3 — Source file by doc_id
+# ===================================
+# IMPORTANT : déclarer cet endpoint AVANT /{document_id} sinon FastAPI matche
+# `source-file` comme un document_id (route catch-all).
+
+# Doc IDs are derived from filenames + a 8-12 char hex hash suffix.
+# Strip the hash to find the on-disk filename.
+# Ex: "cs25_amdt_22_8e69026c" → "cs25_amdt_22.pdf"
+_HASH_SUFFIX_RE = re.compile(r"_[a-f0-9]{6,}$", re.IGNORECASE)
+
+
+def _strip_doc_hash(doc_id: str) -> str:
+    """Retire le suffixe hash hex d'un doc_id pour retrouver le filename source."""
+    return _HASH_SUFFIX_RE.sub("", doc_id)
+
+
+@router.get(
+    "/source-file",
+    summary="Sert le fichier source par doc_id (CH-05.3)",
+    description="""
+    Sert le fichier source d'un doc_id ingéré (lien sources cliquables dans le chat).
+
+    Recherche le fichier dans `data/docs_in/` puis `data/docs_done/` en matchant
+    le stem (filename sans extension) avec le doc_id privé du suffix hash hex.
+
+    Sécurité : path traversal bloqué (validation `resolve()` dans les whitelists).
+    """,
+)
+async def get_source_file_by_doc_id(
+    doc_id: str = Query(..., description="doc_id avec ou sans suffix hash"),
+):
+    """Retourne le fichier source comme FileResponse, ou 404 si introuvable."""
+    settings = get_settings()
+    base_name = _strip_doc_hash(doc_id)
+
+    # Validation : pas de path traversal dans le doc_id
+    if "/" in base_name or "\\" in base_name or ".." in base_name:
+        raise HTTPException(status_code=400, detail="Invalid doc_id")
+
+    candidate_dirs = [settings.docs_in_dir, settings.docs_done_dir]
+    for base_dir in candidate_dirs:
+        if not base_dir.exists():
+            continue
+        for entry in base_dir.iterdir():
+            if not entry.is_file():
+                continue
+            if entry.stem == base_name:
+                # Defense-in-depth : assurer que le fichier reste dans le dossier whitelisté
+                resolved = entry.resolve()
+                base_resolved = base_dir.resolve()
+                try:
+                    resolved.relative_to(base_resolved)
+                except ValueError:
+                    continue
+                # Content-Disposition: inline → le navigateur affiche le doc
+                # plutôt que de le télécharger, ce qui permet à `#page=N` (RFC 3778)
+                # de fonctionner pour le deep-link à une page PDF (CH-05.5).
+                return FileResponse(
+                    path=resolved,
+                    media_type=None,  # auto-detect from extension
+                    headers={
+                        "Content-Disposition": f'inline; filename="{entry.name}"',
+                    },
+                )
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"Source file not found for doc_id={doc_id} (base_name={base_name})",
+    )
 
 
 @router.get(
@@ -775,3 +850,4 @@ async def resolve_episode_to_document(
     finally:
         kg_service.close()
         doc_service.close()
+
