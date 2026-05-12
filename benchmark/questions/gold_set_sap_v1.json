@@ -1,0 +1,909 @@
+[
+  {
+    "id": "GOLD_SAP_Q1_1",
+    "question": "Comment activer le module Embedded Reporting Studio dans S/4HANA Cloud Private Edition 2024 ?",
+    "primary_type": "false_premise",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Il n’existe pas de composant standard SAP officiellement nommé « Embedded Reporting Studio » dans SAP S/4HANA Cloud Private Edition. Les capacités de reporting embarqué reposent principalement sur Embedded Analytics, CDS Views, Fiori analytical apps, Smart Business KPIs et l’intégration SAP Analytics Cloud. L’activation passe généralement par l’activation des business roles Fiori, des services OData, des CDS analytical queries et éventuellement des contenus SAC intégrés.",
+      "exact_identifiers": [
+        "Embedded Analytics",
+        "CDS Views",
+        "Smart Business KPIs",
+        "SAP Analytics Cloud",
+        "OData"
+      ],
+      "supporting_doc_ids": [
+        "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"
+      ],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q1_2",
+    "question": "Quelle est la procédure de migration directe depuis SAP Business One vers S/4HANA Cloud Private Edition ?",
+    "primary_type": "false_premise",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "SAP ne propose pas de procédure standard de system conversion directe depuis SAP Business One vers SAP S/4HANA Cloud Private Edition. Les conversions SUM/DMO concernent SAP ECC et SAP Business Suite. Pour SAP Business One, l’approche recommandée est généralement une nouvelle implémentation (greenfield) avec migration de données via SAP Migration Cockpit, SAP Data Services ou outils partenaires.",
+      "exact_identifiers": [
+        "SUM",
+        "DMO",
+        "greenfield",
+        "Migration Cockpit",
+        "SAP Business One"
+      ],
+      "supporting_doc_ids": [
+        "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+        "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"
+      ],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q1_3",
+    "question": "Comment configurer le multi-tenant strict sur un déploiement S/4HANA Cloud Private Edition ?",
+    "primary_type": "false_premise",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Faux présupposé : S/4HANA Cloud Private Edition est un environnement privé/dédié, pas un SaaS public multi-tenant strict. Le multi-tenant strict correspond davantage à la logique Public Edition.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "Public Edition",
+        "S/4HANA",
+        "HANA",
+        "MM",
+        "PP",
+        "FI",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896",
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"
+      ],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q2_1",
+    "question": "À partir de quelle release SPS le support de HANA 1.0 s'arrête-t-il pour S/4HANA Cloud Private Edition ?",
+    "primary_type": "lifecycle",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "SAP HANA 1.0 est obsolète pour les releases modernes S/4HANA. S/4HANA Cloud Private Edition récentes reposent sur SAP HANA 2.0. Mais avec les sources candidates seules, la réponse exacte “à partir de tel SPS” reste insuffisamment documentée.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "S/4HANA",
+        "HANA",
+        "SPS",
+        "MM",
+        "PP",
+        "FI"
+      ],
+      "supporting_doc_ids": [
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q2_2",
+    "question": "Quelle version de S/4HANA Cloud Private Edition introduit l'obligation de migrer du Classic Asset Accounting vers New Asset Accounting ?",
+    "primary_type": "lifecycle",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "La migration vers New Asset Accounting est un prérequis de conversion S/4HANA lié aux simplification items Finance. Elle ne doit pas être présentée comme une nouveauté spécifique d’une release PCE récente : c’est une exigence structurelle de S/4HANA. Les étapes doivent être validées via SAP Readiness Check, Simplification Item Catalog et les notes Finance associées.",
+      "exact_identifiers": [
+        "Simplification Item Catalog",
+        "Classic Asset Accounting",
+        "Cloud Private Edition",
+        "New Asset Accounting",
+        "Asset Accounting",
+        "Readiness Check",
+        "S/4HANA",
+        "HANA",
+        "PCE",
+        "MM"
+      ],
+      "supporting_doc_ids": [
+        "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q2_3",
+    "question": "À partir de quelle release le Customer/Vendor Master Data classique est-il remplacé par Business Partner obligatoire ?",
+    "primary_type": "lifecycle",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Le modèle Business Partner est obligatoire dès les premières releases S/4HANA, avec Customer/Vendor Integration — CVI. Les clients et fournisseurs sont gérés via des rôles BP ; le BP devient le point d’entrée central.",
+      "exact_identifiers": [
+        "Vendor Master Data",
+        "Vendor Integration",
+        "Business Partner",
+        "S/4HANA",
+        "HANA",
+        "CVI",
+        "BP"
+      ],
+      "supporting_doc_ids": [
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba",
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q3_1",
+    "question": "Pourquoi SAP recommande-t-il ABAP RAP plutôt que CDS View Extensions pour les nouveaux développements custom sur S/4HANA Cloud Private Edition ?",
+    "primary_type": "causal",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "SAP recommande ABAP RAP pour les nouveaux développements car il est plus aligné avec ABAP Cloud, clean core, extensibilité upgrade-stable, services OData, comportements transactionnels, autorisations et intégration Fiori. Les CDS View Extensions restent utiles pour étendre des vues, mais ne constituent pas un modèle applicatif complet.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "View Extensions",
+        "S/4HANA",
+        "Fiori",
+        "OData",
+        "ABAP",
+        "HANA",
+        "RAP",
+        "CDS",
+        "SAC"
+      ],
+      "supporting_doc_ids": [
+        "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q3_2",
+    "question": "Pour quelle raison technique S/4HANA Cloud Private Edition impose-t-il HANA exclusivement (pas de support multi-DB) ?",
+    "primary_type": "causal",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Comme indiqué dans le nom du produit S/4HANA est uniquement prévu pour fonctionner avec HANA et aucune autre database. Il n'est plus possbile, comme avec ECC ou R3 d'utiliser une autre bade de données que SAP HANA",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "S/4HANA",
+        "HANA",
+        "ECC",
+        "MM",
+        "PP",
+        "R3",
+        "DB",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357",
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q3_3",
+    "question": "Pourquoi le Cash Management Classic doit-il être remplacé lors de la conversion vers S/4HANA Cloud Private Edition ?",
+    "primary_type": "causal",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Le Classic Cash Management doit être remplacé car S/4HANA introduit un modèle Finance simplifié et de nouvelles capacités de cash management intégrées à HANA, Fiori et aux données temps réel. C’est typiquement traité via Simplification Item Catalog, Readiness Check et activités de conversion Finance.",
+      "exact_identifiers": [
+        "Simplification Item Catalog",
+        "Cash Management Classic",
+        "Cloud Private Edition",
+        "Readiness Check",
+        "Cash Management",
+        "S/4HANA",
+        "Fiori",
+        "HANA",
+        "FI",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q4_1",
+    "question": "Quelles sont les différences précises de scope fonctionnel entre S/4HANA Cloud Private Edition et S/4HANA Cloud Public Edition ?",
+    "primary_type": "comparison",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Public Edition = SaaS standardisé, scope plus prescriptif, upgrades SAP fréquents, extensibilité plus contrôlée. Private Edition = scope proche on-premise, plus de flexibilité, conversion brownfield possible, custom code plus large, opérations managées SAP. SAP Learning distingue bien RISE/PCE et les scénarios greenfield/brownfield. Mais la liste exhaustive des différences n'est pas précisée.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "Cloud Public Edition",
+        "Private Edition",
+        "Public Edition",
+        "RISE/PCE",
+        "S/4HANA",
+        "HANA",
+        "RISE",
+        "PCE",
+        "FI"
+      ],
+      "supporting_doc_ids": [
+        "SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q4_2",
+    "question": "Compare les modèles d'extensibilité entre S/4HANA Cloud Private Edition et S/4HANA on-premise (in-app, side-by-side BTP, key user extensions) ?",
+    "primary_type": "comparison",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "PCE et on-premise supportent les trois modèles : in-app/key user, on-stack ABAP, side-by-side BTP. La différence est la gouvernance : en PCE, SAP pousse davantage le modèle clean core, ABAP Cloud, APIs stables et tiered extensibility ; en on-premise, le client garde plus de liberté technique, y compris du legacy/custom plus risqué.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "S/4HANA",
+        "ABAP",
+        "HANA",
+        "PCE",
+        "BTP",
+        "PP",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q4_3",
+    "question": "Différences entre RISE with SAP et GROW with SAP appliquées à S/4HANA Cloud Private Edition ?",
+    "primary_type": "comparison",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "GROW with SAP cible SAP S/4HANA Cloud Public Edition tandis que Rise désigne S/4HANA Cloud Private Edition. RISE couvre les scénarios plus complexes, y compris greenfield et brownfield/private edition.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "Cloud Public Edition",
+        "S/4HANA",
+        "GROW",
+        "HANA",
+        "RISE",
+        "PP",
+        "FI",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "SAP Cloud ERP Private and RISE with SAP S_4HANA Cloud, private edition Supplement_3206ecd0",
+        "RISE with SAP S4HANA Cloud private edition tailored option, Cloud ERP, tailored option Service Description Guide_ac99cc3b",
+        "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q5_1",
+    "question": "Quelles fonctionnalités du standard S/4HANA on-premise ne sont PAS disponibles dans S/4HANA Cloud Private Edition ?",
+    "primary_type": "negation",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Il faut être prudent : PCE est fonctionnellement très proche de S/4HANA on-premise. Les écarts portent surtout sur le modèle opérationnel, l’accès infra, certains composants legacy, add-ons non certifiés, restrictions cloud et services non inclus/licenciés séparément. Ne pas inventer une liste fonctionnelle sans Feature Scope Description détaillée.",
+      "exact_identifiers": [
+        "Feature Scope Description",
+        "Cloud Private Edition",
+        "S/4HANA",
+        "HANA",
+        "PCE",
+        "PAS",
+        "FI",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q5_2",
+    "question": "Quels modules ne sont jamais inclus dans le scope standard de S/4HANA Cloud Private Edition (nécessitent un addon séparé) ?",
+    "primary_type": "negation",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Exemples à citer prudemment : SAP Analytics Cloud, SAP Digital Manufacturing, certaines modular cloud LoB solutions, solutions sectorielles ou add-ons certifiés. Le mot “jamais” est dangereux : il faut vérifier le contrat, le SKU et le Feature Scope Description.",
+      "exact_identifiers": [
+        "Feature Scope Description",
+        "Cloud Private Edition",
+        "Digital Manufacturing",
+        "Analytics Cloud",
+        "S/4HANA",
+        "HANA",
+        "SKU",
+        "MM",
+        "FI",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q5_3",
+    "question": "Pour quelles opérations système le customer n'a-t-il PAS d'accès direct en S/4HANA Cloud Private Edition (vs on-premise) ?",
+    "primary_type": "negation",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Le client n’a généralement pas d’accès direct aux opérations bas niveau : OS patching, DB/HANA administration, kernel patching, backups infrastructure, DR technique, hyperviseur, réseau/datacenter, monitoring infrastructure. Ces opérations relèvent du modèle managé SAP ECS/RISE.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "ECS/RISE",
+        "DB/HANA",
+        "S/4HANA",
+        "HANA",
+        "RISE",
+        "PAS",
+        "OS",
+        "DR"
+      ],
+      "supporting_doc_ids": [
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q6_1",
+    "question": "Liste tous les rôles standards définis dans le contrat RISE with SAP Operations & Support pour S/4HANA Cloud Private Edition.",
+    "primary_type": "listing",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Réponse prudente : les rôles exacts doivent être extraits du contrat R&R officiel. À partir des sources, on peut citer : Customer, SAP ECS Operations, SAP Cloud Application Services, SAP Product Support, éventuellement Consulting/Delivery/Premium Engagement selon contexte. Ne pas prétendre une liste exhaustive sans ouvrir le R&R complet.",
+      "exact_identifiers": [
+        "Cloud Application Services",
+        "Cloud Private Edition",
+        "Premium Engagement",
+        "Product Support",
+        "S/4HANA",
+        "HANA",
+        "RISE",
+        "ECS",
+        "PP",
+        "FI"
+      ],
+      "supporting_doc_ids": [
+        "training_aa_sap_erp_cloud_private_operations_june_2025_75643d51",
+        "SAP Cloud ERP Private_ RISE with SAP S_4HANA Cloud, private edition_ SAP ERP, private cloud edition Service Description Guide_6b96a24d",
+        "training_caa_rise_with_sap_security_and_compliance_may_2025_dc319de7"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q6_2",
+    "question": "Quelles sont toutes les options de déploiement de S/4HANA Cloud Private Edition (hyperscalers AWS/Azure/GCP, datacenter SAP) ?",
+    "primary_type": "listing",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "S/4HANA Cloud Private Edition peut être déployé sur hyperscalers supportés, typiquement AWS, Microsoft Azure, Google Cloud, ou options SAP/datacenter selon disponibilité contractuelle. Les options exactes dépendent du pays, de la région, du contrat et de l’offre souveraine éventuelle.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "Microsoft Azure",
+        "Google Cloud",
+        "S/4HANA",
+        "Azure",
+        "AWS/",
+        "SAP/",
+        "HANA",
+        "GCP",
+        "AWS"
+      ],
+      "supporting_doc_ids": [
+        "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357",
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q6_3",
+    "question": "Liste tous les types de patches appliqués automatiquement par SAP en S/4HANA Cloud Private Edition (OS, DB, kernel, support packs, security).",
+    "primary_type": "listing",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Liste attendue : OS patches, DB/HANA patches, HANA revisions/version upgrades, SAP kernel updates, security notes, support packages, FPS updates, release upgrades. Attention : ce n’est pas toujours “automatique” au sens sans coordination ; c’est géré via maintenance window/change process.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "DB/HANA",
+        "S/4HANA",
+        "HANA",
+        "FPS",
+        "PP",
+        "OS",
+        "DB",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357",
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q7_1",
+    "question": "Pour un client sur SAP ECC EHP6 avec un addon HR custom, quelle est la séquence de migration recommandée vers S/4HANA Cloud Private Edition 2024, et dans quel ordre les modules doivent-ils être reconfigurés ?",
+    "primary_type": "multi_hop",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Séquence recommandée : vérifier éligibilité ECC EHP6, analyser add-on HR custom, lancer Readiness Check, Simplification Item Check, Custom Code Migration/ATC, décider cible HCM (SuccessFactors, HCM Compatibility Pack, ou H4S4 selon stratégie), préparer CVI/Finance/AA si concernés, exécuter conversion via SUM/DMO, puis réaliser follow-on activities et tests. SAP documente conversion, SUM, readiness check et custom code migration",
+      "exact_identifiers": [
+        "Simplification Item Check",
+        "Cloud Private Edition",
+        "Custom Code Migration",
+        "Compatibility Pack",
+        "Readiness Check",
+        "SUM/DMO",
+        "S/4HANA",
+        "HANA",
+        "2024",
+        "EHP6"
+      ],
+      "supporting_doc_ids": [
+        "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+        "011_SAP_S4HANA_2023_Installation_Guide_23de8c60",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q7_2",
+    "question": "Architecture hybride SAP Datasphere + S/4HANA Cloud Private Edition + BW/4HANA : quelle est la séquence d'installation recommandée et quelles dépendances entre eux ?",
+    "primary_type": "multi_hop",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "il n’y a pas une séquence unique obligatoire. En général, on stabilise d’abord le système transactionnel S/4HANA PCE, puis on connecte BW/4HANA pour les flux analytiques existants ou historiques, puis SAP Datasphere pour la couche data fabric/semantic layer et intégration cloud. Les dépendances clés sont connectivité, authorizations, extractors/CDS views, provisioning et stratégie de coexistence BW/Datasphere.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "Datasphere",
+        "BW/4HANA",
+        "S/4HANA",
+        "HANA",
+        "PCE",
+        "CDS",
+        "SAC",
+        "BW/",
+        "MM"
+      ],
+      "supporting_doc_ids": [
+        "011_SAP_S4HANA_2023_Installation_Guide_23de8c60",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q7_3",
+    "question": "Conversion Classic Asset Accounting vers New Asset Accounting lors d'un passage vers S/4HANA Cloud Private Edition : quels prérequis et étapes intermédiaires ?",
+    "primary_type": "multi_hop",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Pré-requis : exécuter Readiness Check, vérifier les Simplification Items Finance, préparer les ledger/accounting principles, clôturer ou aligner données FI-AA, traiter erreurs de cohérence, migrer vers New Asset Accounting, puis exécuter conversion S/4HANA et follow-on activities. Les guides SAP recommandent Readiness Check, SUM et Simplification Item Catalog.",
+      "exact_identifiers": [
+        "Conversion Classic Asset Accounting",
+        "Simplification Items Finance",
+        "Simplification Item Catalog",
+        "Cloud Private Edition",
+        "New Asset Accounting",
+        "Asset Accounting",
+        "Readiness Check",
+        "S/4HANA",
+        "HANA",
+        "SUM"
+      ],
+      "supporting_doc_ids": [
+        "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q8_1",
+    "question": "Pour un client EU avec contraintes GDPR strictes, quelles options de résidence des données sont disponibles pour S/4HANA Cloud Private Edition ?",
+    "primary_type": "contextual",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Pour contraintes GDPR strictes : vérifier région d’hébergement EU, contractualiser les engagements de résidence, envisager EU Access ou Sovereign Cloud Edition si besoin de garanties renforcées. Sans ces options, la garantie stricte de résidence régionale n’est pas automatique selon le snippet.",
+      "exact_identifiers": [
+        "Sovereign Cloud Edition",
+        "Cloud Private Edition",
+        "S/4HANA",
+        "GDPR",
+        "HANA",
+        "PP",
+        "EU",
+        "FI",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896",
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q8_2",
+    "question": "Pour un client public sector US (FedRAMP/GovCloud), S/4HANA Cloud Private Edition est-il disponible et avec quelles certifications ?",
+    "primary_type": "contextual",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "non answerable à partir des sources fournies. Pour un client public sector US, il faut vérifier l’offre SAP applicable, la région, l’hyperscaler, le SKU souverain/gov et les certifications disponibles dans le SAP Trust Center ou documents contractuels. Ne pas affirmer FedRAMP sans preuve contractuelle.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "Trust Center",
+        "GovCloud",
+        "FedRAMP",
+        "S/4HANA",
+        "HANA",
+        "SKU",
+        "PP",
+        "FI",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0",
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896",
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q8_3",
+    "question": "Déploiement S/4HANA Cloud Private Edition sur AWS région Frankfurt : garanties d'uptime réseau et modalités de DR cross-region ?",
+    "primary_type": "contextual",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Pour AWS Frankfurt : HA intra-région possible via plusieurs AZ ; DR dépend du design contracté sachant qu'il est possible d'avoir du short distance (intra-region - RPO 0mn) ou long distance (cross-region - 30mn RPO).  Le cross-region DR et les garanties réseau doivent être confirmés contractuellement ; Le RTO est de 12 heures en standard mais peut contractuellement être réduit à 4 heures avec un cout supplémentaire d'abonnement.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "S/4HANA",
+        "HANA",
+        "RPO",
+        "SAC",
+        "AWS",
+        "RTO",
+        "HA",
+        "PP",
+        "DR"
+      ],
+      "supporting_doc_ids": [
+        "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357",
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896",
+        "SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q9_1",
+    "question": "Quelle est la roadmap S/4HANA Cloud Private Edition 2027 annoncée par SAP ?",
+    "primary_type": "unanswerable",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Les seules informations de roadmap sont celles mentionnées dans les roadmap produit officiellement partagées par SAP sur le site dédié. Point important à retenir : une roadmap ne constitue pas un engagement ferme ni sur la livraison d'une fonctionnalité, ni sur sa date effective de mise à disposition",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "S/4HANA",
+        "2027",
+        "HANA",
+        "FI",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf",
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"
+      ],
+      "answerability": "unanswerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q9_2",
+    "question": "Quel est le prix exact d'une licence S/4HANA Cloud Private Edition pour 500 users en France ?",
+    "primary_type": "unanswerable",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Le prix dépend des FUE/users, modules, environnements, hyperscaler, SLA, services inclus, durée contractuelle et remises négociées.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "S/4HANA",
+        "HANA",
+        "FUE/",
+        "SLA",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      ],
+      "answerability": "unanswerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q9_3",
+    "question": "Combien de clients ont migré vers S/4HANA Cloud Private Edition en Europe en 2024 ?",
+    "primary_type": "unanswerable",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "SAP publie parfois des métriques globales clients/cloud, mais pas nécessairement le nombre exact de clients européens ayant migré vers PCE en 2024.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "S/4HANA",
+        "HANA",
+        "2024",
+        "PCE",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf",
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      ],
+      "answerability": "unanswerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q10_1",
+    "question": "Quel est le SLA d'uptime contractuel de S/4HANA Cloud Private Edition (en % de disponibilité mensuelle) ?",
+    "primary_type": "quantitative",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Le SLA est de 99,9% en standard mais pouvant être augmenté à 99,9% contractuellement via la souscription d'une option complémentaire.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "S/4HANA",
+        "HANA",
+        "SLA",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "Service Level Agreement for Private Cloud Edition Services and Tailored Option Services_fed78d51",
+        "SAP Cloud ERP Private_ RISE with SAP S_4HANA Cloud, private edition_ SAP ERP, private cloud edition Service Description Guide_6b96a24d",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q10_2",
+    "question": "Combien de mises à jour OS par an sont incluses dans le contrat RISE Premium Supplier pour S/4HANA Cloud Private Edition ?",
+    "primary_type": "quantitative",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Une nouvelle version est publiée tous les deux ans tandis que des Features Pack sont généralement publiés tous les 6 mois et une version standard est maintenue 7 ans.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "Premium Supplier",
+        "Features Pack",
+        "S/4HANA",
+        "RISE",
+        "HANA",
+        "PP",
+        "OS",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "RISE with SAP S4HANA Cloud private edition tailored option, Cloud ERP, tailored option Service Description Guide_ac99cc3b",
+        "SAP Cloud ERP Private_ RISE with SAP S_4HANA Cloud, private edition_ SAP ERP, private cloud edition Service Description Guide_6b96a24d",
+        "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  },
+  {
+    "id": "GOLD_SAP_Q10_3",
+    "question": "Quelle est la durée typique d'une upgrade d'une release N à N+1 sur S/4HANA Cloud Private Edition ?",
+    "primary_type": "quantitative",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Une upgrade PCE N→N+1 dépend de la taille système, custom code, add-ons, downtime accepté, tests métier et complexité Finance/logistique. Le guide SAP décrit le processus et outils, mais pas une durée universelle. Cette durée doit être définie avec les équipes SAP ECS qui réaliseront cette montée de version.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "S/4HANA",
+        "HANA",
+        "PCE",
+        "ECS",
+        "FI",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696",
+        "SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0",
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    }
+  }
+]

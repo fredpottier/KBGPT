@@ -46,7 +46,7 @@ services:
       KNOWBASE_DATA_DIR: /data
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
-      BURST_MAX_CONCURRENT_DOCS: "2"  # 2 docs en parallèle (augmenté sur demande)
+      BURST_MAX_CONCURRENT_DOCS: "3"  # 3 docs en parallèle (test 12/05/2026 sur batch SAP, à monter à 4 si KV cache OK)
       SERVICE_NAME: app  # Pour logs persistants /app/logs/app/app.log
       LOGS_DIR: /app/logs
       # CH-46 Phase A — optims latence V4 (env-only)
@@ -130,6 +130,9 @@ services:
       # CH-43 — bascule v4 Facts-First (Tranches 1-5 + leviers latence) — 2026-05-07
       # CH-49 — bascule v4_2 Tiered Pipeline (Layer 0+1+2 + 5 operators + verifier veto) — 2026-05-10
       RUNTIME_VERSION: v4_2
+      # Concurrence docs en parallèle pour ClaimFirst pipeline (était oubliée
+      # dans ce bloc, présente uniquement dans `app` historiquement).
+      BURST_MAX_CONCURRENT_DOCS: "3"  # 3 docs en parallèle (test 12/05/2026 sur batch SAP, à monter à 4 si KV cache OK)
       # Judges centralises — switch d'Ollama vers llama.cpp self-hosted
       # (container prometheus-judge, GPU, stable vs Ollama timeout 14B)
       # CH-34 (04/05/2026) — bascule de Prometheus (sous-évaluait 90% des cas, +0.687 delta)
