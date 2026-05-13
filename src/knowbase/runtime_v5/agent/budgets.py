@@ -60,15 +60,15 @@ class ShapeBudget:
 # Si shape inconnu/None → DEFAULT_SHAPE_BUDGET (multi_hop = profil moyen).
 SHAPE_BUDGETS: dict[str, ShapeBudget] = {
     "factual": ShapeBudget(
-        max_iterations=3, max_tool_calls=8,
+        max_iterations=8, max_tool_calls=20,
         max_retrieved_chars=20_000, max_output_tokens=3_000,
     ),
     "factual_simple": ShapeBudget(
-        max_iterations=3, max_tool_calls=8,
+        max_iterations=8, max_tool_calls=20,
         max_retrieved_chars=20_000, max_output_tokens=3_000,
     ),
     "listing": ShapeBudget(
-        max_iterations=5, max_tool_calls=12,
+        max_iterations=8, max_tool_calls=20,
         max_retrieved_chars=35_000, max_output_tokens=4_000,
     ),
     "multi_hop": ShapeBudget(
@@ -92,19 +92,19 @@ SHAPE_BUDGETS: dict[str, ShapeBudget] = {
         max_retrieved_chars=50_000, max_output_tokens=5_000,
     ),
     "contextual": ShapeBudget(
-        max_iterations=5, max_tool_calls=15,
+        max_iterations=8, max_tool_calls=20,
         max_retrieved_chars=30_000, max_output_tokens=3_000,
     ),
     "unanswerable": ShapeBudget(
-        max_iterations=5, max_tool_calls=15,
+        max_iterations=8, max_tool_calls=20,
         max_retrieved_chars=30_000, max_output_tokens=3_000,
     ),
     "false_premise": ShapeBudget(
-        max_iterations=5, max_tool_calls=15,
+        max_iterations=8, max_tool_calls=20,
         max_retrieved_chars=30_000, max_output_tokens=3_000,
     ),
     "negation": ShapeBudget(
-        max_iterations=5, max_tool_calls=15,
+        max_iterations=8, max_tool_calls=20,
         max_retrieved_chars=30_000, max_output_tokens=3_000,
     ),
 }
