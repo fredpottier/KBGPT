@@ -185,13 +185,17 @@ def main():
         metrics = result.get("metrics", {})
         epi = result.get("epistemic_status", "?")
         sr = result.get("stop_reason", "")
+        verifier_report = result.get("verifier_report")  # A5 S7.7 Mode A
         phantom = has_phantom(answer)
         cited = has_citation(answer)
 
+        v_outcome = (verifier_report or {}).get("outcome", "n/a")
+        v_supp = (verifier_report or {}).get("support_rate", 0.0)
         print(f"  → {body.get('status')} | {epi} | {total_lat:.1f}s | "
               f"{metrics.get('n_iterations','?')}it | "
               f"{metrics.get('n_tool_calls','?')}tc | "
               f"{len(citations)}cit | "
+              f"v={v_outcome}({v_supp:.2f}) | "
               f"{'PHANTOM' if phantom else ''}{'CITED' if cited else ''}")
 
         results.append({
@@ -203,6 +207,7 @@ def main():
             "citations": citations, "n_citations": len(citations),
             "phantom_tool_call": phantom, "has_citation": cited,
             "metrics": metrics, "total_latency_s": total_lat,
+            "verifier_report": verifier_report,
         })
 
         # Save progressive

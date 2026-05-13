@@ -184,28 +184,86 @@ class ScoreThresholdAdapter:
 
 
 class HHEMBackend:
-    """Adapter HHEM-2.1-Open (Vectara). Wrappe le modèle production.
+    """Adapter HHEM-2.1-Open (Vectara). DeBERTa-v3-large fine-tuned faithfulness.
 
-    Activation différée : nécessite `vectara/hallucination_evaluation_model`
-    pré-chargé. Pour S7 actuel, on garde l'interface seulement (handler raise
-    `NotImplementedError` jusqu'à branchement prod).
+    Réutilise `knowbase.facts_first.hhem_judge._get_hhem_model()` (lazy-load
+    singleton, modèle déjà installé local sous data/models/hub).
 
-    Branchement prod :
-        from sentence_transformers import CrossEncoder
-        model = CrossEncoder("vectara/hallucination_evaluation_model", ...)
-        score = model.predict([(evidence, claim)])[0]
+    Format HHEM : input = "[premise]\\n[hypothesis]" → sigmoid score 0-1
+    (1.0 = entailed/supported, 0.0 = contradicted).
+
+    Decision mapping :
+      score >= support_threshold (default 0.5) → SUPPORTED
+      score <= contradict_threshold (default 0.2) → CONTRADICTED
+      sinon → NEUTRAL
+
+    Le GroundingVerifier override ces seuils via ShapeThreshold par shape.
     """
 
     name = "hhem-2.1-open"
 
-    def __init__(self, model_loader=None):
-        self.model_loader = model_loader  # callable returning the model
+    def __init__(
+        self,
+        support_threshold: float = 0.5,
+        contradict_threshold: float = 0.2,
+    ):
+        if support_threshold < contradict_threshold:
+            raise ValueError("support_threshold must be ≥ contradict_threshold")
+        self.support_threshold = support_threshold
+        self.contradict_threshold = contradict_threshold
 
     def check(self, claim: str, evidence: str) -> NLICheckResult:
-        if self.model_loader is None:
-            raise NotImplementedError(
-                "HHEMBackend not configured — provide model_loader at construction"
+        import time as _t
+        from knowbase.facts_first.hhem_judge import _get_hhem_model
+
+        t0 = _t.time()
+        loaded = _get_hhem_model()
+        if loaded is None:
+            # Modèle indisponible (load failed) → NEUTRAL conservateur
+            return NLICheckResult(
+                claim_text=claim,
+                decision=NLIDecision.INSUFFICIENT_CONTEXT,
+                score=0.0,
+                evidence_snippet=evidence[:200],
+                latency_ms=(_t.time() - t0) * 1000.0,
+                backend_name=f"{self.name}(unavailable)",
             )
-        # Production : run model.predict([(evidence, claim)])[0]
-        # On retourne pour V5.1 minimal une interface placeholder
-        raise NotImplementedError("HHEM branching deferred to S7 prod activation")
+        tokenizer, model, device, torch = loaded
+
+        try:
+            # HHEM format : "[premise]\n[hypothesis]"
+            formatted = f"{evidence}\n{claim}"
+            with torch.no_grad():
+                inputs = tokenizer(
+                    [formatted], return_tensors="pt",
+                    padding=True, truncation=True, max_length=512,
+                )
+                inputs = {k: v.to(device) for k, v in inputs.items()}
+                outputs = model(**inputs)
+                score = float(torch.sigmoid(outputs.logits).squeeze(-1).cpu().item())
+        except Exception as exc:
+            logger.warning("[HHEMBackend] inference failed: %s", exc)
+            return NLICheckResult(
+                claim_text=claim,
+                decision=NLIDecision.INSUFFICIENT_CONTEXT,
+                score=0.0,
+                evidence_snippet=evidence[:200],
+                latency_ms=(_t.time() - t0) * 1000.0,
+                backend_name=f"{self.name}(error)",
+            )
+
+        if score >= self.support_threshold:
+            decision = NLIDecision.SUPPORTED
+        elif score <= self.contradict_threshold:
+            decision = NLIDecision.CONTRADICTED
+        else:
+            decision = NLIDecision.NEUTRAL
+
+        return NLICheckResult(
+            claim_text=claim,
+            decision=decision,
+            score=score,
+            evidence_snippet=evidence[:200],
+            latency_ms=(_t.time() - t0) * 1000.0,
+            backend_name=self.name,
+        )

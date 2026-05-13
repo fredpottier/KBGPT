@@ -95,15 +95,19 @@ class AgentRunResult:
     stop_reason: str
     workspace: Workspace
     latency_s: float
+    verifier_report: Optional[dict] = None  # S7 passive mode (Mode A)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "answer": self.answer,
             "epistemic_status": self.epistemic_status.value,
             "stop_reason": self.stop_reason,
             "latency_s": self.latency_s,
             "workspace_summary": self.workspace.summary(),
         }
+        if self.verifier_report is not None:
+            d["verifier_report"] = self.verifier_report
+        return d
 
 
 # ─── LLM call interface (abstrait pour tests) ────────────────────────────────
@@ -147,6 +151,7 @@ class ReasoningAgentV51:
         max_message_history: int = 60,
         tracer: Optional[ObservabilityTracer] = None,
         metrics: Optional[MetricsRegistry] = None,
+        verifier=None,  # GroundingVerifier optional (Mode A passive S7.7)
     ):
         self.llm = llm_caller
         self.registry = registry or get_default_registry()
@@ -154,6 +159,7 @@ class ReasoningAgentV51:
         self.max_message_history = max_message_history
         self.tracer = tracer or get_default_tracer()
         self.metrics = metrics or get_default_metrics()
+        self.verifier = verifier  # None = skip verification
         # Pre-register metrics (low-cardinality SLO ADR §3g)
         self._m_agent_duration = self.metrics.histogram(
             "agent_answer_duration_s",
@@ -471,6 +477,13 @@ class ReasoningAgentV51:
             latency_s=latency_s,
         )
 
+        # ─── S7 verifier passive mode (Mode A) ───────────────────────────────
+        # Run verifier post-hoc to measure correlation outcome ↔ judge score.
+        # Does NOT modify final_answer_content. Report stored in result.
+        verifier_report = self._run_verifier_passive(
+            workspace, final_answer_content, answer_shape,
+        )
+
         # ─── Metrics + close root span ──────────────────────────────────────
         shape_label = answer_shape or "unknown"
         status_label = epistemic_status.value
@@ -504,7 +517,81 @@ class ReasoningAgentV51:
             stop_reason=stop_reason,
             workspace=workspace,
             latency_s=latency_s,
+            verifier_report=verifier_report,
         )
+
+    # ─── Verifier passive (Mode A S7.7) ──────────────────────────────────────
+
+    def _run_verifier_passive(
+        self,
+        workspace: Workspace,
+        final_answer: str,
+        answer_shape: Optional[str],
+    ) -> Optional[dict]:
+        """Run verifier post-hoc (Mode A). Does NOT modify final_answer.
+
+        Returns compact dict with outcome + counts, or None if verifier disabled
+        or answer empty.
+        """
+        if self.verifier is None:
+            return None
+        if not final_answer or not final_answer.strip():
+            return None
+
+        # Build evidence_by_citation from workspace.evidence_collected.
+        # Key by doc_id AND section_id for citation matching.
+        evidence_by_citation: dict[str, str] = {}
+        for ev in workspace.evidence_collected:
+            if ev.doc_id and ev.text_excerpt:
+                # Doc-level key (concat if multiple sections for same doc)
+                prev = evidence_by_citation.get(ev.doc_id, "")
+                evidence_by_citation[ev.doc_id] = (
+                    f"{prev}\n\n{ev.text_excerpt}" if prev else ev.text_excerpt
+                )[:8000]
+                if ev.section_id:
+                    evidence_by_citation[ev.section_id] = ev.text_excerpt[:8000]
+
+        try:
+            report = self.verifier.verify(
+                answer_text=final_answer,
+                evidence_by_citation=evidence_by_citation,
+                answer_shape=answer_shape,
+                cited_tool_names=None,
+            )
+        except Exception as exc:
+            logger.warning("[V51] verifier failed: %s", exc)
+            return {"error": str(exc)[:200]}
+
+        # Compact report (avoid large NLI claim details in API response)
+        n_supported = sum(
+            1 for r in report.nli_results if r.decision.value == "supported"
+        )
+        n_contradicted = sum(
+            1 for r in report.nli_results if r.decision.value == "contradicted"
+        )
+        n_neutral = sum(
+            1 for r in report.nli_results if r.decision.value == "neutral"
+        )
+        scores = [r.score for r in report.nli_results]
+        return {
+            "outcome": report.outcome.value if hasattr(report.outcome, "value") else str(report.outcome),
+            "backend_name": report.backend_name,
+            "n_claims": len(report.claims),
+            "n_supported": n_supported,
+            "n_contradicted": n_contradicted,
+            "n_neutral": n_neutral,
+            "n_failures": len(report.failures),
+            "support_rate": (
+                n_supported / len(report.nli_results) if report.nli_results else 0.0
+            ),
+            "mean_nli_score": (sum(scores) / len(scores)) if scores else 0.0,
+            "min_nli_score": min(scores) if scores else 0.0,
+            "latency_ms": report.latency_ms,
+            "failure_reasons": [
+                f.reason.value if hasattr(f.reason, "value") else str(f.reason)
+                for f in report.failures
+            ][:10],
+        }
 
     # ─── Sync wrapper (compat) ───────────────────────────────────────────────
 

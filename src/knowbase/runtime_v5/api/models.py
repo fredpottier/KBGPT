@@ -161,6 +161,7 @@ class AnswerResponse(BaseModel):
     stop_reason: str = ""
     workspace_url: Optional[str] = None
     metrics: ResponseMetrics = Field(default_factory=ResponseMetrics)
+    verifier_report: Optional[dict] = None  # S7.7 Mode A passive (optional)
 
 
 # ─── Async job (mode=async) ──────────────────────────────────────────────────

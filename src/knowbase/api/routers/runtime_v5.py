@@ -89,18 +89,36 @@ def _get_job_store() -> InMemoryJobStore:
 
 
 def _get_agent() -> ReasoningAgentV51:
-    """Singleton agent : init registry (POC + V2 tools) + HTTPLLMCaller."""
+    """Singleton agent : init registry (POC + V2 tools) + HTTPLLMCaller +
+    optional GroundingVerifier (S7.7 Mode A passive)."""
     global _agent
     if _agent is None:
+        import os
         # Re-init registry pour s'assurer que tous les tools sont enregistrés
         reset_default_registry()
         registry = get_default_registry()
         register_poc_tools(registry)
         register_v2_tools(registry)
         llm = HTTPLLMCaller(model="deepseek-ai/DeepSeek-V3.1")
+
+        # S7.7 Mode A : verifier passif (mesure outcome, ne modifie pas answer)
+        verifier = None
+        if os.getenv("V5_VERIFIER_ENABLED", "0") in ("1", "true", "True"):
+            try:
+                from knowbase.runtime_v5.verifier.backends import HHEMBackend
+                from knowbase.runtime_v5.verifier.grounding_verifier import (
+                    GroundingVerifier,
+                )
+                backend = HHEMBackend()
+                verifier = GroundingVerifier(backend=backend)
+                logger.info("[V5 Router] Verifier ENABLED (HHEM-2.1 Mode A passive)")
+            except Exception as exc:
+                logger.warning("[V5 Router] verifier setup failed: %s", exc)
+
         _agent = ReasoningAgentV51(
             llm_caller=llm,
             registry=registry,
+            verifier=verifier,
         )
         logger.info(
             f"[V5 Router] Agent initialized — registry stats: {registry.stats()}"
@@ -210,6 +228,7 @@ def _result_to_api_response(result, request_id: str) -> AnswerResponse:
         stop_reason=result.stop_reason,
         workspace_url=f"/admin/workspaces/{request_id}",
         metrics=metrics,
+        verifier_report=getattr(result, "verifier_report", None),
     )
 
 
