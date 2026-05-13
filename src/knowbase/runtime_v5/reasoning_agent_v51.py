@@ -61,6 +61,16 @@ from knowbase.runtime_v5.agent.workspace import (
     EpistemicStatus,
     Workspace,
 )
+from knowbase.runtime_v5.observability.metrics import (
+    MetricsRegistry,
+    get_default_metrics,
+)
+from knowbase.runtime_v5.observability.tracer import (
+    ObservabilityTracer,
+    SpanContext,
+    SpanStatus,
+    get_default_tracer,
+)
 from knowbase.runtime_v5.tools.registry import (
     EvidenceType,
     ToolRegistry,
@@ -135,11 +145,42 @@ class ReasoningAgentV51:
         registry: Optional[ToolRegistry] = None,
         sanitizer: Optional[ToolCallSanitizer] = None,
         max_message_history: int = 60,
+        tracer: Optional[ObservabilityTracer] = None,
+        metrics: Optional[MetricsRegistry] = None,
     ):
         self.llm = llm_caller
         self.registry = registry or get_default_registry()
         self.sanitizer = sanitizer or ToolCallSanitizer(self.registry)
         self.max_message_history = max_message_history
+        self.tracer = tracer or get_default_tracer()
+        self.metrics = metrics or get_default_metrics()
+        # Pre-register metrics (low-cardinality SLO ADR §3g)
+        self._m_agent_duration = self.metrics.histogram(
+            "agent_answer_duration_s",
+            help_text="End-to-end agent run duration (seconds)",
+            label_keys=["shape", "epistemic_status"],
+        )
+        self._m_agent_iter = self.metrics.histogram(
+            "agent_iterations",
+            help_text="Iterations per run",
+            label_keys=["shape"],
+            buckets=(1, 2, 3, 5, 8, 12),
+        )
+        self._m_tool_calls = self.metrics.counter(
+            "tool_calls_total",
+            help_text="Total tool calls",
+            label_keys=["tool", "outcome"],  # outcome=ok|repaired|error
+        )
+        self._m_tool_repair = self.metrics.counter(
+            "tool_call_repair_total",
+            help_text="Tool calls with sanitizer repair applied",
+            label_keys=["tool"],
+        )
+        self._m_stop_reason = self.metrics.counter(
+            "agent_stop_reason_total",
+            help_text="Stop reason counters",
+            label_keys=["reason"],
+        )
 
     # ─── Async entrypoint (recommandé production) ────────────────────────────
 
@@ -197,6 +238,19 @@ class ReasoningAgentV51:
         epistemic_status = EpistemicStatus.COMPLETE
         final_answer_content = ""
 
+        # Root span : gen_ai.agent.answer (ADR §3g hierarchy)
+        # Géré manuellement (pas via SpanContext) car on l'end dans le finally
+        # APRÈS récupération des stats finales.
+        root_span = self.tracer.start_span(
+            "gen_ai.agent.answer",
+            attributes={
+                "tenant_id": tenant_id,
+                "answer_shape": answer_shape or "unknown",
+                "request_id": workspace.request_id,
+                # NOTE : question pas dans les attributs (PII tier3 only)
+            },
+        )
+
         try:
             while True:
                 # 1. Cancellation check
@@ -218,18 +272,33 @@ class ReasoningAgentV51:
                     logger.info(f"[V51] {stop_reason}")
                     break
 
-                # 4. LLM call
+                # 4. LLM call (sub-span : gen_ai.inference)
                 budgets.increment_iteration()
                 tool_schemas = self.registry.to_llm_tools()
-                llm_resp = self.llm.call(messages, tool_schemas, max_tokens=2000)
-                if "error" in llm_resp:
-                    stop_reason = f"llm_error:{llm_resp['error']}"
-                    epistemic_status = EpistemicStatus.ABORTED
-                    break
+                with SpanContext(
+                    self.tracer, "gen_ai.inference",
+                    parent_span=root_span,
+                    attributes={
+                        "iter": budgets.iterations,
+                        "n_tools": len(tool_schemas),
+                    },
+                ) as llm_span:
+                    llm_resp = self.llm.call(messages, tool_schemas, max_tokens=2000)
+                    if "error" in llm_resp:
+                        llm_span.set_attribute("error", llm_resp["error"])
+                        llm_span.set_status(SpanStatus.ERROR, llm_resp["error"])
+                        stop_reason = f"llm_error:{llm_resp['error']}"
+                        epistemic_status = EpistemicStatus.ABORTED
+                        break
 
-                msg = llm_resp["message"]
-                usage = llm_resp.get("usage", {})
-                budgets.add_output_tokens(usage.get("completion_tokens", 0))
+                    msg = llm_resp["message"]
+                    usage = llm_resp.get("usage", {})
+                    completion_tokens = usage.get("completion_tokens", 0)
+                    llm_span.set_attributes({
+                        "completion_tokens": completion_tokens,
+                        "prompt_tokens": usage.get("prompt_tokens", 0),
+                    })
+                budgets.add_output_tokens(completion_tokens)
                 messages.append(msg)
 
                 tool_calls = msg.get("tool_calls") or []
@@ -271,17 +340,37 @@ class ReasoningAgentV51:
                         budgets.increment_tool_call()
                         continue
 
-                    # 6b. Execute tool
-                    t_tool = time.time()
-                    try:
-                        if spec.handler is None:
-                            tool_result = {"error": f"tool '{fn_name}' has no handler"}
-                        else:
-                            tool_result = {"result": spec.handler(**tool_args_clean)}
-                    except Exception as ex:
-                        tool_result = {"error": f"{type(ex).__name__}: {ex}"}
-                    tool_latency_ms = (time.time() - t_tool) * 1000.0
+                    # 6b. Execute tool (sub-span : gen_ai.execute_tool)
+                    with SpanContext(
+                        self.tracer, "gen_ai.execute_tool",
+                        parent_span=root_span,
+                        attributes={
+                            "tool_name": fn_name,
+                            "iter": iter_idx,
+                            "repair_applied": repair_applied,
+                        },
+                    ) as tool_span:
+                        t_tool = time.time()
+                        try:
+                            if spec.handler is None:
+                                tool_result = {"error": f"tool '{fn_name}' has no handler"}
+                            else:
+                                tool_result = {"result": spec.handler(**tool_args_clean)}
+                        except Exception as ex:
+                            tool_result = {"error": f"{type(ex).__name__}: {ex}"}
+                            tool_span.set_status(SpanStatus.ERROR, str(ex))
+                        tool_latency_ms = (time.time() - t_tool) * 1000.0
+                        tool_span.set_attribute("latency_ms", tool_latency_ms)
                     budgets.increment_tool_call()
+                    # Metric counter
+                    outcome = (
+                        "error" if "error" in tool_result
+                        else "repaired" if repair_applied
+                        else "ok"
+                    )
+                    self._m_tool_calls.inc(labels={"tool": fn_name, "outcome": outcome})
+                    if repair_applied:
+                        self._m_tool_repair.inc(labels={"tool": fn_name})
 
                     # 6c. Compress + inject result
                     result_str = json.dumps(tool_result, ensure_ascii=False)
@@ -340,7 +429,11 @@ class ReasoningAgentV51:
         except CancellationRequested as ce:
             stop_reason = f"cancelled:{ce.source}:{ce.reason}"[:300]
             epistemic_status = EpistemicStatus.ABORTED
+            root_span.set_status(SpanStatus.ERROR, "cancelled")
             logger.info(f"[V51] {stop_reason}")
+        except Exception as e:
+            root_span.record_exception(e)
+            raise
 
         # ─── Forced synthesis if no final answer ─────────────────────────────
         if not final_answer_content.strip() and epistemic_status != EpistemicStatus.ABORTED:
@@ -377,6 +470,33 @@ class ReasoningAgentV51:
             stop_reason=stop_reason,
             latency_s=latency_s,
         )
+
+        # ─── Metrics + close root span ──────────────────────────────────────
+        shape_label = answer_shape or "unknown"
+        status_label = epistemic_status.value
+        self._m_agent_duration.observe(latency_s, labels={
+            "shape": shape_label, "epistemic_status": status_label,
+        })
+        self._m_agent_iter.observe(budgets.iterations, labels={"shape": shape_label})
+        self._m_stop_reason.inc(labels={"reason": stop_reason[:60] or "concluded"})
+
+        # Attribs finaux sur root span + close
+        root_span.set_attributes({
+            "epistemic_status": status_label,
+            "stop_reason": stop_reason[:200],
+            "n_iterations": budgets.iterations,
+            "n_tool_calls": budgets.tool_calls,
+            "n_evidence_items": len(workspace.evidence_collected),
+            "latency_s": latency_s,
+            "output_tokens": budgets.output_tokens,
+            "retrieved_chars": budgets.retrieved_chars,
+        })
+        if root_span.status == SpanStatus.UNSET:
+            root_span.set_status(
+                SpanStatus.OK if epistemic_status not in
+                (EpistemicStatus.ABORTED,) else SpanStatus.ERROR
+            )
+        self.tracer.end_span(root_span)
 
         return AgentRunResult(
             answer=final_answer_content or "",
