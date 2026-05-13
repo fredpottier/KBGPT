@@ -1,0 +1,427 @@
+{
+  "_meta": {
+    "ts": "20260513T180708Z",
+    "url": "http://localhost:8000",
+    "tenant_id": "default",
+    "panel_source": "benchmark/questions/quantitative_panel_10q.json",
+    "n_questions": 8,
+    "n_completed": 8,
+    "total_duration_s": 143.66741967201233
+  },
+  "results": [
+    {
+      "qid": "V2_V1_GOLD_SAP_Q10_1",
+      "primary_type": "quantitative",
+      "question": "Quel est le SLA d'uptime contractuel de S/4HANA Cloud Private Edition (en % de disponibilité mensuelle) ?",
+      "ground_truth": "Le SLA est de 99,9% en standard mais pouvant être augmenté à 99,9% contractuellement via la souscription d'une option complémentaire.",
+      "request_id": "req_7d117f2134504353",
+      "status": "completed",
+      "epistemic_status": "supported",
+      "stop_reason": "concluded",
+      "answer": "          Excellent ! J'ai trouvé l'information recherchée. Selon le document [doc=Service Level Agreement for Private Cloud Edition Services and Tailored Option Services_fed78d51], le SLA d'uptime contractuel pour S/4HANA Cloud Private Edition est de **99,7%** de disponibilité mensuelle pour les environnements de production (PRD).\n\nPlus précisément, la section 1.17.1 stipule :\n- **99,7%** de System Availability Percentage pour PRD (environnements de production)\n- **95,0%** pour NON-PRD (environnements non-production)\n\nÀ moins qu'un pourcentage plus élevé ne soit spécifié dans le bon de commande.\n\n**Réponse finale :** Le SLA d'uptime contractuel de S/4HANA Cloud Private Edition est de **99,7%** de disponibilité mensuelle pour les environnements de production (PRD), comme spécifié dans l'accord de niveau de service [doc=Service Level Agreement for Private Cloud Edition Services and Tailored Option Services_fed78d51].",
+      "citations": [
+        {
+          "doc_id": "Service Level Agreement for Private Cloud Edition Services and Tailored Option Services_fed78d51",
+          "section_id": "sec_621c75c32d432b",
+          "section_path": null
+        },
+        {
+          "doc_id": "Service Level Agreement for Private Cloud Edition Services and Tailored Option Services_fed78d51",
+          "section_id": "sec_c5b5bfb5443a35",
+          "section_path": null
+        },
+        {
+          "doc_id": "Service Level Agreement for Private Cloud Edition Services and Tailored Option Services_fed78d51",
+          "section_id": "sec_38f0081b981ef4",
+          "section_path": null
+        },
+        {
+          "doc_id": "Service Level Agreement for Private Cloud Edition Services and Tailored Option Services_fed78d51",
+          "section_id": "sec_34d02013491b25",
+          "section_path": null
+        },
+        {
+          "doc_id": "?",
+          "section_id": "sec_c5b5bfb5443a35",
+          "section_path": null
+        }
+      ],
+      "metrics": {
+        "n_iterations": 7,
+        "n_tool_calls": 6,
+        "n_evidence_items": 5,
+        "n_repairs": 0,
+        "retrieved_chars": 10143,
+        "output_tokens": 666,
+        "latency_s": 19.12268590927124
+      },
+      "total_latency_s": 19.126309633255005,
+      "error": null
+    },
+    {
+      "qid": "V2_V1_GOLD_SAP_Q10_2",
+      "primary_type": "quantitative",
+      "question": "Combien de mises à jour OS par an sont incluses dans le contrat RISE Premium Supplier pour S/4HANA Cloud Private Edition ?",
+      "ground_truth": "Une nouvelle version est publiée tous les deux ans tandis que des Features Pack sont généralement publiés tous les 6 mois et une version standard est maintenue 7 ans.",
+      "request_id": "req_9e83de3e59384068",
+      "status": "completed",
+      "epistemic_status": "partial",
+      "stop_reason": "budget_soft_cap_max_iterations",
+      "answer": "D'après les documents consultés, je n'ai pas trouvé d'information spécifique concernant le nombre exact de mises à jour OS par an incluses dans le contrat RISE Premium Supplier pour S/4HANA Cloud Private Edition. Les documents disponibles se concentrent principalement sur les descriptions de service, les conditions générales et les options personnalisées, mais ne mentionnent pas explicitement la fréquence des mises à jour du système d'exploitation pour cette offre spécifique.\n\n[doc=SAP_Cloud_ERP_Private__Operations_and_Support-2_14e7eee5]\n[doc=RISE with SAP S4HANA Cloud private edition tailored option, Cloud ERP, tailored option Service Description Guide_ac99cc3b]\n[doc=SAP Cloud ERP Private and RISE with SAP S_4HANA Cloud, private edition Supplement_3206ecd0]",
+      "citations": [],
+      "metrics": {
+        "n_iterations": 8,
+        "n_tool_calls": 8,
+        "n_evidence_items": 0,
+        "n_repairs": 0,
+        "retrieved_chars": 16661,
+        "output_tokens": 506,
+        "latency_s": 20.18647074699402
+      },
+      "total_latency_s": 20.19055938720703,
+      "error": null
+    },
+    {
+      "qid": "V2_V1_GOLD_SAP_Q10_3",
+      "primary_type": "quantitative",
+      "question": "Quelle est la durée typique d'une upgrade d'une release N à N+1 sur S/4HANA Cloud Private Edition ?",
+      "ground_truth": "Une upgrade PCE N→N+1 dépend de la taille système, custom code, add-ons, downtime accepté, tests métier et complexité Finance/logistique. Le guide SAP décrit le processus et outils, mais pas une durée universelle. Cette durée doit être définie avec les équipes SAP ECS qui réaliseront cette montée de",
+      "request_id": "req_86130878202c4047",
+      "status": "completed",
+      "epistemic_status": "partial",
+      "stop_reason": "budget_soft_cap_max_iterations",
+      "answer": "D'après la documentation consultée [doc=008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696], je n'ai pas trouvé d'information spécifique sur la durée typique d'une upgrade d'une release N à N+1 sur S/4HANA Cloud Private Edition. Le guide d'upgrade fournit des informations détaillées sur le processus d'upgrade mais ne mentionne pas de durée spécifique pour cette opération.",
+      "citations": [],
+      "metrics": {
+        "n_iterations": 8,
+        "n_tool_calls": 8,
+        "n_evidence_items": 0,
+        "n_repairs": 0,
+        "retrieved_chars": 14413,
+        "output_tokens": 536,
+        "latency_s": 15.04318380355835
+      },
+      "total_latency_s": 16.068989992141724,
+      "error": null
+    },
+    {
+      "qid": "V2_T4_T4_HUM_0022",
+      "primary_type": "multi_hop",
+      "question": "Que disent les documents sur les certifications et audits de securite SAP (SOC, ISO) pour les services cloud ?",
+      "ground_truth": "Les certifications et audits de sécurité pour les services cloud SAP S/4HANA Cloud Private Edition sont documentés principalement dans le RISE with SAP Cloud ERP Private deck ([doc=020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357]) et complétés par le deck Access to Customer Systems ([doc=007_SAP_S",
+      "request_id": "req_e3094314a9e84e6a",
+      "status": "completed",
+      "epistemic_status": "partial",
+      "stop_reason": "budget_soft_cap_max_iterations",
+      "answer": "Les documents indiquent que SAP maintient plusieurs certifications de sécurité pour ses services cloud, incluant notamment les certifications ISO 27001, ISO 27017, ISO 27018, ISO 22301, ISO 9001 ainsi que les audits SOC1 Type 2 (ISAE 3402) et SOC2 Type 2 (ISAE 3000). Ces certifications font partie d'un programme complet de conformité qui inclut également BS 10012, BSI-C5, GDPR-readiness, NIST CSF, PCI-DSS, HIPAA, CCPS, ENS et ISMAP [doc=11476-SAPSE_RISE_with_SAP_Security_final_31c725f3].",
+      "citations": [
+        {
+          "doc_id": "11476-SAPSE_RISE_with_SAP_Security_final_31c725f3",
+          "section_id": "sec_84c8ecd80b4159",
+          "section_path": null
+        },
+        {
+          "doc_id": "11476-SAPSE_RISE_with_SAP_Security_final_31c725f3",
+          "section_id": "sec_7c75da04c2c481",
+          "section_path": null
+        },
+        {
+          "doc_id": "11476-SAPSE_RISE_with_SAP_Security_final_31c725f3",
+          "section_id": "sec_a52c46e9f46693",
+          "section_path": null
+        },
+        {
+          "doc_id": "?",
+          "section_id": "sec_a52c46e9f46693",
+          "section_path": null
+        },
+        {
+          "doc_id": "training_caa_rise_with_sap_security_and_compliance_may_2025_dc319de7",
+          "section_id": "sec_48c53edb240801",
+          "section_path": null
+        }
+      ],
+      "metrics": {
+        "n_iterations": 8,
+        "n_tool_calls": 8,
+        "n_evidence_items": 5,
+        "n_repairs": 0,
+        "retrieved_chars": 6831,
+        "output_tokens": 464,
+        "latency_s": 14.718365669250488
+      },
+      "total_latency_s": 14.722402572631836,
+      "error": null
+    },
+    {
+      "qid": "V2_V1_GOLD_SAP_Q9_3",
+      "primary_type": "unanswerable",
+      "question": "Combien de clients ont migré vers S/4HANA Cloud Private Edition en Europe en 2024 ?",
+      "ground_truth": "SAP publie parfois des métriques globales clients/cloud, mais pas nécessairement le nombre exact de clients européens ayant migré vers PCE en 2024.",
+      "request_id": "req_9ab7bc66aede4683",
+      "status": "completed",
+      "epistemic_status": "partial",
+      "stop_reason": "budget_soft_cap_max_iterations",
+      "answer": "D'après les recherches effectuées dans les documents SAP disponibles, je n'ai trouvé aucune information spécifique concernant le nombre de clients ayant migré vers S/4HANA Cloud Private Edition en Europe en 2024. Les documents consultés [doc=004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf] ne contiennent pas de statistiques sur les migrations clients pour cette période spécifique.\n\nJe ne peux donc pas fournir un chiffre précis concernant le nombre de migrations vers S/4HANA Cloud Private Edition en Europe en 2024 à partir des documents disponibles.",
+      "citations": [],
+      "metrics": {
+        "n_iterations": 5,
+        "n_tool_calls": 5,
+        "n_evidence_items": 0,
+        "n_repairs": 0,
+        "retrieved_chars": 3082,
+        "output_tokens": 389,
+        "latency_s": 17.715574264526367
+      },
+      "total_latency_s": 19.578700304031372,
+      "error": null
+    },
+    {
+      "qid": "V2_T1_T1_HUM_0053",
+      "primary_type": "factual",
+      "question": "Combien de Lines of Business sont couvertes par SAP S/4HANA 1809 ?",
+      "ground_truth": "10 Lines of Business : Sales & Marketing, Asset Management, Supply Chain, Services, Manufacturing, Finance, Procurement, Human Resource, R&D, Cross Topics.",
+      "request_id": "req_124dea218acf4293",
+      "status": "completed",
+      "epistemic_status": "partial",
+      "stop_reason": "budget_soft_cap_max_iterations",
+      "answer": "D'après le document SAP S/4HANA 1809 Business Scope Master, SAP S/4HANA 1809 couvre plusieurs Lines of Business (LoB) incluant Sales, Service, Supply Chain, Manufacturing, Sourcing & Procurement, Research & Development/Engineering, Asset Management, et Core Finance [doc=018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba].",
+      "citations": [
+        {
+          "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba",
+          "section_id": "sec_14633f8607df74",
+          "section_path": null
+        },
+        {
+          "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba",
+          "section_id": "sec_2ba2b46cee7711",
+          "section_path": null
+        },
+        {
+          "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba",
+          "section_id": "sec_d0ce7108269080",
+          "section_path": null
+        },
+        {
+          "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba",
+          "section_id": "sec_75407209ed6f35",
+          "section_path": null
+        }
+      ],
+      "metrics": {
+        "n_iterations": 3,
+        "n_tool_calls": 3,
+        "n_evidence_items": 4,
+        "n_repairs": 0,
+        "retrieved_chars": 19016,
+        "output_tokens": 217,
+        "latency_s": 12.933703660964966
+      },
+      "total_latency_s": 12.938173294067383,
+      "error": null
+    },
+    {
+      "qid": "V2_T1_T1_HUM_0044",
+      "primary_type": "factual",
+      "question": "Combien de pays de l'UE sont couverts par la fonctionnalite Intrastat dans S/4HANA ?",
+      "ground_truth": "La fonctionnalite Intrastat couvre les 27 Etats membres de l'UE.",
+      "request_id": "req_6ce7a5e34f524113",
+      "status": "completed",
+      "epistemic_status": "partial",
+      "stop_reason": "budget_soft_cap_max_iterations",
+      "answer": "Based on the available documentation, the Intrastat functionality in SAP S/4HANA is designed for managing Intrastat declarations and their master data, specifically for goods movements between member states of the European Union. However, the documents reviewed [doc=025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700] do not explicitly state the exact number of EU countries covered by this functionality. The documentation mentions that Intrastat is used for EU member states and specifically notes an additional requirement for services in Italy, but it does not provide a comprehensive list or count of all covered countries.",
+      "citations": [
+        {
+          "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+          "section_id": "sec_8cf4909c13b377",
+          "section_path": null
+        },
+        {
+          "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+          "section_id": "sec_7aad3aac9607f9",
+          "section_path": null
+        },
+        {
+          "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+          "section_id": "sec_1b21061756193f",
+          "section_path": null
+        }
+      ],
+      "metrics": {
+        "n_iterations": 3,
+        "n_tool_calls": 3,
+        "n_evidence_items": 3,
+        "n_repairs": 0,
+        "retrieved_chars": 4195,
+        "output_tokens": 202,
+        "latency_s": 8.857703924179077
+      },
+      "total_latency_s": 8.861600160598755,
+      "error": null
+    },
+    {
+      "qid": "V2_T4_T4_HUM_0025",
+      "primary_type": "multi_hop",
+      "question": "Que disent les documents sur les partenaires technologiques et IA de l'ecosysteme SAP ?",
+      "ground_truth": "L'écosystème de partenaires technologiques et IA de SAP est explicitement nommé dans le Business Scope 2025 SAP Cloud ERP Private ([doc=006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0]) à travers le slide \"SAP Business AI\".\n\n**Partenariats AI ecosystem et investissements** ([doc=006_SAP_S4HANA_2023_Co",
+      "request_id": "req_a219567cc83145a5",
+      "status": "completed",
+      "epistemic_status": "partial",
+      "stop_reason": "budget_soft_cap_max_iterations",
+      "answer": "D'après les documents SAP consultés, l'écosystème SAP comprend plusieurs types de partenaires technologiques et IA :\n\n**Partenaires technologiques et hyperscalers :**\nSAP collabore avec des hyperscalers majeurs comme AWS, Azure, Google Cloud et IBM Cloud pour l'infrastructure cloud [doc=020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357]. L'écosystème SAP inclut également une collaboration en ingénierie avec ces hyperscalers et partenaires pour l'architecture de référence [doc=SAP_Cloud_ERP_Private__Operations_and_Support-2_14e7eee5].\n\n**Écosystème de partenaires de conseil :**\nSAP dispose d'un vaste réseau de plus de 200 000 consultants partenaires certifiés dans son écosystème [doc=SAP_Cloud_CPR_Private__Operations_and_Support-2_14e7eee5].\n\n**Solutions d'intelligence artificielle :**\nSAP intègre l'IA dans ses solutions avec Joule, son assistant IA d'entreprise, qui offre des capacités d'IA générative pour diverses fonctions métier (finance, chaîne d'approvisionnement, ventes, service) [doc=004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf]. SAP Business Suite intègre l'IA, les données et les applications sur une plateforme technologique [doc=004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf].\n\n**Modèle opérationnel collaboratif :**\nSAP travaille en équipe avec ses partenaires pour assurer une livraison fiable et sécurisée des services cloud [doc=SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0] et propose des services premium auprès d'experts SAP et partenaires certifiés [doc=SAP_Cloud_ERP_Private__Operations_and_Support-2_14e7eee5].",
+      "citations": [
+        {
+          "doc_id": "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf",
+          "section_id": "sec_ad7581ac43bf0f",
+          "section_path": null
+        },
+        {
+          "doc_id": "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf",
+          "section_id": "sec_7f91f523718fc5",
+          "section_path": null
+        },
+        {
+          "doc_id": "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf",
+          "section_id": "sec_b2944f9a222d7f",
+          "section_path": null
+        },
+        {
+          "doc_id": "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf",
+          "section_id": "sec_1d191cda2d9b45",
+          "section_path": null
+        },
+        {
+          "doc_id": "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf",
+          "section_id": "sec_5719c053fa3a07",
+          "section_path": null
+        },
+        {
+          "doc_id": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357",
+          "section_id": "sec_953d3e4e073c5b",
+          "section_path": null
+        },
+        {
+          "doc_id": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357",
+          "section_id": "sec_fd3ceb2bc2a1bc",
+          "section_path": null
+        },
+        {
+          "doc_id": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357",
+          "section_id": "sec_84b586e78c87d4",
+          "section_path": null
+        },
+        {
+          "doc_id": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357",
+          "section_id": "sec_63f3c5ace05236",
+          "section_path": null
+        },
+        {
+          "doc_id": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357",
+          "section_id": "sec_3043eb46ca6d36",
+          "section_path": null
+        },
+        {
+          "doc_id": "SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0",
+          "section_id": "sec_72c76591a4721f",
+          "section_path": null
+        },
+        {
+          "doc_id": "SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0",
+          "section_id": "sec_717fab4e269241",
+          "section_path": null
+        },
+        {
+          "doc_id": "SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0",
+          "section_id": "sec_bd5a7f16850a08",
+          "section_path": null
+        },
+        {
+          "doc_id": "SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0",
+          "section_id": "sec_cf27e62b0bc99b",
+          "section_path": null
+        },
+        {
+          "doc_id": "SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0",
+          "section_id": "sec_f81ae50a17c221",
+          "section_path": null
+        },
+        {
+          "doc_id": "SAP_Cloud_ERP_Private__Operations_and_Support-2_14e7eee5",
+          "section_id": "sec_9e13d9b92c774a",
+          "section_path": null
+        },
+        {
+          "doc_id": "SAP_Cloud_ERP_Private__Operations_and_Support-2_14e7eee5",
+          "section_id": "sec_6228dcfc0f8a2f",
+          "section_path": null
+        },
+        {
+          "doc_id": "SAP_Cloud_ERP_Private__Operations_and_Support-2_14e7eee5",
+          "section_id": "sec_d50814c571bdbf",
+          "section_path": null
+        },
+        {
+          "doc_id": "SAP_Cloud_ERP_Private__Operations_and_Support-2_14e7eee5",
+          "section_id": "sec_92f0898957d3b3",
+          "section_path": null
+        },
+        {
+          "doc_id": "SAP_Cloud_ERP_Private__Operations_and_Support-2_14e7eee5",
+          "section_id": "sec_12ee5152ac5cf4",
+          "section_path": null
+        },
+        {
+          "doc_id": "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf",
+          "section_id": "sec_ab91fce323218d",
+          "section_path": null
+        },
+        {
+          "doc_id": "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf",
+          "section_id": "sec_279d0af965b1e1",
+          "section_path": null
+        },
+        {
+          "doc_id": "RISE with SAP S4HANA Cloud private edition tailored option, Cloud ERP, tailored option Service Description Guide_ac99cc3b",
+          "section_id": "sec_986a6fb46e84b4",
+          "section_path": null
+        },
+        {
+          "doc_id": "RISE with SAP S4HANA Cloud private edition tailored option, Cloud ERP, tailored option Service Description Guide_ac99cc3b",
+          "section_id": "sec_f224922653e6d6",
+          "section_path": null
+        },
+        {
+          "doc_id": "RISE with SAP S4HANA Cloud private edition tailored option, Cloud ERP, tailored option Service Description Guide_ac99cc3b",
+          "section_id": "sec_a1b6897e4856fa",
+          "section_path": null
+        },
+        {
+          "doc_id": "RISE with SAP S4HANA Cloud private edition tailored option, Cloud ERP, tailored option Service Description Guide_ac99cc3b",
+          "section_id": "sec_14959a443d566b",
+          "section_path": null
+        },
+        {
+          "doc_id": "RISE with SAP S4HANA Cloud private edition tailored option, Cloud ERP, tailored option Service Description Guide_ac99cc3b",
+          "section_id": "sec_0d54f5d6f2c521",
+          "section_path": null
+        },
+        {
+          "doc_id": "?",
+          "section_id": "sec_6228dcfc0f8a2f",
+          "section_path": null
+        }
+      ],
+      "metrics": {
+        "n_iterations": 8,
+        "n_tool_calls": 8,
+        "n_evidence_items": 28,
+        "n_repairs": 0,
+        "retrieved_chars": 37747,
+        "output_tokens": 704,
+        "latency_s": 32.151084423065186
+      },
+      "total_latency_s": 32.15490770339966,
+      "error": null
+    }
+  ]
+}
