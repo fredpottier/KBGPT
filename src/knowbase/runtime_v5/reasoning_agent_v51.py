@@ -516,10 +516,30 @@ class ReasoningAgentV51:
 
     @staticmethod
     def _build_user_prompt(question: str, tenant_id: str, extra: str) -> str:
-        out = f"Question: {question}\n\nTenant: {tenant_id}\n"
+        # POST-MORTEM 143q bench : sans liste available_docs l'agent doit deviner
+        # les doc_ids → factual score 0.18. POC initial listait les docs → 0.63.
+        # Réintégration : inject liste depuis structure_loader (corpus indexé).
+        from knowbase.runtime_v5.structure_loader import list_available_doc_ids
+        try:
+            docs = list_available_doc_ids()
+        except Exception:
+            docs = []
+        docs_listing = (
+            "\n".join(f"  - {d}" for d in docs) if docs else "  (corpus not indexed)"
+        )
+        out = (
+            f"Question: {question}\n\n"
+            f"Tenant: {tenant_id}\n\n"
+            f"available_docs:\n{docs_listing}\n"
+        )
         if extra:
             out += f"\n{extra}\n"
-        out += "\nUse the reading tools to gather evidence, then provide your final answer with citations [doc=ID]."
+        out += (
+            "\nPlan your approach, use the reading tools to gather evidence, "
+            "and produce a final answer with citations [doc=ID].\n"
+            "If multiple docs are likely relevant, run outline() on the most "
+            "promising one FIRST before reading sections."
+        )
         return out
 
     @staticmethod
