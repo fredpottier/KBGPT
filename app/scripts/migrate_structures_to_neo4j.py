@@ -68,13 +68,14 @@ def migrate_document(dsg, tenant_id: str, doc_json: dict, dry_run: bool = False)
         stats["duration_s"] = time.time() - t0
         return stats
 
-    # 1. Upsert Document
+    # 1. Upsert Document (V1.5 : doc_version=1 int, composite key)
     try:
         dsg.upsert_document(
             tenant_id=tenant_id,
             doc_id=doc_id,
             doc_name=doc_name,
             n_pages=n_pages,
+            doc_version=1,
             extractor_version=extractor,
             active_status="active",
         )

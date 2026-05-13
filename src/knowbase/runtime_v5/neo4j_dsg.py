@@ -49,9 +49,11 @@ logger = logging.getLogger(__name__)
 # Schema constraints + indexes (embedded — équivalent migrations/v5_dsg_setup.cypher).
 # Ordre : constraints d'abord puis indexes. Tous idempotents (IF NOT EXISTS).
 _SCHEMA_STATEMENTS = [
-    # ─── Constraints (multi-tenant composite keys) ───
-    "CREATE CONSTRAINT v5_doc_tenant_unique IF NOT EXISTS "
-    "FOR (d:V5Document) REQUIRE (d.tenant_id, d.doc_id) IS UNIQUE",
+    # ─── Constraints (multi-tenant composite keys + versioning) ───
+    # V1.5 S2.3 : composite key inclut doc_version pour permettre staged+active
+    # coexistents lors du two-phase publish.
+    "CREATE CONSTRAINT v5_doc_tenant_version_unique IF NOT EXISTS "
+    "FOR (d:V5Document) REQUIRE (d.tenant_id, d.doc_id, d.doc_version) IS UNIQUE",
 
     "CREATE CONSTRAINT v5_doc_internal_unique IF NOT EXISTS "
     "FOR (d:V5Document) REQUIRE d.doc_internal_id IS UNIQUE",
@@ -80,6 +82,16 @@ _SCHEMA_STATEMENTS = [
 
     "CREATE INDEX v5_doc_active_status IF NOT EXISTS "
     "FOR (d:V5Document) ON (d.tenant_id, d.active_status)",
+
+    # Index pour lookup version courante (active) sans scan
+    "CREATE INDEX v5_doc_active_lookup IF NOT EXISTS "
+    "FOR (d:V5Document) ON (d.tenant_id, d.doc_id, d.active_status)",
+]
+
+# Statement de migration explicite (drop ancienne constraint si présente).
+# Exécuté UNE fois lors du setup_schema, sans IF NOT EXISTS (idempotent via try).
+_LEGACY_DROP_STATEMENTS = [
+    "DROP CONSTRAINT v5_doc_tenant_unique IF EXISTS",
 ]
 
 
@@ -125,12 +137,24 @@ class V5DSG:
     def setup_schema(self) -> dict:
         """Applique constraints + indexes V5 DSG (idempotent).
 
-        Utilise les statements embarqués `_SCHEMA_STATEMENTS`. Idempotent
-        grâce à IF NOT EXISTS sur chaque CREATE.
+        - Drop legacy constraints obsolètes (ex: v5_doc_tenant_unique pré-V1.5)
+        - Apply _SCHEMA_STATEMENTS avec IF NOT EXISTS
 
         Returns:
-            {"applied": int, "total": int, "errors": list[dict]}
+            {"applied": int, "total": int, "errors": list[dict], "legacy_dropped": int}
         """
+        # Phase 1 : drop legacy constraints (pour migration V1.5 → V1.5+)
+        legacy_dropped = 0
+        for stmt in _LEGACY_DROP_STATEMENTS:
+            try:
+                self._execute_write(stmt)
+                legacy_dropped += 1
+                logger.info(f"[V5DSG] Dropped legacy: {stmt[:80]}")
+            except Exception as e:
+                # Si la constraint n'existe pas, OK
+                logger.debug(f"[V5DSG] Legacy drop noop: {stmt[:80]} — {e}")
+
+        # Phase 2 : apply schema courant
         applied = 0
         errors = []
         for stmt in _SCHEMA_STATEMENTS:
@@ -143,16 +167,27 @@ class V5DSG:
                 errors.append({"stmt": stmt[:200], "error": str(e)})
                 logger.error(f"[V5DSG] Failed: {stmt[:80]} — {e}")
 
-        return {"applied": applied, "total": len(_SCHEMA_STATEMENTS), "errors": errors}
+        return {
+            "applied": applied,
+            "total": len(_SCHEMA_STATEMENTS),
+            "errors": errors,
+            "legacy_dropped": legacy_dropped,
+        }
 
     # ────────────────────────────────────────────────────────────────────────
     # Document operations
     # ────────────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _doc_internal_id(tenant_id: str, doc_id: str) -> str:
-        """Opaque global ID = sha256(tenant_id, doc_id) (anti-collision)."""
-        return "doc_" + hashlib.sha256(f"{tenant_id}|{doc_id}".encode("utf-8")).hexdigest()[:24]
+    def _doc_internal_id(tenant_id: str, doc_id: str, doc_version: int = 1) -> str:
+        """Opaque global ID = sha256(tenant_id, doc_id, doc_version) (anti-collision).
+
+        V1.5 S2.3 : inclut doc_version pour permettre staged+active coexistents
+        avec composite key (tenant_id, doc_id, doc_version) UNIQUE.
+        """
+        return "doc_" + hashlib.sha256(
+            f"{tenant_id}|{doc_id}|v{doc_version}".encode("utf-8")
+        ).hexdigest()[:24]
 
     def upsert_document(
         self,
@@ -160,7 +195,7 @@ class V5DSG:
         doc_id: str,
         doc_name: Optional[str] = None,
         n_pages: int = 0,
-        doc_version: str = "1.0",
+        doc_version: int = 1,
         source_uri: str = "",
         canonical_text_uri: str = "",
         extractor_version: str = "docling-page-fallback",
@@ -170,16 +205,19 @@ class V5DSG:
 
         Args:
             tenant_id: tenant isolation key (obligatoire)
-            doc_id: ID document (unique par tenant)
+            doc_id: ID document (unique par tenant + version)
+            doc_version: version intégrale (1, 2, 3...) — composite key
 
         Returns:
             dict avec doc_internal_id assigné
         """
         if not tenant_id or not doc_id:
             raise ValueError("tenant_id and doc_id required")
-        doc_internal_id = self._doc_internal_id(tenant_id, doc_id)
+        if not isinstance(doc_version, int) or doc_version < 1:
+            raise ValueError("doc_version must be positive int")
+        doc_internal_id = self._doc_internal_id(tenant_id, doc_id, doc_version)
         query = """
-        MERGE (d:V5Document {tenant_id: $tenant_id, doc_id: $doc_id})
+        MERGE (d:V5Document {tenant_id: $tenant_id, doc_id: $doc_id, doc_version: $doc_version})
         ON CREATE SET
             d.doc_internal_id = $doc_internal_id,
             d.doc_name = $doc_name,
@@ -308,15 +346,44 @@ class V5DSG:
     # Read operations (tenant_id MANDATORY in WHERE)
     # ────────────────────────────────────────────────────────────────────────
 
-    def get_document(self, tenant_id: str, doc_id: str) -> Optional[dict]:
-        """Récupère un Document par (tenant_id, doc_id)."""
+    def get_document(
+        self, tenant_id: str, doc_id: str,
+        doc_version: Optional[int] = None,
+        active_only: bool = True,
+    ) -> Optional[dict]:
+        """Récupère un Document par (tenant_id, doc_id).
+
+        Args:
+            tenant_id: tenant isolation key
+            doc_id: ID document
+            doc_version: si fourni, exige cette version exacte
+            active_only: si True (default), filtre active_status='active'.
+                         Ignoré si doc_version est fourni.
+        """
         if not tenant_id or not doc_id:
             raise ValueError("tenant_id and doc_id required")
-        query = """
-        MATCH (d:V5Document {tenant_id: $tenant_id, doc_id: $doc_id})
-        RETURN d
-        """
-        result = self._execute_query(query, tenant_id=tenant_id, doc_id=doc_id)
+        if doc_version is not None:
+            query = """
+            MATCH (d:V5Document {tenant_id: $tenant_id, doc_id: $doc_id, doc_version: $doc_version})
+            RETURN d
+            """
+            result = self._execute_query(
+                query, tenant_id=tenant_id, doc_id=doc_id, doc_version=doc_version
+            )
+        elif active_only:
+            query = """
+            MATCH (d:V5Document {tenant_id: $tenant_id, doc_id: $doc_id, active_status: 'active'})
+            RETURN d
+            """
+            result = self._execute_query(query, tenant_id=tenant_id, doc_id=doc_id)
+        else:
+            query = """
+            MATCH (d:V5Document {tenant_id: $tenant_id, doc_id: $doc_id})
+            RETURN d
+            ORDER BY d.doc_version DESC
+            LIMIT 1
+            """
+            result = self._execute_query(query, tenant_id=tenant_id, doc_id=doc_id)
         if not result:
             return None
         return dict(result[0]["d"])

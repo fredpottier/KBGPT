@@ -1,17 +1,25 @@
 """V5 DSG — Two-phase publish pour ingestion atomique.
 
-⚠️ DRAFT V1.5 — NON-BRANCHÉ (différé post-S3).
-
-État : module rédigé pour ancrer l'architecture cible, mais nécessite une
-migration de schéma (composite key Neo4j (tenant_id, doc_id, doc_version)
-UNIQUE au lieu de (tenant_id, doc_id) UNIQUE) + ré-migration des 38 docs
-existants + S2.0 (bench Docling vs SmolDocling) AVANT activation.
-
-Priorité actuelle : S3 (ReadingTools) car chemin critique qualité agent.
-À reprendre quand on attaque l'industrialisation du pipeline ingestion
-(post-bench extractors comparison gate).
-
 ADR V1.5 §3c (Sprint S2.3) : staging → validation → atomic flip.
+
+État V1.5+ : ACTIVÉ. Schéma migré (composite key (tenant_id, doc_id, doc_version)
+UNIQUE) + 38 docs ré-importés avec doc_version=1 int.
+
+Note : ce module ne fait PAS d'extraction (S2.0 bench Docling vs SmolDocling
+toujours différé). Il prend en entrée une structure DEJA extraite et applique
+le flow atomique. Utilisé par S2.6 (intégration ClaimFirst order=2.5) une fois
+l'extraction industrialisée.
+
+⚠️ Limitation V1.5 — sections partagées entre versions :
+- V5Document a composite key (tenant_id, doc_id, doc_version) — versions multiples OK
+- V5Section a composite key (tenant_id, section_id) — section_id stable entre versions
+- Conséquence : si une réingestion change le contenu d'une section avec même
+  section_id (e.g. typo correction), le contenu staged écrase l'actif in-place
+  pendant la fenêtre staging→flip (typiquement <1s).
+- Workaround : pendant cette fenêtre, l'active Document pointe via HAS_SECTION
+  vers une section dont le contenu est temporairement celui de la nouvelle version.
+- Résolution V1.6 : versioning sections via (tenant_id, section_id, doc_version)
+  composite key. Différé car nécessite réécriture lookup logic.
 
 Garanties :
 - Une réingestion en cours n'expose JAMAIS de structure partielle aux runtimes.
