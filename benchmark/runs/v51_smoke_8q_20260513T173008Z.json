@@ -1,0 +1,245 @@
+{
+  "_meta": {
+    "ts": "20260513T173008Z",
+    "url": "http://localhost:8000",
+    "tenant_id": "default",
+    "panel_source": "benchmark/questions/quantitative_panel_10q.json",
+    "n_questions": 8,
+    "n_completed": 8,
+    "total_duration_s": 139.80228543281555
+  },
+  "results": [
+    {
+      "qid": "V2_V1_GOLD_SAP_Q10_1",
+      "primary_type": "quantitative",
+      "question": "Quel est le SLA d'uptime contractuel de S/4HANA Cloud Private Edition (en % de disponibilité mensuelle) ?",
+      "ground_truth": "Le SLA est de 99,9% en standard mais pouvant être augmenté à 99,9% contractuellement via la souscription d'une option complémentaire.",
+      "request_id": "req_04420ad549b3401c",
+      "status": "completed",
+      "epistemic_status": "supported",
+      "stop_reason": "concluded",
+      "answer": "          Parfait ! J'ai trouvé l'information recherchée. Selon le document SLA, le niveau de disponibilité contractuel pour S/4HANA Cloud Private Edition est de **99,7%** pour les environnements de production (PRD) et **95,0%** pour les environnements non-production (NON-PRD), à moins qu'un pourcentage plus élevé ne soit spécifié dans le bon de commande.\n\n**Réponse finale :**\n\nLe SLA d'uptime contractuel de S/4HANA Cloud Private Edition est de :\n- **99,7%** de disponibilité mensuelle pour les environnements de production (PRD)\n- **95,0%** de disponibilité mensuelle pour les environnements non-production (NON-PRD)\n\nCes pourcentages peuvent être supérieurs si spécifiés dans le bon de commande. [doc=Service Level Agreement for Private Cloud Edition Services and Tailored Option Services_fed78d51]",
+      "citations": [
+        {
+          "doc_id": "Service Level Agreement for Private Cloud Edition Services and Tailored Option Services_fed78d51",
+          "section_id": "sec_621c75c32d432b",
+          "section_path": null
+        },
+        {
+          "doc_id": "Service Level Agreement for Private Cloud Edition Services and Tailored Option Services_fed78d51",
+          "section_id": "sec_c5b5bfb5443a35",
+          "section_path": null
+        },
+        {
+          "doc_id": "Service Level Agreement for Private Cloud Edition Services and Tailored Option Services_fed78d51",
+          "section_id": "sec_38f0081b981ef4",
+          "section_path": null
+        },
+        {
+          "doc_id": "Service Level Agreement for Private Cloud Edition Services and Tailored Option Services_fed78d51",
+          "section_id": "sec_34d02013491b25",
+          "section_path": null
+        },
+        {
+          "doc_id": "?",
+          "section_id": "sec_c5b5bfb5443a35",
+          "section_path": null
+        }
+      ],
+      "metrics": {
+        "n_iterations": 7,
+        "n_tool_calls": 6,
+        "n_evidence_items": 5,
+        "n_repairs": 0,
+        "retrieved_chars": 10143,
+        "output_tokens": 632,
+        "latency_s": 22.281985759735107
+      },
+      "total_latency_s": 22.285568237304688,
+      "error": null
+    },
+    {
+      "qid": "V2_V1_GOLD_SAP_Q10_2",
+      "primary_type": "quantitative",
+      "question": "Combien de mises à jour OS par an sont incluses dans le contrat RISE Premium Supplier pour S/4HANA Cloud Private Edition ?",
+      "ground_truth": "Une nouvelle version est publiée tous les deux ans tandis que des Features Pack sont généralement publiés tous les 6 mois et une version standard est maintenue 7 ans.",
+      "request_id": "req_00d6084bdb544ddc",
+      "status": "completed",
+      "epistemic_status": "supported",
+      "stop_reason": "concluded",
+      "answer": "          Je vais essayer avec le document \"SAP_CAS_for_SAP_Cloud_ERP_Private_L2_v.04-2026_PUBLISHED_4b71178b\" qui semble être un contrat de service.<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>find_in<｜tool▁sep｜>{\"doc_id\": \"SAP_CAS_for_SAP_Cloud_ERP_Private_L2_v.04-2026_PUBLISHED_4b71178b\", \"query\": \"Premium Supplier\"} mum=5}db6b.",
+      "citations": [],
+      "metrics": {
+        "n_iterations": 8,
+        "n_tool_calls": 7,
+        "n_evidence_items": 0,
+        "n_repairs": 0,
+        "retrieved_chars": 3566,
+        "output_tokens": 569,
+        "latency_s": 34.149829149246216
+      },
+      "total_latency_s": 34.153465270996094,
+      "error": null
+    },
+    {
+      "qid": "V2_V1_GOLD_SAP_Q10_3",
+      "primary_type": "quantitative",
+      "question": "Quelle est la durée typique d'une upgrade d'une release N à N+1 sur S/4HANA Cloud Private Edition ?",
+      "ground_truth": "Une upgrade PCE N→N+1 dépend de la taille système, custom code, add-ons, downtime accepté, tests métier et complexité Finance/logistique. Le guide SAP décrit le processus et outils, mais pas une durée universelle. Cette durée doit être définie avec les équipes SAP ECS qui réaliseront cette montée de",
+      "request_id": "req_98cc5078c4b44813",
+      "status": "completed",
+      "epistemic_status": "supported",
+      "stop_reason": "concluded",
+      "answer": "          Maintenant, je vais rechercher spécifiquement des informations sur la durée d'upgrade dans ce guide.<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>find_in<｜tool▁sep｜>{\"doc_id\": \"008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696\", \"query\": \"durée temps duration upgrade release\", \"max_results\": 10, \"snippet_chars\": 400} FF00FF      .",
+      "citations": [],
+      "metrics": {
+        "n_iterations": 4,
+        "n_tool_calls": 3,
+        "n_evidence_items": 0,
+        "n_repairs": 0,
+        "retrieved_chars": 13528,
+        "output_tokens": 288,
+        "latency_s": 9.772574186325073
+      },
+      "total_latency_s": 9.776219129562378,
+      "error": null
+    },
+    {
+      "qid": "V2_T4_T4_HUM_0022",
+      "primary_type": "multi_hop",
+      "question": "Que disent les documents sur les certifications et audits de securite SAP (SOC, ISO) pour les services cloud ?",
+      "ground_truth": "Les certifications et audits de sécurité pour les services cloud SAP S/4HANA Cloud Private Edition sont documentés principalement dans le RISE with SAP Cloud ERP Private deck ([doc=020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357]) et complétés par le deck Access to Customer Systems ([doc=007_SAP_S",
+      "request_id": "req_9969b55fd9464c58",
+      "status": "completed",
+      "epistemic_status": "partial",
+      "stop_reason": "budget_soft_cap_max_iterations",
+      "answer": "Les documents indiquent que SAP maintient plusieurs certifications et audits de sécurité pour ses services cloud. Les certifications actuelles incluent : ISO 27001, ISO 27017, ISO 27018, ISO 22301, ISO 9001, BS 10012, ISAE 3402 SOC1 Type 2, ISAE 3000 SOC2 Type 2, ainsi que la conformité avec BSI-C5, GDPR, NIST CSF, PCI-DSS, HIPAA, CCPS, ENS et ISMAP. Ces certifications couvrent la gestion de la sécurité de l'information, la protection des données, la continuité des activités et diverses réglementations sectorielles [doc=11476-SAPSE_RISE_with_SAP_Security_final_31c725f3].",
+      "citations": [
+        {
+          "doc_id": "?",
+          "section_id": "sec_a52c46e9f46693",
+          "section_path": null
+        }
+      ],
+      "metrics": {
+        "n_iterations": 8,
+        "n_tool_calls": 8,
+        "n_evidence_items": 1,
+        "n_repairs": 0,
+        "retrieved_chars": 9727,
+        "output_tokens": 526,
+        "latency_s": 24.220731496810913
+      },
+      "total_latency_s": 25.56396746635437,
+      "error": null
+    },
+    {
+      "qid": "V2_V1_GOLD_SAP_Q9_3",
+      "primary_type": "unanswerable",
+      "question": "Combien de clients ont migré vers S/4HANA Cloud Private Edition en Europe en 2024 ?",
+      "ground_truth": "SAP publie parfois des métriques globales clients/cloud, mais pas nécessairement le nombre exact de clients européens ayant migré vers PCE en 2024.",
+      "request_id": "req_3e921262d70349d0",
+      "status": "completed",
+      "epistemic_status": "supported",
+      "stop_reason": "concluded",
+      "answer": "Let me try searching in one of the more relevant-looking documents about S/4HANA Cloud Private Edition:<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>find_in<｜tool▁sep｜>{\"doc_id\": \"004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf\", \"query\": \"clients migré Europe 2024\"} mum",
+      "citations": [],
+      "metrics": {
+        "n_iterations": 3,
+        "n_tool_calls": 2,
+        "n_evidence_items": 0,
+        "n_repairs": 0,
+        "retrieved_chars": 2649,
+        "output_tokens": 212,
+        "latency_s": 6.216306924819946
+      },
+      "total_latency_s": 8.68262529373169,
+      "error": null
+    },
+    {
+      "qid": "V2_T1_T1_HUM_0053",
+      "primary_type": "factual",
+      "question": "Combien de Lines of Business sont couvertes par SAP S/4HANA 1809 ?",
+      "ground_truth": "10 Lines of Business : Sales & Marketing, Asset Management, Supply Chain, Services, Manufacturing, Finance, Procurement, Human Resource, R&D, Cross Topics.",
+      "request_id": "req_53de4a4c49fd41a1",
+      "status": "completed",
+      "epistemic_status": "partial",
+      "stop_reason": "budget_soft_cap_max_iterations",
+      "answer": "D'après le document sur la portée commerciale de SAP S/4HANA 1809, je peux identifier plusieurs Lines of Business (LoB) couvertes par cette version. Les principales LoB mentionnées incluent :\n\n- SAP S/4HANA Sales & Marketing\n- SAP S/4HANA Service  \n- SAP S/4HANA Supply Chain\n- SAP S/4HANA Manufacturing\n- SAP S/4HANA Sourcing and Procurement\n- SAP S/4HANA Research & Development / Engineering\n- SAP S/4HANA Asset Management\n- SAP S/4HANA Core Finance\n\nLe document ne fournit pas un nombre exact total de Lines of Business couvertes par SAP S/4HANA 1809, mais présente ces principales catégories fonctionnelles qui représentent les différents domaines métier pris en charge par la suite.\n\n[doc=018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba]",
+      "citations": [],
+      "metrics": {
+        "n_iterations": 3,
+        "n_tool_calls": 3,
+        "n_evidence_items": 0,
+        "n_repairs": 0,
+        "retrieved_chars": 16630,
+        "output_tokens": 204,
+        "latency_s": 12.524183750152588
+      },
+      "total_latency_s": 12.527731657028198,
+      "error": null
+    },
+    {
+      "qid": "V2_T1_T1_HUM_0044",
+      "primary_type": "factual",
+      "question": "Combien de pays de l'UE sont couverts par la fonctionnalite Intrastat dans S/4HANA ?",
+      "ground_truth": "La fonctionnalite Intrastat couvre les 27 Etats membres de l'UE.",
+      "request_id": "req_4d6e8848dd474e20",
+      "status": "completed",
+      "epistemic_status": "partial",
+      "stop_reason": "budget_soft_cap_max_iterations",
+      "answer": "La fonctionnalité Intrastat dans S/4HANA couvre 26 pays de l'UE [doc=018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba].",
+      "citations": [
+        {
+          "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba",
+          "section_id": "sec_6be63abeb5f636",
+          "section_path": null
+        },
+        {
+          "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba",
+          "section_id": "sec_fe4d45c751fca6",
+          "section_path": null
+        },
+        {
+          "doc_id": "?",
+          "section_id": "sec_6be63abeb5f636",
+          "section_path": null
+        }
+      ],
+      "metrics": {
+        "n_iterations": 3,
+        "n_tool_calls": 3,
+        "n_evidence_items": 3,
+        "n_repairs": 0,
+        "retrieved_chars": 5832,
+        "output_tokens": 197,
+        "latency_s": 7.435386896133423
+      },
+      "total_latency_s": 8.567378997802734,
+      "error": null
+    },
+    {
+      "qid": "V2_T4_T4_HUM_0025",
+      "primary_type": "multi_hop",
+      "question": "Que disent les documents sur les partenaires technologiques et IA de l'ecosysteme SAP ?",
+      "ground_truth": "L'écosystème de partenaires technologiques et IA de SAP est explicitement nommé dans le Business Scope 2025 SAP Cloud ERP Private ([doc=006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0]) à travers le slide \"SAP Business AI\".\n\n**Partenariats AI ecosystem et investissements** ([doc=006_SAP_S4HANA_2023_Co",
+      "request_id": "req_40da0743597d420c",
+      "status": "completed",
+      "epistemic_status": "supported",
+      "stop_reason": "concluded",
+      "answer": "          Let me try searching for specific technology partners that SAP might mention:<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>find_in<｜tool▁sep｜>{\"doc_id\": \"SAP_CAS_for_SAP_Cloud_ERP_Private_L2_v.04-2026_PUBLISHED_4b71178b\", \"query\": \"Microsoft Google AWS Azure OpenAI\", \"max_results\": 10}的时刻     .",
+      "citations": [],
+      "metrics": {
+        "n_iterations": 7,
+        "n_tool_calls": 6,
+        "n_evidence_items": 0,
+        "n_repairs": 0,
+        "retrieved_chars": 3555,
+        "output_tokens": 471,
+        "latency_s": 17.612175464630127
+      },
+      "total_latency_s": 18.222845315933228,
+      "error": null
+    }
+  ]
+}
