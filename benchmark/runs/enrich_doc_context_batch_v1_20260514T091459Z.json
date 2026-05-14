@@ -1,0 +1,1074 @@
+{
+  "_meta": {
+    "ts": "20260514T091459Z",
+    "tag": "batch_v1",
+    "model": "deepseek-ai/DeepSeek-V3.1",
+    "n_total": 38,
+    "duration_s": 177.5,
+    "dry_run": false
+  },
+  "results": [
+    {
+      "doc_id": "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9",
+      "status": "updated",
+      "title": "SAP S/4HANA 2023 Upgrade Guide and Procedures",
+      "summary": "This document provides a comprehensive guide for upgrading from lower SAP S/4HANA releases to SAP S/4HANA 2023, including preparation, simplification item checks, and custom code migration.",
+      "key_topics": [
+        "Upgrade Process",
+        "Simplification Item Checks",
+        "Custom Code Analysis",
+        "System Requirements",
+        "Software Update Manager"
+      ],
+      "key_terms": [
+        "Simplification Item-Check (SI-Check)",
+        "Simplification Item Catalog",
+        "SAP Readiness Check",
+        "Custom Code Migration",
+        "Software Update Manager (SUM)",
+        "SAP S/4HANA 2023",
+        "ABAP Test Cockpit (ATC)",
+        "SAP Note 3307222",
+        "SAP Product Availability Matrix (PAM)",
+        "SAP BASIS 7.58"
+      ],
+      "anchors_hint_count": 2,
+      "input_chars": 12056,
+      "latency_s": 6.2
+    },
+    {
+      "doc_id": "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_—_Highlights_of_Innovations_(2023_FPS03)_01b01cbf",
+      "status": "updated",
+      "title": "SAP S/4HANA Cloud Private Edition Innovations 2023 FPS03",
+      "summary": "This document details the 2023 FPS03 innovations for SAP S/4HANA Cloud Private Edition, focusing on AI integration, Joule, and new features across various business modules.",
+      "key_topics": [
+        "Artificial Intelligence Integration",
+        "Enterprise Resource Planning",
+        "Cloud Computing",
+        "Business Process Automation",
+        "Product Roadmap"
+      ],
+      "key_terms": [
+        "SAP S/4HANA Cloud Private Edition",
+        "Joule",
+        "2023 FPS03",
+        "SAP Business Data Cloud",
+        "SAP Global Trade Services",
+        "Manage Maintenance Orders App",
+        "Extended Warehouse Management",
+        "Detailed Scheduling Optimizer",
+        "Manage Production Models",
+        "Road Map Explorer"
+      ],
+      "anchors_hint_count": 3,
+      "input_chars": 11740,
+      "latency_s": 2.3
+    },
+    {
+      "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf",
+      "status": "updated",
+      "title": "Conversion Guide for SAP S/4HANA 2022",
+      "summary": "This guide provides instructions for converting a system to SAP S/4HANA, covering preparation, tools, and post-conversion activities.",
+      "key_topics": [
+        "System Conversion",
+        "Data Migration",
+        "Custom Code Adaptation",
+        "Software Update Management",
+        "Post-Conversion Cleanup"
+      ],
+      "key_terms": [
+        "SAP S/4HANA 2022",
+        "Software Update Manager (SUM)",
+        "Simplification Item-Check",
+        "Silent Data Migration Infrastructure (SDMI)",
+        "SAP DVM Work Center",
+        "Maintenance Planner",
+        "SAP Readiness Check",
+        "SAP HANA",
+        "SAP Fiori",
+        "ABAP Platform"
+      ],
+      "anchors_hint_count": 1,
+      "input_chars": 12054,
+      "latency_s": 7.4
+    },
+    {
+      "doc_id": "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0",
+      "status": "updated",
+      "title": "Conversion Guide for SAP S/4HANA and SAP S/4HANA Cloud",
+      "summary": "This guide provides instructions for converting an existing SAP Business Suite system to SAP S/4HANA 2023 or SAP S/4HANA Cloud Private Edition.",
+      "key_topics": [
+        "System Conversion Process",
+        "Custom Code Migration",
+        "Data Migration",
+        "Software Update Management",
+        "Landscape Adaptation"
+      ],
+      "key_terms": [
+        "SAP S/4HANA 2023",
+        "Software Update Manager (SUM)",
+        "Simplification Item Catalog",
+        "Silent Data Migration Infrastructure (SDMI)",
+        "Maintenance Planner",
+        "SAP Readiness Check",
+        "Custom Code Migration tool",
+        "SAP Note 2187425",
+        "SAP Note 1749142",
+        "SAP Fiori"
+      ],
+      "anchors_hint_count": 1,
+      "input_chars": 11975,
+      "latency_s": 6.7
+    },
+    {
+      "doc_id": "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896",
+      "status": "updated",
+      "title": "SAP S/4HANA Cloud Private Edition Access to Customer Systems",
+      "summary": "This document outlines SAP's approach and procedures for accessing customer systems in SAP S/4HANA Cloud Private Edition environments.",
+      "key_topics": [
+        "Authentication",
+        "Authorisation",
+        "Remote Support Access",
+        "System Connectivity",
+        "Customer Data Security"
+      ],
+      "key_terms": [
+        "SAP S/4HANA Cloud Private Edition",
+        "SAP Cloud Application Support (CAS)",
+        "SAPRouter",
+        "Customer Remote Logon Depot",
+        "SAP for Me",
+        "IPSec VPN",
+        "SAP Product Support",
+        "ISO 270001",
+        "Advanced Secure Support",
+        "SAP Enterprise Support"
+      ],
+      "anchors_hint_count": 3,
+      "input_chars": 12046,
+      "latency_s": 5.8
+    },
+    {
+      "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696",
+      "status": "updated",
+      "title": "SAP S/4HANA Cloud Private Edition 2025 Upgrade Guide",
+      "summary": "This guide explains the upgrade process from lower releases to SAP S/4HANA Cloud Private Edition 2025.",
+      "key_topics": [
+        "System Upgrade Process",
+        "Custom Code Migration",
+        "Simplification Item Check",
+        "Software Update Manager",
+        "Authorization Management"
+      ],
+      "key_terms": [
+        "SAP S/4HANA Cloud Private Edition 2025",
+        "Software Update Manager (SUM)",
+        "Simplification Item-Check (SI-Check)",
+        "SAP Readiness Check",
+        "Custom Code Migration Guide",
+        "Maintenance Planner",
+        "SAP Note 3658070",
+        "SAP Note 2399707",
+        "SAP Note 2502552",
+        "SAP_BC_YCM_APS"
+      ],
+      "anchors_hint_count": 1,
+      "input_chars": 12056,
+      "latency_s": 4.6
+    },
+    {
+      "doc_id": "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+      "status": "updated",
+      "title": "Conversion Guide for SAP S/4HANA Cloud Private Edition",
+      "summary": "This guide provides instructions for converting an SAP ERP 6.0 system to SAP S/4HANA Cloud Private Edition, including planning, preparation, and execution steps.",
+      "key_topics": [
+        "System Conversion",
+        "Cloud Migration",
+        "Technical Preparation",
+        "Custom Code Analysis",
+        "Authorization Conversion"
+      ],
+      "key_terms": [
+        "SAP S/4HANA Cloud Private Edition",
+        "SAP ERP 6.0",
+        "Software Update Manager (SUM)",
+        "Maintenance Planner",
+        "Simplification Item Catalog",
+        "RISE with SAP",
+        "DMOVE2S4",
+        "Database Migration Option (DMO)",
+        "ABAP Test Cockpit (ATC)",
+        "SAP Note 3117879"
+      ],
+      "anchors_hint_count": 4,
+      "input_chars": 11938,
+      "latency_s": 5.8
+    },
+    {
+      "doc_id": "011_SAP_S4HANA_2023_Installation_Guide_23de8c60",
+      "status": "updated",
+      "title": "SAP S/4HANA Installation Guide and Follow-Up Activities",
+      "summary": "This document provides guidance for installing SAP S/4HANA and configuring various integrated components and follow-up activities.",
+      "key_topics": [
+        "System Landscape Deployment",
+        "Data Migration",
+        "Component Installation",
+        "Post-Installation Configuration",
+        "Integration Scenarios"
+      ],
+      "key_terms": [
+        "SAP S/4HANA Migration Cockpit",
+        "Maintenance Planner",
+        "SAP Fiori Front-end Server",
+        "SAP Gateway",
+        "ABAP Platform",
+        "PI Adapters",
+        "Advanced Variant Configuration",
+        "Commercial Project Management",
+        "BW-IP",
+        "Transportation Management"
+      ],
+      "anchors_hint_count": 1,
+      "input_chars": 12056,
+      "latency_s": 5.6
+    },
+    {
+      "doc_id": "012_SAP_S4HANA_2021_Installation_Guide_c441dbaf",
+      "status": "updated",
+      "title": "Installation Guide for SAP S/4HANA 2021 System",
+      "summary": "This guide provides installation procedures, documentation requirements, and follow-up activities for implementing SAP S/4HANA 2021.",
+      "key_topics": [
+        "System Installation",
+        "User Assistance Configuration",
+        "Technical Job Framework",
+        "Role Configuration",
+        "Follow-up Activities"
+      ],
+      "key_terms": [
+        "SAP S/4HANA 2021",
+        "Maintenance Planner",
+        "Software Provisioning tool",
+        "SAP Fiori",
+        "ABAP Platform",
+        "SAP Note 2251604",
+        "SAP Note 2733253",
+        "/LTB/JOB_DISPATCHER",
+        "SAP Predictive Factory",
+        "SAP Analytics Cloud"
+      ],
+      "anchors_hint_count": 1,
+      "input_chars": 11961,
+      "latency_s": 5.2
+    },
+    {
+      "doc_id": "013_SAP-014_What's_New_in_SAP_S_4HANA_and_SAP_S_4HANA_Cloud_Private_Edition_2023_SPS04_611b554d",
+      "status": "updated",
+      "title": "SAP S/4HANA Cloud Private Edition 2023 SPS04 Release Notes",
+      "summary": "This document details the new features and enhancements in SAP S/4HANA and SAP S/4HANA Cloud Private Edition for the 2023 SPS04 release.",
+      "key_topics": [
+        "Master Data Maintenance",
+        "Document Management",
+        "Financial Accounting",
+        "Production Planning",
+        "Product Lifecycle Management"
+      ],
+      "key_terms": [
+        "SAP S/4HANA Cloud Private Edition",
+        "Maintain Business Partner report",
+        "AI-Assisted Journal Upload",
+        "CDS Views",
+        "Monitor Material Coverage",
+        "BAdI Dynamic Field Control",
+        "Manage Change Records",
+        "Transportation Requirement Routing and Scheduling",
+        "SAP Business Accelerator Hub",
+        "SAP Continuous Influence Program"
+      ],
+      "anchors_hint_count": 1,
+      "input_chars": 11911,
+      "latency_s": 6.3
+    },
+    {
+      "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07",
+      "status": "updated",
+      "title": "Operations Guide for SAP S/4HANA 2021 Content",
+      "summary": "This document provides operational guidance for monitoring, troubleshooting, and administering SAP S/4HANA systems and its business applications.",
+      "key_topics": [
+        "System Monitoring",
+        "Data Archiving",
+        "Troubleshooting",
+        "Workflow Management",
+        "Interface Monitoring"
+      ],
+      "key_terms": [
+        "SAP S/4HANA",
+        "EWM",
+        "ABAP Platform",
+        "RFC",
+        "IDoc",
+        "CCMS",
+        "ST22",
+        "PPH_SETUP_MRPRECORDS",
+        "SXMB_MONI",
+        "EHFND_WFT"
+      ],
+      "anchors_hint_count": 5,
+      "input_chars": 11904,
+      "latency_s": 5.2
+    },
+    {
+      "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e",
+      "status": "updated",
+      "title": "SAP S/4HANA 2022 Operations Guide for System Monitoring and Troubleshooting",
+      "summary": "This document provides operational guidance for monitoring, troubleshooting, and maintaining various SAP S/4HANA 2022 business applications and technical components.",
+      "key_topics": [
+        "System Monitoring",
+        "Troubleshooting Procedures",
+        "Data Archiving",
+        "Background Job Management",
+        "Performance Analysis"
+      ],
+      "key_terms": [
+        "PPH_SETUP_MRPRECORDS",
+        "SAP Information Lifecycle Management",
+        "bgRFC",
+        "CCMS",
+        "SXMB_MONI",
+        "SFW5",
+        "R_EHPRC_DPP_CLEANUP",
+        "Ariba Network",
+        "SAP Fieldglass",
+        "MDG_BS_FILE_UPLOAD"
+      ],
+      "anchors_hint_count": 2,
+      "input_chars": 11971,
+      "latency_s": 3.6
+    },
+    {
+      "doc_id": "017_SAP_S4HANA_2023_Operations_Guide_b11842e3",
+      "status": "updated",
+      "title": "SAP S/4HANA Operations Guide for System Monitoring and Troubleshooting",
+      "summary": "This document provides operational guidance for monitoring, troubleshooting, and maintaining SAP S/4HANA systems, including data archiving, background jobs, and application logging.",
+      "key_topics": [
+        "System Monitoring",
+        "Data Archiving",
+        "Troubleshooting",
+        "Background Processing",
+        "Application Logging"
+      ],
+      "key_terms": [
+        "ABAP Platform",
+        "SAP S/4HANA",
+        "CCMS",
+        "bgRFC",
+        "PPH_SETUP_MRPRECORDS",
+        "R_EHFND_WFF_CORRECT_PCBOS",
+        "SAP Business Workflow",
+        "SAP Information Lifecycle Management",
+        "Extended Warehouse Management",
+        "Transportation Management"
+      ],
+      "anchors_hint_count": 3,
+      "input_chars": 12054,
+      "latency_s": 4.6
+    },
+    {
+      "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba",
+      "status": "updated",
+      "title": "SAP S/4HANA Business Scope Release 1809 Overview",
+      "summary": "This document outlines the features, architecture, and simplification items for various SAP S/4HANA modules and line-of-business solutions in the 1809 release.",
+      "key_topics": [
+        "Enterprise Architecture Simplification",
+        "Cloud Integration",
+        "Business Process Transformation",
+        "Fiori Application Deployment",
+        "Data Model Migration"
+      ],
+      "key_terms": [
+        "SAP S/4HANA",
+        "SAP HANA",
+        "Fiori Apps",
+        "Business Partner",
+        "Simplification",
+        "SAP Note 2265093",
+        "SAP Note 2713963",
+        "SAP Note 2270544",
+        "SAP Note 2223144",
+        "Central Contract Administration"
+      ],
+      "anchors_hint_count": 1,
+      "input_chars": 12054,
+      "latency_s": 5.1
+    },
+    {
+      "doc_id": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357",
+      "status": "updated",
+      "title": "SAP RISE Security Governance and Cloud Operations",
+      "summary": "This document outlines security protocols, governance, and operational procedures for SAP RISE cloud environments on hyperscaler platforms.",
+      "key_topics": [
+        "Cloud Security Governance",
+        "Data Protection",
+        "Network Segmentation",
+        "Incident Management",
+        "Compliance and Audits"
+      ],
+      "key_terms": [
+        "RISE",
+        "SAP S/4HANA",
+        "Hyperscaler Accounts",
+        "VPC/VNET",
+        "TGW",
+        "FWaaS",
+        "SAP Secure Login Service",
+        "SSFS",
+        "LogServ",
+        "RAVEN"
+      ],
+      "anchors_hint_count": 1,
+      "input_chars": 12003,
+      "latency_s": 4.3
+    },
+    {
+      "doc_id": "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e",
+      "status": "updated",
+      "title": "SAP S/4HANA Cloud Private Edition Implementation Administration Guide",
+      "summary": "This guide provides procedures for configuring and implementing SAP S/4HANA Cloud Private Edition using SAP Best Practices.",
+      "key_topics": [
+        "Client Configuration",
+        "Solution Activation",
+        "System Integration",
+        "Data Transfer",
+        "Workflow Configuration"
+      ],
+      "key_terms": [
+        "SAP S/4HANA Cloud Private Edition",
+        "SAP Best Practices",
+        "Client 000",
+        "Transaction /SMB/BBI",
+        "EWM",
+        "BD54",
+        "PFTC_CHG",
+        "BD14",
+        "SAP Note 3330258",
+        "Logical System"
+      ],
+      "anchors_hint_count": 2,
+      "input_chars": 12058,
+      "latency_s": 4.3
+    },
+    {
+      "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+      "status": "updated",
+      "title": "SAP S/4HANA Cloud Private Edition Business Scope Overview",
+      "summary": "This document outlines the business scope and functional capabilities of SAP S/4HANA Cloud Private Edition based on the 2023 FPS03 release.",
+      "key_topics": [
+        "Enterprise Resource Planning",
+        "Supply Chain Management",
+        "Sales and Service Management",
+        "Financial Operations",
+        "Manufacturing Insights"
+      ],
+      "key_terms": [
+        "SAP S/4HANA Cloud Private Edition",
+        "SAP Fiori",
+        "SAP Business Suite",
+        "Joule",
+        "Order-to-Cash Dashboard",
+        "Predictive Labor Demand",
+        "SAP Document and Reporting Compliance",
+        "Product Compliance",
+        "SAP Field Service Management",
+        "SAP S/4HANA Central Finance"
+      ],
+      "anchors_hint_count": 3,
+      "input_chars": 12048,
+      "latency_s": 4.9
+    },
+    {
+      "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+      "status": "updated",
+      "title": "SAP S/4HANA Cloud Private Edition 2025 Innovation Highlights",
+      "summary": "This document details the 2025 innovation highlights for SAP S/4HANA Cloud Private Edition, covering new features across procurement, supply chain, manufacturing, sales, service, finance, and asset management.",
+      "key_topics": [
+        "Procurement Automation",
+        "Supply Chain Optimization",
+        "Manufacturing Planning",
+        "Sales Order Processing",
+        "Financial Accounting"
+      ],
+      "key_terms": [
+        "SAP S/4HANA Cloud Private Edition",
+        "Joule",
+        "Universal Parallel Accounting",
+        "SAP Fiori",
+        "SAP Watch List Screening",
+        "SAP Global Trade Services",
+        "Central Finance",
+        "Object-Based Authorization",
+        "SAP APM Integration",
+        "Advanced Transportation Management"
+      ],
+      "anchors_hint_count": 4,
+      "input_chars": 11930,
+      "latency_s": 1.8
+    },
+    {
+      "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+      "status": "updated",
+      "title": "SAP S/4HANA Cloud Private Edition 2023 Content Guide",
+      "summary": "This document details the features and business processes available in SAP S/4HANA Cloud Private Edition 2023, covering enterprise management, enhanced functions, and industry-specific capabilities.",
+      "key_topics": [
+        "Accounts Receivable",
+        "Manufacturing",
+        "Sales Rebate Management",
+        "Supplier Evaluation",
+        "Order Promising"
+      ],
+      "key_terms": [
+        "SAP S/4HANA Cloud Private Edition",
+        "SAP Fraud Management",
+        "Just-In-Time (JIT)",
+        "Bills of Material",
+        "Settlement Management",
+        "Available to Promise",
+        "SAP HANA enterprise search",
+        "Central Finance",
+        "Extended Service Parts Planning",
+        "Policy Management for Insurance"
+      ],
+      "anchors_hint_count": 1,
+      "input_chars": 10099,
+      "latency_s": 3.5
+    },
+    {
+      "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+      "status": "updated",
+      "title": "SAP S/4HANA 2023 Enterprise Management Feature Overview",
+      "summary": "This document describes the key features, functions, and industry-specific capabilities of SAP S/4HANA 2023 Enterprise Management.",
+      "key_topics": [
+        "Fraud Management",
+        "Accounts Receivable",
+        "Classification System",
+        "Warranty Management",
+        "Operational Procurement"
+      ],
+      "key_terms": [
+        "SAP S/4HANA 2023",
+        "SAP Fraud Management",
+        "ABAP RESTful Application Programming Model",
+        "Kanbans",
+        "Core Data Services",
+        "Linear Asset Management",
+        "Dangerous Goods Management",
+        "Enterprise Contract Management",
+        "Commercial Project Management",
+        "Assortment Management"
+      ],
+      "anchors_hint_count": 2,
+      "input_chars": 10021,
+      "latency_s": 2.9
+    },
+    {
+      "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+      "status": "updated",
+      "title": "SAP S/4HANA Security Guide Data Protection and Authorization",
+      "summary": "This document provides security guidance for SAP S/4HANA systems, covering data protection, authorization concepts, and technical measures for handling personal data.",
+      "key_topics": [
+        "Data Protection",
+        "Authorization Management",
+        "Access Control",
+        "Information Lifecycle Management",
+        "User Authentication"
+      ],
+      "key_terms": [
+        "SAP S/4HANA",
+        "SAP ILM",
+        "PFCG",
+        "S_APPL_LOG",
+        "SAP_HR_PYC_PY_ADMIN",
+        "TBT1",
+        "SNC",
+        "SAP logon tickets",
+        "EWM_STOCK_UPLOAD"
+      ],
+      "anchors_hint_count": 4,
+      "input_chars": 12058,
+      "latency_s": 3.6
+    },
+    {
+      "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+      "status": "updated",
+      "title": "SAP S/4HANA 2022 Security Guide for Enterprise Applications",
+      "summary": "This document provides security guidance for SAP S/4HANA 2022, covering authorization concepts, data protection, logging, and system security configurations.",
+      "key_topics": [
+        "Authorization Management",
+        "Data Protection Compliance",
+        "Network Security",
+        "Logging and Tracing",
+        "Information Lifecycle Management"
+      ],
+      "key_terms": [
+        "SAP S/4HANA 2022",
+        "SAP Credit Management",
+        "SAP Information Lifecycle Management",
+        "SAP NetWeaver",
+        "ABAP",
+        "RFC",
+        "SAP_HR_PYC_CONFIG_PROC",
+        "SAP Note 616900",
+        "GHO_R_DPP_MAP_PERS_DATA",
+        "BAdI HRHAP00_AUTHORITY"
+      ],
+      "anchors_hint_count": 5,
+      "input_chars": 11286,
+      "latency_s": 11.4
+    },
+    {
+      "doc_id": "031_SAP_Cloud_ALM_Functional_Overview_d98ab9e6",
+      "status": "updated",
+      "title": "SAP Cloud ALM Functional Overview Presentation Slides",
+      "summary": "This document provides a functional overview of SAP Cloud ALM, covering its capabilities for implementation, operations, and service management.",
+      "key_topics": [
+        "Application Lifecycle Management",
+        "Cloud Operations",
+        "Implementation Methodology",
+        "Service Management",
+        "Performance Monitoring"
+      ],
+      "key_terms": [
+        "SAP Cloud ALM",
+        "SAP Enterprise Support",
+        "SAP Activate",
+        "Business Service Management",
+        "Integration & Exception Monitoring",
+        "Health Monitoring",
+        "SAP Business Technology Platform",
+        "Cloud Transport Management Service",
+        "Adaptation Transport Organizer",
+        "Selenium"
+      ],
+      "anchors_hint_count": 3,
+      "input_chars": 12050,
+      "latency_s": 7.9
+    },
+    {
+      "doc_id": "11476-SAPSE_RISE_with_SAP_Security_final_31c725f3",
+      "status": "updated",
+      "title": "Enhancing security and compliance with SAP Cloud ERP Private",
+      "summary": "This document outlines the security features, compliance capabilities, and strategic advantages of SAP Cloud ERP Private for enterprise management.",
+      "key_topics": [
+        "Cybersecurity",
+        "Regulatory Compliance",
+        "Cloud Security",
+        "Threat Management",
+        "Data Protection"
+      ],
+      "key_terms": [
+        "SAP Cloud ERP Private",
+        "Joule",
+        "NIS2",
+        "Cyber Resilience Act",
+        "SAP HANA",
+        "DevSecOps",
+        "NIST CSF",
+        "GDPR",
+        "HIPAA",
+        "PCIDSS"
+      ],
+      "anchors_hint_count": 3,
+      "input_chars": 11923,
+      "latency_s": 3.3
+    },
+    {
+      "doc_id": "ERP Transition option_de027d7b",
+      "status": "updated",
+      "title": "SAP ERP Transition Option to S/4HANA Private Cloud",
+      "summary": "This document outlines the transition offering for moving from SAP ERP to SAP S/4HANA Private Cloud, including services, prerequisites, and timelines.",
+      "key_topics": [
+        "Cloud Transition",
+        "Maintenance Phases",
+        "Subscription Pricing",
+        "Product Migration",
+        "Customer Prerequisites"
+      ],
+      "key_terms": [
+        "SAP S/4HANA",
+        "RISE with SAP",
+        "ERP PCE",
+        "Mainstream Maintenance",
+        "SPS",
+        "FPS",
+        "EhP 7",
+        "Safekeeper",
+        "CSM",
+        "Transition Services"
+      ],
+      "anchors_hint_count": 1,
+      "input_chars": 3285,
+      "latency_s": 4.6
+    },
+    {
+      "doc_id": "France 1 - Copy_cff8a256",
+      "status": "updated",
+      "title": "Overview of SAP Cloud Application Services and Offerings",
+      "summary": "This document describes SAP Cloud Application Services (CAS), detailing its scope, portfolio areas, service packages, and operational procedures for managing and improving SAP cloud applications.",
+      "key_topics": [
+        "Cloud Application Management",
+        "Service Level Agreements",
+        "Operational Support",
+        "Security and Compliance",
+        "Performance Optimization"
+      ],
+      "key_terms": [
+        "SAP Cloud Application Services",
+        "RISE",
+        "SAP SuccessFactors",
+        "S/4HANA Cloud",
+        "SAP Business Technology Platform",
+        "Application Service Manager",
+        "SAP Cloud ALM",
+        "Functional Application Management",
+        "Data Lifecycle Management",
+        "SAP Solution Manager"
+      ],
+      "anchors_hint_count": 2,
+      "input_chars": 8790,
+      "latency_s": 3.8
+    },
+    {
+      "doc_id": "RISE with SAP S4HANA Cloud private edition tailored option, Cloud ERP, tailored option Service Description Guide_ac99cc3b",
+      "status": "updated",
+      "title": "SAP Subscription Software Definitions and Usage Metrics",
+      "summary": "This document defines usage metrics, terms, and conditions for various SAP subscription software products including SAP HANA, S/4HANA Cloud, and RISE with SAP offerings.",
+      "key_topics": [
+        "Usage Metrics Definitions",
+        "Subscription Software Terms",
+        "Software Licensing",
+        "Cloud Service Specifications",
+        "Product-Specific Conditions"
+      ],
+      "key_terms": [
+        "SAP HANA",
+        "SAP S/4HANA Cloud",
+        "RISE with SAP",
+        "Active User",
+        "Entitlements Package",
+        "Smart Data Quality",
+        "Smart Data Integration",
+        "SAP Process Control",
+        "SAP Risk Management",
+        "SAP NetWeaver"
+      ],
+      "anchors_hint_count": 3,
+      "input_chars": 11939,
+      "latency_s": 4.4
+    },
+    {
+      "doc_id": "SAP Cloud ERP Private and RISE with SAP S_4HANA Cloud, private edition Supplement_3206ecd0",
+      "status": "updated",
+      "title": "SAP Cloud ERP Private and RISE with SAP S/4HANA Supplemental Terms",
+      "summary": "This document outlines supplemental terms and conditions for SAP Cloud ERP Private and RISE with SAP S/4HANA Cloud private edition services.",
+      "key_topics": [
+        "Cloud Service Terms",
+        "Artificial Intelligence",
+        "System Maintenance",
+        "Add-on Development",
+        "Support Services"
+      ],
+      "key_terms": [
+        "SAP Cloud ERP Private",
+        "RISE with SAP S/4HANA Cloud",
+        "SAP S/4HANA Cloud Private Edition",
+        "Bundled Cloud Services",
+        "Starter System",
+        "Customer ABAP Add-on",
+        "SAP Solution Manager Enterprise Edition",
+        "SAP NetWeaver",
+        "SAP Release and Maintenance Strategy",
+        "SAP AI Terms"
+      ],
+      "anchors_hint_count": 3,
+      "input_chars": 12016,
+      "latency_s": 5.1
+    },
+    {
+      "doc_id": "SAP Cloud ERP Private_ RISE with SAP S_4HANA Cloud, private edition_ SAP ERP, private cloud edition Service Description Guide_6b96a24d",
+      "status": "updated",
+      "title": "SAP Cloud ERP Private Edition Service Description Guide",
+      "summary": "This document describes the usage metrics, terms, and eligible services for various SAP S/4HANA Cloud private edition modules.",
+      "key_topics": [
+        "Usage Metrics",
+        "Cloud Service Eligibility",
+        "Disaster Recovery",
+        "Subscription Terms",
+        "System Sizing"
+      ],
+      "key_terms": [
+        "S/4HANA Cloud",
+        "RISE with SAP",
+        "SAP ERP",
+        "GxP",
+        "SLA",
+        "SAP WEB DISPATCHER",
+        "SAP HANA",
+        "SAP BW/4HANA Cloud",
+        "SAP Solution Manager",
+        "SAP Log Service"
+      ],
+      "anchors_hint_count": 4,
+      "input_chars": 11918,
+      "latency_s": 3.7
+    },
+    {
+      "doc_id": "SAP_CAS_for_SAP_Cloud_ERP_Private_L2_v.04-2026_PUBLISHED_4b71178b",
+      "status": "updated",
+      "title": "SAP Cloud Application Services for Cloud ERP Private",
+      "summary": "This document describes SAP Cloud Application Services (CAS) for managing technical operations, security, and performance of SAP Cloud ERP Private environments.",
+      "key_topics": [
+        "Technical Operations",
+        "Application Security",
+        "Performance Monitoring",
+        "Data Management",
+        "Incident Management"
+      ],
+      "key_terms": [
+        "SAP Cloud ERP Private",
+        "RISE",
+        "Transport Management System",
+        "SAP Security Notes",
+        "SAP BPA",
+        "Application Operations Cockpit",
+        "SAP Hot News",
+        "IDocs",
+        "Fiori",
+        "Joule"
+      ],
+      "anchors_hint_count": 3,
+      "input_chars": 9936,
+      "latency_s": 2.7
+    },
+    {
+      "doc_id": "SAP_Cloud_ERP_Private__Operations_and_Support-2_14e7eee5",
+      "status": "updated",
+      "title": "SAP Cloud ERP Private Operations and Support Overview",
+      "summary": "This document describes SAP's AI-powered private cloud ERP management and support services, highlighting security, compliance, and operational benefits.",
+      "key_topics": [
+        "Cloud ERP Management",
+        "AI-Powered Operations",
+        "Security and Compliance",
+        "Business Continuity",
+        "Data Sovereignty"
+      ],
+      "key_terms": [
+        "SAP Cloud ERP Private",
+        "SAP Cloud ALM",
+        "Sovereign Cloud",
+        "SAP Reference Architecture",
+        "AI-Driven Customer Support",
+        "SAP Enterprise Cloud Services",
+        "99.998% System uptime",
+        "Full stack SLA",
+        "Hyperscaler",
+        "Data protection controls"
+      ],
+      "anchors_hint_count": 3,
+      "input_chars": 11325,
+      "latency_s": 1.7
+    },
+    {
+      "doc_id": "SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0",
+      "status": "updated",
+      "title": "SAP Public ERP Cloud Delivery Operations and Architecture Guide",
+      "summary": "This document outlines SAP's operational framework, architecture, and maintenance processes for delivering its Public ERP Cloud services.",
+      "key_topics": [
+        "Cloud Operations",
+        "System Architecture",
+        "Release Management",
+        "Performance Monitoring",
+        "Disaster Recovery"
+      ],
+      "key_terms": [
+        "S/4HANA Cloud",
+        "Hotfix Collection (HFC)",
+        "Continuous Feature Delivery (CFD)",
+        "SAP Business Technology Platform",
+        "SAP Cloud ALM",
+        "Dynamic Capacity Management",
+        "Recovery Point Objective (RPO)",
+        "gCTS",
+        "3-System Landscape",
+        "Release 2508"
+      ],
+      "anchors_hint_count": 1,
+      "input_chars": 11878,
+      "latency_s": 3.9
+    },
+    {
+      "doc_id": "Service Level Agreement for Private Cloud Edition Services and Tailored Option Services_fed78d51",
+      "status": "updated",
+      "title": "Service Level Agreement for SAP Private Cloud and Tailored Option Services",
+      "summary": "This document defines the service levels, availability metrics, and credit mechanisms for SAP's Private Cloud Edition and Tailored Option Services.",
+      "key_topics": [
+        "Service Level Agreement",
+        "System Availability",
+        "Downtime Definitions",
+        "Service Credits",
+        "Incident Management"
+      ],
+      "key_terms": [
+        "Private Cloud Edition Services",
+        "Tailored Option Services",
+        "SA SLA",
+        "System Availability Percentage",
+        "PRD",
+        "NON-PRD",
+        "Server Provisioning",
+        "Monthly Service Fees",
+        "RISE with SAP S/4HANA Cloud",
+        "SAP Service Request Platform"
+      ],
+      "anchors_hint_count": 3,
+      "input_chars": 11169,
+      "latency_s": 3.8
+    },
+    {
+      "doc_id": "Support Schedule for Cloud Services_bf75d389",
+      "status": "updated",
+      "title": "Support Schedule for SAP Cloud Services",
+      "summary": "This document outlines SAP's support offerings, customer responsibilities, and response levels for its cloud services.",
+      "key_topics": [
+        "Cloud Support Services",
+        "Customer Responsibilities",
+        "Support Case Management",
+        "Service Level Agreements",
+        "Support Offerings"
+      ],
+      "key_terms": [
+        "SAP Enterprise Support",
+        "SAP Preferred Success",
+        "Customer Contact",
+        "Local Business Hours",
+        "SAP Customer Support Website",
+        "My Trust Center",
+        "Order Form",
+        "Mission Critical Support",
+        "SAP Support Advisory Services"
+      ],
+      "anchors_hint_count": 1,
+      "input_chars": 5439,
+      "latency_s": 4.0
+    },
+    {
+      "doc_id": "training_aa_sap_erp_cloud_private_operations_june_2025_75643d51",
+      "status": "updated",
+      "title": "RISE with SAP Cloud ERP Private Edition Roles and Responsibilities",
+      "summary": "This document outlines the roles, responsibilities, and service offerings for SAP's RISE with SAP S/4HANA Cloud, private edition managed service.",
+      "key_topics": [
+        "Cloud Operations",
+        "Roles and Responsibilities",
+        "Service Level Agreements",
+        "Security Management",
+        "Service Request Fulfillment"
+      ],
+      "key_terms": [
+        "RISE with SAP",
+        "SAP S/4HANA Cloud",
+        "Private Edition",
+        "SAP Cloud Application Services",
+        "SAP Enterprise Cloud Services",
+        "SAP4Me",
+        "SAP Early Watch Alert",
+        "Homogeneous system copy",
+        "Security Patch Management",
+        "Technical Monitoring"
+      ],
+      "anchors_hint_count": 1,
+      "input_chars": 11951,
+      "latency_s": 5.7
+    },
+    {
+      "doc_id": "training_caa_rise_with_sap_security_and_compliance_may_2025 (1)_a3c3015a",
+      "status": "updated",
+      "title": "SAP Cloud ERP Private Security Architecture and Deployment",
+      "summary": "This document outlines the security architecture, deployment model, and shared responsibilities for SAP Cloud ERP Private Edition using RISE with SAP.",
+      "key_topics": [
+        "Security Architecture",
+        "Shared Responsibility Model",
+        "Data Encryption",
+        "Access Control",
+        "Incident Management"
+      ],
+      "key_terms": [
+        "RISE with SAP",
+        "SAP Enterprise Cloud Services",
+        "SAP Data Custodian",
+        "TLS 1.2",
+        "AES-256",
+        "C5",
+        "SIEM",
+        "SAP Business Technology Platform",
+        "SAP Security Incident Management",
+        "SAP Trust Center"
+      ],
+      "anchors_hint_count": 2,
+      "input_chars": 10937,
+      "latency_s": 4.6
+    },
+    {
+      "doc_id": "training_caa_rise_with_sap_security_and_compliance_may_2025_dc319de7",
+      "status": "updated",
+      "title": "SAP Cloud ERP Private Security Architecture and Responsibilities",
+      "summary": "This document outlines the security architecture, encryption, access controls, and shared responsibility model for SAP Cloud ERP Private deployments.",
+      "key_topics": [
+        "Security Architecture",
+        "Encryption Management",
+        "Access Control",
+        "Shared Responsibility Model",
+        "Incident Management"
+      ],
+      "key_terms": [
+        "RISE with SAP",
+        "SAP Enterprise Cloud Services",
+        "TLS 1.2",
+        "AES-256",
+        "SAP Data Custodian",
+        "SIEM",
+        "C5",
+        "SAP Security Incident Management",
+        "SAP Trust Center",
+        "EU Access"
+      ],
+      "anchors_hint_count": 3,
+      "input_chars": 10946,
+      "latency_s": 4.4
+    },
+    {
+      "doc_id": "training_caa_rise_with_sap_technical_architecture_networking_may_2025_77bb7aa3",
+      "status": "updated",
+      "title": "Cloud Networking Fundamentals and SAP RISE Connectivity Options",
+      "summary": "This document covers cloud networking principles, protocols, and SAP-specific connectivity solutions like VPN, MPLS, and SDN for RISE deployments.",
+      "key_topics": [
+        "Cloud Networking",
+        "Network Protocols",
+        "DNS Reliability",
+        "VPN Connectivity",
+        "SDN Architecture"
+      ],
+      "key_terms": [
+        "OSI Model",
+        "IPv4",
+        "DNS",
+        "IPsec S2S VPN",
+        "MPLS",
+        "SAP RISE",
+        "SAP BTP",
+        "Cloud Connector",
+        "AWS DirectConnect",
+        "Azure VNet"
+      ],
+      "anchors_hint_count": 3,
+      "input_chars": 10685,
+      "latency_s": 2.7
+    }
+  ]
+}
