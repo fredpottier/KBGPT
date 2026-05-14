@@ -603,10 +603,7 @@ class ReasoningAgentV51:
 
     @staticmethod
     def _build_user_prompt(question: str, tenant_id: str, extra: str) -> str:
-        # Listing enrichi : doc_id + doc_title + key_topics + key_terms depuis
-        # DocumentContext Neo4j (A6, enrich_document_context.py).
-        # Fallback gracieux sur list_available_doc_ids() si l'enrichissement
-        # n'a pas été appliqué (ex: nouveau tenant, premier démarrage).
+        # Listing enrichi (A6) + Domain Pack hints (A10).
         from knowbase.runtime_v5.doc_topics_loader import (
             format_available_docs_listing,
             load_doc_topics,
@@ -615,7 +612,6 @@ class ReasoningAgentV51:
         if records:
             docs_listing = format_available_docs_listing(records)
         else:
-            # Fallback : juste les doc_ids depuis structure_loader
             from knowbase.runtime_v5.structure_loader import list_available_doc_ids
             try:
                 docs = list_available_doc_ids()
@@ -624,11 +620,30 @@ class ReasoningAgentV51:
             docs_listing = (
                 "\n".join(f"  - {d}" for d in docs) if docs else "  (corpus not indexed)"
             )
+
+        # A10 Domain Pack hints (filtered by query terms)
+        # Charte respectée : mécanisme générique, pack tenant-scoped.
+        # Skip si désactivé via env (V5_DOMAIN_PACK_ENABLED=0).
+        pack_hints_block = ""
+        if os.getenv("V5_DOMAIN_PACK_ENABLED", "1") in ("1", "true", "True"):
+            try:
+                from knowbase.runtime_v5.domain_pack_loader import (
+                    load_pack, filter_pack_for_query, format_hints_block,
+                )
+                pack = load_pack()  # default = enterprise_sap via env V5_DEFAULT_DOMAIN_PACK
+                if pack:
+                    hints = filter_pack_for_query(pack, question, max_items=12)
+                    pack_hints_block = format_hints_block(hints)
+            except Exception as exc:
+                logger.warning("[V51] domain_pack hints failed: %s", exc)
+
         out = (
             f"Question: {question}\n\n"
             f"Tenant: {tenant_id}\n\n"
             f"available_docs:\n{docs_listing}\n"
         )
+        if pack_hints_block:
+            out += f"\n{pack_hints_block}\n"
         if extra:
             out += f"\n{extra}\n"
         out += (
