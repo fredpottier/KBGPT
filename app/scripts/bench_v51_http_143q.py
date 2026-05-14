@@ -108,12 +108,16 @@ def save_progress(path, results, ts, total_duration_s, n_total):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://localhost:8000")
-    parser.add_argument("--tenant-id", default="default")
+    parser.add_argument("--tenant-id", default="bench143",
+                        help="Prefix for rotating tenant ids")
+    parser.add_argument("--questions-per-tenant", type=int, default=5,
+                        help="rotate tenant after N questions (bypass admission daily_quota 50)")
     parser.add_argument("--panel",
                         default="benchmark/questions/gold_set_sap_v2.json")
     parser.add_argument("--limit", type=int, default=0,
                         help="0 = all 143q. Lower for smoke.")
     parser.add_argument("--timeout-s", type=int, default=300)
+    parser.add_argument("--tag", default="a9", help="Tag for output file")
     args = parser.parse_args()
 
     root = Path("/app") if Path("/app").exists() else Path(__file__).resolve().parents[2]
@@ -148,14 +152,17 @@ def main():
         question = q.get("question", "")
         gt = get_ground_truth(q)
 
+        # Rotation tenant : bypass admission daily_quota_complex (50/jour)
+        tenant = f"{args.tenant_id}_{args.tag}_t{i // args.questions_per_tenant}"
+
         elapsed_global = time.time() - t_global
         progress_pct = 100 * (i + 1) / n_total
-        print(f"\n[{i+1}/{n_total} ({progress_pct:.0f}%)] {qid} [{ptype}] — t+{elapsed_global:.0f}s")
+        print(f"\n[{i+1}/{n_total} ({progress_pct:.0f}%)] {qid} [{ptype}] tenant={tenant} — t+{elapsed_global:.0f}s")
         print(f"  Q: {question[:120]}...")
 
-        idemp = f"bench143_{ts}_{qid}"
+        idemp = f"bench143_{args.tag}_{ts}_{qid}_{tenant}"
         t_q = time.time()
-        sub = submit_question(args.url, args.tenant_id, question, ptype, idemp)
+        sub = submit_question(args.url, tenant, question, ptype, idemp)
         if "_error" in sub:
             print(f"  ❌ submit: {sub['_error']}")
             results.append({
@@ -167,7 +174,7 @@ def main():
             continue
 
         rid = sub["request_id"]
-        body = poll_status(args.url, args.tenant_id, rid,
+        body = poll_status(args.url, tenant, rid,
                            timeout_s=args.timeout_s)
         total_lat = time.time() - t_q
 
@@ -190,6 +197,7 @@ def main():
         metrics = result.get("metrics", {})
         epi = result.get("epistemic_status", "?")
         sr = result.get("stop_reason", "")
+        verifier_report = result.get("verifier_report")  # A5 passive mode
 
         # Flags
         phantom = has_phantom(answer)
@@ -221,6 +229,7 @@ def main():
             "has_citation": cited,
             "metrics": metrics,
             "total_latency_s": total_lat,
+            "verifier_report": verifier_report,
             "error": err,
         })
         save_progress(output_path, results, ts, time.time() - t_global, n_total)
