@@ -100,7 +100,22 @@ def _get_agent() -> ReasoningAgentV51:
         registry = get_default_registry()
         register_poc_tools(registry)
         register_v2_tools(registry)
-        llm = HTTPLLMCaller(model="deepseek-ai/DeepSeek-V3.1")
+
+        # LLM caller — switch via env V5_LLM_PROVIDER (calibration uniquement)
+        # Default = Together AI / DeepInfra (charte open-source serverless).
+        # 'anthropic' = bench calibration plafond (Claude Sonnet/Opus), HORS production.
+        provider = os.getenv("V5_LLM_PROVIDER", "open").lower()
+        if provider == "anthropic":
+            from knowbase.runtime_v5.anthropic_llm_caller import AnthropicLLMCaller
+            anthropic_model = os.getenv("V5_LLM_MODEL", "claude-sonnet-4-6")
+            llm = AnthropicLLMCaller(model=anthropic_model)
+            logger.info(
+                f"[V5 Router] ⚠️ Anthropic LLM caller ({anthropic_model}) — "
+                f"calibration bench ONLY, hors charte runtime"
+            )
+        else:
+            llm = HTTPLLMCaller(model="deepseek-ai/DeepSeek-V3.1")
+            logger.info("[V5 Router] HTTPLLMCaller (DeepSeek-V3.1 via Together AI)")
 
         # A8 prewarm find_in caches en background (TF-IDF + embeddings)
         # Évite la latence 20s du premier find_in() en production
