@@ -150,36 +150,40 @@ TOOL_SCHEMAS = [
 ]
 
 
-SYSTEM_PROMPT = """You are a careful research agent who answers questions by navigating structured documents.
+SYSTEM_PROMPT = """You are an EFFICIENT research agent answering questions by navigating structured documents.
 
-You have access to a set of reading tools that let you:
-  - List the table of contents of a document (outline)
-  - Read specific sections by their identifier or numbering (read)
-  - Search inside a document (find_in)
-  - Resolve internal references like "see Article 5(3)" (resolve_ref)
-  - Get structural context around a section (expand_context)
-  - Compare sections from different documents (compare_sections)
-  - Find related versions / variants of a document (list_versions)
+You have access to reading tools: outline, read, find_in, resolve_ref, expand_context, compare_sections, list_versions.
 
-Your approach:
-  1. Begin by understanding the question carefully. Note any embedded assumption that might be wrong (the question might contain a false premise that needs correction).
-  2. Identify which document(s) are relevant. Use available_docs from the user prompt.
-  3. Use outline first if you don't know the structure of a relevant doc.
-  4. Read specific sections (full text) rather than guessing — never assume content you haven't read.
-  5. Resolve any cross-references you encounter ("see X", "cf Y").
-  6. Maintain awareness of what you've collected vs what's still missing.
-  7. After 3-5 productive tool calls, you SHOULD conclude with a final answer based on what you've gathered.
-  8. When you have enough evidence, write a final answer with citations.
+**EFFICIENCY MANDATE — read this carefully:**
 
-Citations format: [doc=DOC_ID/SECTION_PATH] after each factual claim.
+Your goal is to answer the question WELL with the MINIMUM number of tool calls necessary. Most questions need only 2-4 tool calls. Over-exploration is a defect, not a virtue.
 
-Anti-patterns to avoid:
-  - Never abstain ("answer not found") when you haven't actually read the relevant sections.
-  - Never invent details that you haven't verified by reading.
-  - Don't repeat the same tool call with the same parameters more than twice.
-  - Don't conclude prematurely if your collected evidence is shallow.
+**Decision rules (apply at every step):**
 
-When ready, produce a final answer in plain text. Do not call any tool in your final message."""
+1. **Did you just read a section that contains the answer?** → STOP exploring, write the final answer NOW (no more tools).
+2. **Have you read 3+ sections without finding new useful information?** → STOP, conclude with what you have OR state the corpus doesn't contain the answer.
+3. **Are you about to call the same tool with similar arguments?** → STOP, this is a loop. Conclude.
+
+**Typical efficient patterns:**
+  - Factual question : outline → read → CONCLUDE (2-3 tool calls)
+  - Comparison      : outline → read each → CONCLUDE (3-4 calls)
+  - Multi-hop       : outline → read sec A → resolve_ref → read sec B → CONCLUDE (4-5 calls)
+  - False premise   : read most relevant section → check premise → CONCLUDE
+  - Unanswerable    : 1-2 read attempts → CONCLUDE with explicit "not in corpus"
+
+**Anti-patterns (forbidden):**
+  - Reading many sections "just in case" → wasteful
+  - Re-reading a section already read → forbidden
+  - Calling outline on the same doc twice → forbidden
+  - Continuing to explore after you have a complete answer → forbidden
+  - "Let me also check..." after a complete answer is found → forbidden
+
+**When you have an answer (even partial), output it as plain text WITHOUT calling any tool.**
+Final message format: plain prose with citations [doc=DOC_ID/SECTION_PATH] after each factual claim.
+
+**If the corpus doesn't contain the answer after 3 sections explored**: explicitly state "The available documents do not contain X" and STOP.
+
+Begin by understanding the question. Note any false premise. Then act minimally — early stopping is rewarded."""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -279,7 +283,19 @@ Plan your approach, use the reading tools to gather evidence, and produce a fina
     same_call_signatures = []
     stopped_reason = "concluded"
 
+    # Stop rules state tracking (NEW)
+    sections_read: set = set()           # section_ids LUS via read/read_with_footnotes/compare_sections (lecture pleine, pas indexation)
+    iter_without_new_section = 0          # compteur stagnation
+    STAGNATION_MAX = 2                    # 2 iter sans nouvelle section lue → break
+    STAGNATION_MIN_READS = 1              # min 1 section lue avant de pouvoir stagnate (sinon laisser l'agent commencer)
+    ANTI_LOOP_HARD = 3                    # 3× même call → break
+    force_break = False                   # flag pour sortir de la boucle for externe
+    # Tools qui comptent comme "vraie lecture" (vs indexation)
+    READ_TOOLS = {"read", "read_with_footnotes", "expand_context", "compare_sections", "summarize_subtree"}
+
     for iteration in range(1, max_iterations + 1):
+        if force_break:
+            break
         if verbose:
             print(f"\n--- ITER {iteration} ---")
         resp = call_llm(messages, TOOL_SCHEMAS, model=model)
@@ -304,6 +320,9 @@ Plan your approach, use the reading tools to gather evidence, and produce a fina
                 print(f"[CONCLUDE] {content[:200]}")
             break
 
+        # Track new sections discovered this iteration
+        new_sections_this_iter = 0
+
         # Execute tool calls in parallel sequence
         for tc in tool_calls:
             fn_name = tc["function"]["name"]
@@ -313,15 +332,22 @@ Plan your approach, use the reading tools to gather evidence, and produce a fina
                 fn_args = {}
             sig = f"{fn_name}({json.dumps(fn_args, sort_keys=True)})"
 
-            # Anti-loop : si même signature appelée 3 fois, force conclude
+            # Anti-loop HARD : si même signature 3×, on injecte stop + break iter loop
             same_call_signatures.append(sig)
             recent_count = same_call_signatures.count(sig)
-            if recent_count >= 3:
+            if recent_count >= ANTI_LOOP_HARD:
                 if verbose:
-                    print(f"[ANTI-LOOP] same call {sig[:80]} repeated {recent_count}x")
-                # Force tool result with hint
-                tool_result = {"error": "duplicate_call_skipped",
-                               "hint": "This same tool+args was called multiple times. Try different parameters or conclude."}
+                    print(f"[ANTI-LOOP HARD] {sig[:80]} repeated {recent_count}× — forcing break")
+                stopped_reason = "stuck_loop"
+                # Inject minimal valid tool result then break outer
+                tool_result = {"error": "stop_loop_detected",
+                               "hint": "Forced break: conclude now with current evidence."}
+                # Pop the assistant message we just added (avoid dangling tool_calls)
+                # Actually we keep it but provide tool result, then break iter loop
+                result_str = json.dumps(tool_result, ensure_ascii=False)
+                messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result_str})
+                force_break = True
+                break  # break tool_calls loop
             else:
                 if verbose:
                     print(f"[TOOL] {sig[:120]}")
@@ -340,15 +366,39 @@ Plan your approach, use the reading tools to gather evidence, and produce a fina
 
             # Trace summary
             result_summary = ""
-            if "result" in tool_result and isinstance(tool_result["result"], dict):
+            new_section_ids: list = []
+            # On ne compte comme "vraie lecture" que les tools dans READ_TOOLS
+            # (read, read_with_footnotes, compare_sections, expand_context, summarize_subtree)
+            # Les tools d'indexation (outline, find_in, resolve_ref) retournent juste des refs
+            is_read_tool = fn_name in READ_TOOLS
+            if "result" in tool_result and isinstance(tool_result["result"], dict) and is_read_tool:
                 r = tool_result["result"]
                 result_summary = f"keys={list(r.keys())[:6]}"
+                # Extract section_ids from tool result for stagnation tracking
+                if "section_id" in r:
+                    new_section_ids.append(r["section_id"])
+                if "sections" in r and isinstance(r["sections"], list):
+                    for s in r["sections"]:
+                        if isinstance(s, dict) and "section_id" in s:
+                            new_section_ids.append(s["section_id"])
+            elif "result" in tool_result and isinstance(tool_result["result"], dict):
+                # Index tools : on récupère juste un summary mais pas de section_ids
+                r = tool_result["result"]
+                result_summary = f"index={fn_name} keys={list(r.keys())[:4]}"
+
+            # Count truly new sections (not already in sections_read)
+            for sid in new_section_ids:
+                if sid and sid not in sections_read:
+                    sections_read.add(sid)
+                    new_sections_this_iter += 1
+
             trace_entry = {
                 "iter": iteration,
                 "tool": fn_name,
                 "args": fn_args,
                 "result_summary": result_summary,
                 "result_size": len(result_str),
+                "new_sections": len([s for s in new_section_ids if s in sections_read]),
             }
             trace.append(trace_entry)
             workspace["tool_calls_log"].append(trace_entry)
@@ -356,11 +406,35 @@ Plan your approach, use the reading tools to gather evidence, and produce a fina
             if verbose:
                 print(f"  → result {len(result_str)} chars, summary: {result_summary[:80]}")
 
+        # STAGNATION CHECK (NEW) : si N iter sans nouvelle section utile → break
+        # MAIS seulement si l'agent a déjà exploré suffisamment (≥ STAGNATION_MIN_SECTIONS)
+        if new_sections_this_iter == 0:
+            iter_without_new_section += 1
+            if verbose:
+                print(f"[STAGNATION] iter {iteration} brought 0 new sections (stagnation count={iter_without_new_section}, total sections={len(sections_read)})")
+            if iter_without_new_section >= STAGNATION_MAX and len(sections_read) >= STAGNATION_MIN_READS:
+                if verbose:
+                    print(f"[BREAK STAGNATION] {STAGNATION_MAX} iter without new reads AND {len(sections_read)} sections read — forcing conclude")
+                stopped_reason = "stagnation"
+                force_break = True
+            elif iter_without_new_section >= STAGNATION_MAX and len(sections_read) < STAGNATION_MIN_READS:
+                if verbose:
+                    print(f"[STAGNATION HOLD] {iter_without_new_section} iter without new reads but only {len(sections_read)} reads done — letting agent continue")
+        else:
+            iter_without_new_section = 0
+            if verbose:
+                print(f"[NEW SECTIONS] {new_sections_this_iter} new sections this iter (total {len(sections_read)})")
+
     else:
         # Loop exhausted without break
         stopped_reason = "max_iter"
         if verbose:
             print(f"[MAX_ITER] Forcing final synthesis...")
+
+    # FINAL SYNTHESIS : si pas de final_answer (max_iter, stagnation, stuck_loop)
+    if not workspace.get("final_answer") and stopped_reason in ("max_iter", "stagnation", "stuck_loop"):
+        if verbose:
+            print(f"[FORCED SYNTH] reason={stopped_reason}")
         # Strip dangling tool_calls (assistant messages with tool_calls but no corresponding tool response)
         # Together AI may reject conversations ending mid-tool-call
         synth_messages = list(messages) + [
