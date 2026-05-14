@@ -9,7 +9,9 @@ Tous les tools sont stateless et exposent une signature simple, conçue pour
 """
 from __future__ import annotations
 
+import logging
 import re
+import threading
 from difflib import unified_diff
 from typing import Optional
 
@@ -18,6 +20,96 @@ from knowbase.runtime_v5.structure_loader import (
     load_structure,
     list_available_doc_ids,
 )
+
+logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TF-IDF index cache (A7 — pour find_in semantic search)
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-doc cache : doc_id → (vectorizer, section_matrix, section_indices)
+# Built lazily on first find_in() call per doc. Thread-safe.
+_TFIDF_CACHE: dict[str, tuple] = {}
+_TFIDF_LOCK = threading.Lock()
+
+
+def _build_tfidf_index(struct: DocumentStructure):
+    """Construit l'index TF-IDF pour les sections d'un doc.
+
+    Returns: (vectorizer, section_matrix, section_indices)
+      section_indices = list[int] mapping row → struct.sections[i]
+    """
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    docs = []
+    indices = []
+    for i, s in enumerate(struct.sections):
+        title = (s.get("title") or "").strip()
+        text = (s.get("text") or "").strip()
+        if not text and not title:
+            continue
+        # Concat title + text pour scoring (title boost implicite via vocab repeat)
+        combined = f"{title} {title} {text}" if title else text
+        docs.append(combined)
+        indices.append(i)
+
+    if not docs:
+        return None, None, []
+
+    # TF-IDF avec n-grams 1-2 pour capturer expressions composées
+    # (ex: "WWI Monitor" comme bigram, pas seulement les deux mots séparés)
+    vectorizer = TfidfVectorizer(
+        lowercase=True,
+        ngram_range=(1, 2),
+        max_features=50000,
+        token_pattern=r"\b[A-Za-z_][A-Za-z0-9_]+\b",  # capture identifiants techniques
+        sublinear_tf=True,
+    )
+    matrix = vectorizer.fit_transform(docs)
+    return vectorizer, matrix, indices
+
+
+def _get_tfidf_index(doc_id: str, struct: DocumentStructure):
+    """Récupère (ou construit en cache) l'index TF-IDF du doc."""
+    with _TFIDF_LOCK:
+        if doc_id in _TFIDF_CACHE:
+            return _TFIDF_CACHE[doc_id]
+        try:
+            entry = _build_tfidf_index(struct)
+            _TFIDF_CACHE[doc_id] = entry
+            return entry
+        except Exception as exc:
+            logger.warning("[find_in] TF-IDF build failed for %s: %s", doc_id, exc)
+            _TFIDF_CACHE[doc_id] = (None, None, [])
+            return _TFIDF_CACHE[doc_id]
+
+
+def _tfidf_rank_sections(doc_id: str, struct: DocumentStructure, query: str, top_k: int = 10):
+    """Rank les sections par TF-IDF cosine sim. Returns list[(idx, score)]."""
+    vectorizer, matrix, indices = _get_tfidf_index(doc_id, struct)
+    if vectorizer is None or matrix is None or not indices:
+        return []
+    try:
+        q_vec = vectorizer.transform([query])
+        # Cosine sim : matrix est normalisée par TfidfVectorizer (l2 norm default)
+        scores = (matrix @ q_vec.T).toarray().flatten()
+        # Top-K indices triés par score décroissant (exclure score=0)
+        ranked = sorted(
+            [(i, float(scores[k])) for k, i in enumerate(indices) if scores[k] > 0.0],
+            key=lambda x: -x[1],
+        )
+        return ranked[:top_k]
+    except Exception as exc:
+        logger.warning("[find_in] TF-IDF rank failed: %s", exc)
+        return []
+
+
+_REGEX_HINT_PATTERN = re.compile(r"[\\\^\$\*\+\?\[\]\(\)\{\}\|]")
+
+
+def _looks_like_regex(query: str) -> bool:
+    """Heuristique : la query contient des metacharacters regex (=> mode regex strict)."""
+    return bool(_REGEX_HINT_PATTERN.search(query))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -150,11 +242,15 @@ def read(doc_id: str, section_path_or_numbering: str, max_chars: int = 8000) -> 
 # ─────────────────────────────────────────────────────────────────────────────
 
 def find_in(doc_id: str, query: str, max_results: int = 10, snippet_chars: int = 400) -> dict:
-    """Recherche string/regex dans un document spécifique. Retourne sections + extraits.
+    """Recherche TF-IDF rankée dans un document spécifique (A7).
+
+    Mode auto :
+      - Si query ressemble à du regex (metachars) → mode regex literal (back-compat)
+      - Sinon → TF-IDF cosine ranking sur les sections (top-k pertinents)
 
     Args:
         doc_id: identifiant document
-        query: chaîne ou regex (case-insensitive)
+        query: chaîne (auto TF-IDF) ou regex (mode literal)
         max_results: nombre max de sections retournées
         snippet_chars: taille de l'extrait autour du match
     """
@@ -162,31 +258,90 @@ def find_in(doc_id: str, query: str, max_results: int = 10, snippet_chars: int =
     if struct is None:
         return {"error": f"Document {doc_id} not found"}
 
-    try:
-        pat = re.compile(query, re.IGNORECASE)
-    except re.error:
-        # Si pas un regex valide, treat as literal
-        pat = re.compile(re.escape(query), re.IGNORECASE)
+    # Mode 1 — Regex strict (back-compat pour queries explicitement regex)
+    if _looks_like_regex(query):
+        try:
+            pat = re.compile(query, re.IGNORECASE)
+        except re.error:
+            pat = re.compile(re.escape(query), re.IGNORECASE)
+        hits = []
+        for s in struct.sections:
+            text = s.get("text") or ""
+            m = pat.search(text)
+            if m:
+                start = max(0, m.start() - snippet_chars // 2)
+                end = min(len(text), m.end() + snippet_chars // 2)
+                hits.append({
+                    **_section_summary(s),
+                    "match_offset": m.start(),
+                    "snippet": text[start:end],
+                    "score": 1.0,  # binary match
+                    "mode": "regex",
+                })
+            if len(hits) >= max_results:
+                break
+        return {"doc_id": doc_id, "query": query, "mode": "regex",
+                "n_hits": len(hits), "hits": hits}
 
+    # Mode 2 — TF-IDF cosine ranking (default A7)
+    ranked = _tfidf_rank_sections(doc_id, struct, query, top_k=max_results)
+
+    # Fallback : si TF-IDF retourne rien (vocab pas couvert), tente literal substring
+    if not ranked:
+        pat = re.compile(re.escape(query), re.IGNORECASE)
+        hits = []
+        for s in struct.sections:
+            text = s.get("text") or ""
+            m = pat.search(text)
+            if m:
+                start = max(0, m.start() - snippet_chars // 2)
+                end = min(len(text), m.end() + snippet_chars // 2)
+                hits.append({
+                    **_section_summary(s),
+                    "match_offset": m.start(),
+                    "snippet": text[start:end],
+                    "score": 1.0,
+                    "mode": "literal_fallback",
+                })
+            if len(hits) >= max_results:
+                break
+        return {"doc_id": doc_id, "query": query, "mode": "literal_fallback",
+                "n_hits": len(hits), "hits": hits}
+
+    # Build snippets pour les top-K TF-IDF hits
     hits = []
-    for s in struct.sections:
+    # Préparer une regex pour positioning du snippet (chaque mot de query)
+    query_words = [w for w in re.findall(r"\w+", query.lower()) if len(w) >= 2]
+    word_pattern = (
+        re.compile("|".join(re.escape(w) for w in query_words), re.IGNORECASE)
+        if query_words else None
+    )
+
+    for sec_idx, score in ranked:
+        s = struct.sections[sec_idx]
         text = s.get("text") or ""
-        m = pat.search(text)
-        if m:
-            start = max(0, m.start() - snippet_chars // 2)
-            end = min(len(text), m.end() + snippet_chars // 2)
-            snippet = text[start:end]
-            hits.append({
-                **_section_summary(s),
-                "match_offset": m.start(),
-                "snippet": snippet,
-            })
-        if len(hits) >= max_results:
-            break
+        # Positioner le snippet sur le premier mot match (ou début si aucun match)
+        snippet_start = 0
+        match_offset = -1
+        if word_pattern:
+            m = word_pattern.search(text)
+            if m:
+                match_offset = m.start()
+                snippet_start = max(0, m.start() - snippet_chars // 2)
+        snippet_end = min(len(text), snippet_start + snippet_chars)
+        snippet = text[snippet_start:snippet_end]
+        hits.append({
+            **_section_summary(s),
+            "match_offset": match_offset,
+            "snippet": snippet,
+            "score": round(score, 4),
+            "mode": "tfidf",
+        })
 
     return {
         "doc_id": doc_id,
         "query": query,
+        "mode": "tfidf",
         "n_hits": len(hits),
         "hits": hits,
     }
