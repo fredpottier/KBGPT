@@ -113,6 +113,136 @@ def _looks_like_regex(query: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Embedding index cache (A8 — sentence_transformers multilingual-e5-large)
+# ─────────────────────────────────────────────────────────────────────────────
+# Singleton model + per-doc embedding cache (lazy build on first find_in() call).
+# Charte : modèle local open-source réutilisé du projet (V2 retriever, gatekeeper).
+
+_EMB_MODEL = None
+_EMB_MODEL_LOCK = threading.Lock()
+_EMB_INDEX_CACHE: dict[str, tuple] = {}  # doc_id → (matrix, indices) or (None, [])
+
+
+def _get_emb_model():
+    """Lazy load multilingual-e5-large singleton."""
+    global _EMB_MODEL
+    if _EMB_MODEL is not None:
+        return _EMB_MODEL
+    with _EMB_MODEL_LOCK:
+        if _EMB_MODEL is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+                logger.info("[find_in] loading multilingual-e5-large (lazy first call)")
+                _EMB_MODEL = SentenceTransformer("intfloat/multilingual-e5-large")
+            except Exception as exc:
+                logger.warning("[find_in] embedding model load failed: %s", exc)
+                _EMB_MODEL = False  # sentinel : tried and failed
+    return _EMB_MODEL
+
+
+def _build_embedding_index(struct: DocumentStructure):
+    """Encode toutes les sections d'un doc. Returns (matrix, indices) ou (None, []).
+
+    Format e5 : prefixer "passage: " (corpus convention multilingual-e5-large).
+    """
+    model = _get_emb_model()
+    if not model:
+        return None, []
+    passages = []
+    indices = []
+    for i, s in enumerate(struct.sections):
+        title = (s.get("title") or "").strip()
+        text = (s.get("text") or "").strip()
+        if not title and not text:
+            continue
+        # Tronque à 1500 chars (e5 max 512 tokens ≈ 2000 chars), title+text suffit
+        combined = (
+            f"passage: {title}\n{text[:1500]}" if title else f"passage: {text[:1500]}"
+        )
+        passages.append(combined)
+        indices.append(i)
+    if not passages:
+        return None, []
+    try:
+        embeddings = model.encode(
+            passages, batch_size=16, show_progress_bar=False,
+            normalize_embeddings=True,
+        )
+        return embeddings, indices
+    except Exception as exc:
+        logger.warning("[find_in] embedding encode failed: %s", exc)
+        return None, []
+
+
+def _get_embedding_index(doc_id: str, struct: DocumentStructure):
+    """Cache-aware embedding index for a doc."""
+    with _TFIDF_LOCK:  # reuse lock — protects both TF-IDF & embedding caches
+        if doc_id in _EMB_INDEX_CACHE:
+            return _EMB_INDEX_CACHE[doc_id]
+        entry = _build_embedding_index(struct)
+        _EMB_INDEX_CACHE[doc_id] = entry
+        return entry
+
+
+def _embedding_rank_sections(doc_id: str, struct: DocumentStructure, query: str, top_k: int = 10):
+    """Rank par cosine similarity sur embeddings e5-large. Returns list[(idx, score)]."""
+    embeddings, indices = _get_embedding_index(doc_id, struct)
+    if embeddings is None or not indices:
+        return []
+    model = _get_emb_model()
+    if not model:
+        return []
+    try:
+        q_emb = model.encode(
+            [f"query: {query}"], normalize_embeddings=True,
+        )
+        scores = (embeddings @ q_emb.T).flatten()
+        ranked = sorted(
+            [(i, float(scores[k])) for k, i in enumerate(indices)],
+            key=lambda x: -x[1],
+        )
+        return ranked[:top_k]
+    except Exception as exc:
+        logger.warning("[find_in] embedding rank failed: %s", exc)
+        return []
+
+
+def _hybrid_rrf_rank(doc_id: str, struct: DocumentStructure, query: str,
+                     top_k: int = 10, k_const: int = 60):
+    """RRF (Reciprocal Rank Fusion) : fusionne rankings TF-IDF + embeddings.
+
+    Pas de tuning α — chaque ranker contribue via son inverse de rang.
+    Référence : Cormack et al. 2009. Robuste et état de l'art retrieval hybride.
+    """
+    # Récupère 3× top_k de chaque ranker pour avoir une bonne couverture
+    pool_k = max(top_k * 3, 30)
+    tfidf = _tfidf_rank_sections(doc_id, struct, query, top_k=pool_k)
+    emb = _embedding_rank_sections(doc_id, struct, query, top_k=pool_k)
+
+    # Si embeddings indisponibles → fallback TF-IDF pur
+    if not emb:
+        return tfidf[:top_k]
+    if not tfidf:
+        return emb[:top_k]
+
+    tfidf_ranks = {sec_idx: rank for rank, (sec_idx, _) in enumerate(tfidf)}
+    emb_ranks = {sec_idx: rank for rank, (sec_idx, _) in enumerate(emb)}
+
+    all_indices = set(tfidf_ranks) | set(emb_ranks)
+    rrf_scores = {}
+    for idx in all_indices:
+        score = 0.0
+        if idx in tfidf_ranks:
+            score += 1.0 / (k_const + tfidf_ranks[idx])
+        if idx in emb_ranks:
+            score += 1.0 / (k_const + emb_ranks[idx])
+        rrf_scores[idx] = score
+
+    ranked = sorted(rrf_scores.items(), key=lambda x: -x[1])
+    return ranked[:top_k]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -283,7 +413,11 @@ def find_in(doc_id: str, query: str, max_results: int = 10, snippet_chars: int =
         return {"doc_id": doc_id, "query": query, "mode": "regex",
                 "n_hits": len(hits), "hits": hits}
 
-    # Mode 2 — TF-IDF cosine ranking (default A7)
+    # Mode 2 — TF-IDF cosine ranking (A7, default A9)
+    # A8 hybrid_rrf testé (e5-large embeddings) régresse globalement (-0.06pp).
+    # TF-IDF pur garde le meilleur trade-off mesuré (0.620 sur panel SAP 50q).
+    # Fonctions embedding (_get_embedding_index, _hybrid_rrf_rank) gardées pour
+    # usage futur ciblé (ex: shape-adaptive routing).
     ranked = _tfidf_rank_sections(doc_id, struct, query, top_k=max_results)
 
     # Fallback : si TF-IDF retourne rien (vocab pas couvert), tente literal substring
@@ -335,16 +469,50 @@ def find_in(doc_id: str, query: str, max_results: int = 10, snippet_chars: int =
             "match_offset": match_offset,
             "snippet": snippet,
             "score": round(score, 4),
-            "mode": "tfidf",
+            "mode": "hybrid_rrf",
         })
 
     return {
         "doc_id": doc_id,
         "query": query,
-        "mode": "tfidf",
+        "mode": "hybrid_rrf",
         "n_hits": len(hits),
         "hits": hits,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Optional: pre-warm index caches at startup (call from api/main.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def prewarm_find_in_caches(
+    doc_ids: Optional[list[str]] = None,
+    max_docs: int = 0,
+    include_embeddings: bool = False,
+):
+    """Pré-charge TF-IDF indices (et embeddings si demandé) pour les docs.
+
+    Permet d'éviter la latence du premier find_in() en runtime (lazy).
+    A9 : embeddings désactivés par défaut (A8 hybrid RRF régressait globalement).
+    """
+    docs = doc_ids if doc_ids is not None else list_available_doc_ids()
+    if max_docs > 0:
+        docs = docs[:max_docs]
+    logger.info(
+        "[find_in] prewarming caches for %d docs (embeddings=%s)",
+        len(docs), include_embeddings,
+    )
+    n_ok = 0
+    for doc_id in docs:
+        struct = load_structure(doc_id)
+        if struct is None:
+            continue
+        _get_tfidf_index(doc_id, struct)
+        if include_embeddings:
+            _get_embedding_index(doc_id, struct)
+        n_ok += 1
+    logger.info("[find_in] prewarm done: %d/%d docs cached", n_ok, len(docs))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

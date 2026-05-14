@@ -94,12 +94,24 @@ def _get_agent() -> ReasoningAgentV51:
     global _agent
     if _agent is None:
         import os
+        import threading as _threading
         # Re-init registry pour s'assurer que tous les tools sont enregistrés
         reset_default_registry()
         registry = get_default_registry()
         register_poc_tools(registry)
         register_v2_tools(registry)
         llm = HTTPLLMCaller(model="deepseek-ai/DeepSeek-V3.1")
+
+        # A8 prewarm find_in caches en background (TF-IDF + embeddings)
+        # Évite la latence 20s du premier find_in() en production
+        def _prewarm():
+            try:
+                from knowbase.runtime_v5.reading_tools import prewarm_find_in_caches
+                prewarm_find_in_caches()
+            except Exception as exc:
+                logger.warning("[V5 Router] prewarm find_in failed: %s", exc)
+        _threading.Thread(target=_prewarm, daemon=True, name="v5-prewarm").start()
+        logger.info("[V5 Router] find_in prewarm started in background thread")
 
         # S7.7 Mode A : verifier passif (mesure outcome, ne modifie pas answer)
         verifier = None
