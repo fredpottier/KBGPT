@@ -33,6 +33,23 @@ from knowbase.common.clients import (
 from .connection import DEFAULT_QUEUE_NAME, get_queue, get_redis_connection
 
 
+def _start_burst_resync_subscriber() -> None:
+    """Lance le subscriber Redis pub/sub pour les events resync burst.
+
+    CH-BURST.REL : quand le backend détecte un spot interruption + respawn AWS
+    et publie un event sur `osmose:burst:resync`, le worker reçoit la nouvelle
+    URL vLLM et re-configure ses providers immédiatement (au lieu d'attendre
+    la fin du timeout en cours sur l'ancienne IP).
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        from knowbase.ingestion.burst.resync_subscriber import start_subscriber
+
+        start_subscriber()
+    except Exception as e:
+        logger.warning(f"[WORKER:STARTUP] Failed to start burst resync subscriber: {e}")
+
+
 def _restore_burst_state() -> None:
     """Restaure le burst mode depuis Redis ou le fichier persistant /data.
 
@@ -128,6 +145,7 @@ def warm_clients() -> None:
     get_qdrant_client()
     get_sentence_transformer()  # Safe with SimpleWorker (no fork)
     _restore_burst_state()
+    _start_burst_resync_subscriber()  # CH-BURST.REL : écoute les events resync
     _recover_interrupted_jobs()
 
 

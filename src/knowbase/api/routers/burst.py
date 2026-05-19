@@ -15,7 +15,7 @@ Endpoints:
 - GET  /api/burst/providers  - Statut des providers (LLM/Embeddings)
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from pathlib import Path
 import os
@@ -2355,6 +2355,127 @@ async def local_burst_status():
         "running": running,
         "url": VLLM_LOCAL_URL if running else None,
     }
+
+
+# ============================================================================
+# CH-BURST.REL — AWS-as-source-of-truth + dézombie
+# ============================================================================
+
+
+class ForceCleanupRequest(BaseModel):
+    """Body de POST /api/burst/force-cleanup."""
+
+    clean_local: bool = Field(
+        default=True,
+        description="Reset singleton + purge Redis 2 clés (state + state:live) + delete fichier",
+    )
+    clean_aws_orphans: bool = Field(
+        default=False,
+        description="Supprimer les stacks CloudFormation knowwhere-burst-* détectées sur AWS",
+    )
+
+
+@router.get(
+    "/aws-truth",
+    summary="Source de vérité = AWS — diagnostic divergence",
+    description="""
+    Scan AWS (instances Project=KnowWhere + stacks knowwhere-burst-*) et compare
+    avec l'état local (singleton, Redis state, Redis state:live, fichier).
+
+    Diagnostic `divergence_type` :
+    - `coherent` : tout est cohérent (idle ou actif)
+    - `zombie_local` : local plein, AWS vide → bouton "Forcer le nettoyage" requis
+    - `orphan_aws` : AWS plein, local vide → cleanup local + optionnel delete stack
+    - `ip_mismatch` : les deux pleins mais IPs différentes → auto-resync (spot interruption + respawn)
+    - `both` : divergences multiples
+
+    Lecture seule, ne modifie rien.
+    """,
+)
+async def get_aws_truth(
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+) -> Dict[str, Any]:
+    """Action read-only : scan AWS + consolide local + calcule divergence."""
+    try:
+        from knowbase.ingestion.burst.aws_truth_service import discover_aws_truth
+
+        truth = discover_aws_truth()
+        return truth.to_dict()
+    except Exception as e:
+        logger.error(f"[BURST] aws-truth failed: {e}")
+        raise HTTPException(status_code=500, detail=f"AWS truth scan failed: {e}")
+
+
+@router.post(
+    "/auto-resync",
+    summary="Resync silencieux vers AWS (cas spot interruption + respawn)",
+    description="""
+    Quand `aws-truth` détecte `ip_mismatch` (AWS a une instance UP avec une IP
+    différente du state local — typique d'un spot interruption suivi d'un
+    respawn automatique du SpotFleet), cet endpoint met à jour silencieusement :
+
+    1. Le singleton orchestrator.state (instance_ip, instance_id, vllm_url, etc.)
+    2. La clé Redis `osmose:burst:state` (lue par le worker pour résoudre l'URL LLM)
+    3. Publie un événement Redis pub/sub sur `osmose:burst:resync` pour notifier
+       le worker en cours d'ingestion (qui flushe son cache d'URL et bascule au
+       prochain call LLM sans attendre la fin du timeout en cours).
+
+    Si la divergence n'est PAS `ip_mismatch`, l'endpoint retourne `resynced=false`
+    sans modifier l'état.
+    """,
+)
+async def auto_resync_burst(
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+) -> Dict[str, Any]:
+    """Resync silencieux singleton + Redis + pub/sub event."""
+    try:
+        from knowbase.ingestion.burst.aws_truth_service import auto_resync_to_aws
+
+        return auto_resync_to_aws()
+    except Exception as e:
+        logger.error(f"[BURST] auto-resync failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Auto-resync failed: {e}")
+
+
+@router.post(
+    "/force-cleanup",
+    summary="Forcer le nettoyage local et/ou AWS (action utilisateur explicite)",
+    description="""
+    Geste explicite déclenché par l'utilisateur via le bouton "Forcer le
+    nettoyage" sur /admin/gpu. Deux flags granulaires :
+
+    - `clean_local=true` : reset singleton.state à None, purge Redis
+      (`osmose:burst:state` + `osmose:burst:state:live`), delete fichier
+      `.burst_state.json` s'il existe.
+
+    - `clean_aws_orphans=true` : pour chaque stack AWS `knowwhere-burst-*`
+      détectée, déclenche `cloudformation delete-stack`. À utiliser quand le
+      diagnostic est `orphan_aws` (stack AWS sans state local).
+
+    Combinaisons typiques :
+    - zombie_local → clean_local=true, clean_aws_orphans=false
+    - orphan_aws → user choisit (1) clean_local seul (re-decouvrir l'AWS plus
+      tard) ou (2) clean_aws_orphans (supprimer définitivement)
+    """,
+)
+async def force_cleanup_burst(
+    request: ForceCleanupRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+) -> Dict[str, Any]:
+    """Nettoyage explicite local et/ou AWS orphan."""
+    try:
+        from knowbase.ingestion.burst.aws_truth_service import force_cleanup
+
+        return force_cleanup(
+            clean_local=request.clean_local,
+            clean_aws_orphans=request.clean_aws_orphans,
+        )
+    except Exception as e:
+        logger.error(f"[BURST] force-cleanup failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Force cleanup failed: {e}")
 
 
 __all__ = ["router"]
