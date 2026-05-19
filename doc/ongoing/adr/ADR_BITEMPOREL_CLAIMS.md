@@ -1,11 +1,12 @@
 # ADR — Modèle bitemporel sur Claims (Phase A1)
 
-> **Status** : 📝 Proposed (rédigé 2026-05-19, à valider par utilisateur produit)
+> **Status** : ✅ Accepted (rédigé 2026-05-19, validé post-review Claude Web 2026-05-19 + amendements §2.2 / §3 / §4 / §6)
 > **Phase** : A1 (Refondation runtime KG-first — Modèle bitemporel)
 > **Rattaché à** : `doc/VISION.md` §3.2 (Bitemporel sur les claims) + `doc/EXECUTION_ROADMAP.md` §2 Phase A1
 > **Kill switch** : Gate-B (cf §7.2 ROADMAP) — 100% des claims persistés doivent porter les 4 timestamps après cette phase
 > **Auteur** : Fred (utilisateur produit)
 > **Référence externe** : Zep/Graphiti (paper arxiv 2501.13956) — modèle bitemporal industriel ; VersionRAG (arxiv 2510.08109)
+> **Reviewers** : Claude Web (2026-05-19) — verdict "production-ready" + 5 améliorations mineures + 1 spike de mitigation, tous intégrés dans cette version
 
 ---
 
@@ -63,7 +64,7 @@ C'est le modèle prescrit par VISION.md §3.2.
 
 | Timestamp | Type Neo4j | Nullable | Sémantique opérationnelle |
 |---|---|---|---|
-| `valid_from` | `DateTime` | **Non** (default = `ingested_at` si non détectable du doc) | Date à partir de laquelle le claim est vrai dans le monde réel. Si non explicite dans le doc, vaut par défaut la date d'ingestion (le claim est vrai depuis qu'on l'a appris) |
+| `valid_from` | `DateTime` | **Non** (default = `document.valid_from` ou `ingested_at` en dernier recours) | Date à partir de laquelle le claim est vrai dans le monde réel. Cascade : (1) extraction explicite dans le claim, (2) héritage `document.valid_from`, (3) fallback `ingested_at`. **Ambiguïté connue** : un claim avec `valid_from = ingested_at` peut résulter de "fallback faute de signal" OU "extraction réussie qui tombe sur la date d'ingestion". Cette distinction sera tracée par le champ **`marker_type`** ajouté en Phase A2 (`explicit | document_inherited | ingestion_fallback`), qui permettra à la classification claim-vs-claim (`EVOLUTION_OF` / `CONTRADICTS`) de filtrer les claims dont `valid_from` est non-fiable. Pas de pollution A1.1 : on accepte l'ambiguïté ici, marqueur A2 corrigera |
 | `valid_until` | `DateTime` | **Oui** | Date après laquelle le claim n'est plus vrai. `NULL` = encore actif dans le monde réel. Renseigné explicitement (marqueur textuel "expires", "until", "until vX.Y") OU implicitement (claim contradictoire dans doc plus récent → Phase A2) |
 | `ingested_at` | `DateTime` | **Non** | Timestamp système au moment de la persistance Neo4j. Sert d'audit trail. Déjà partiellement présent dans le pipeline actuel (champ existant à compléter pour systématisation) |
 | `invalidated_at` | `DateTime` | **Oui** | Timestamp système au moment où ce claim a été invalidé (suite à contradiction, supersession, retrait du corpus). `NULL` = claim actif dans le KG. **Jamais de suppression** : on invalide, on ne supprime pas (AX-1 préserve la preuve) |
@@ -144,14 +145,32 @@ Script de migration cible :
 ```cypher
 // Migration A1.2 — Bitemporel sur Claim
 // Idempotent : peut être rejouée sans effet
+
+// 1. Count avant migration (audit)
+MATCH (c:Claim) RETURN count(c) AS total_claims_before;
+
+// 2. Migration des claims sans valid_from
 MATCH (c:Claim)
 WHERE c.valid_from IS NULL
 SET c.valid_from = c.ingested_at,
     c.valid_until = NULL,
     c.invalidated_at = NULL
-RETURN count(c) AS migrated;
+WITH count(c) AS migrated_count
 
-// Création indexes
+// 3. Log de migration (audit trail persistant — node :MigrationLog)
+CREATE (:MigrationLog {
+  migration_id: 'v6_bitemporal_claims',
+  executed_at: datetime(),
+  claims_migrated: migrated_count,
+  script_version: '1.0',
+  applied_by: 'A1.2'
+})
+RETURN migrated_count;
+
+// 4. Count après migration (vérification)
+MATCH (c:Claim) RETURN count(c) AS total_claims_after;
+
+// 5. Création indexes
 CREATE INDEX claim_active IF NOT EXISTS
 FOR (c:Claim) ON (c.tenant_id, c.invalidated_at);
 
@@ -163,6 +182,15 @@ FOR (c:Claim) ON (c.tenant_id, c.ingested_at);
 ```
 
 Localisation script migration : `migrations/v6_bitemporal_claims.cypher` (à créer en Phase A1.2).
+
+**Audit post-migration** :
+```cypher
+// Vérifier traçabilité migration
+MATCH (m:MigrationLog {migration_id: 'v6_bitemporal_claims'})
+RETURN m.executed_at, m.claims_migrated, m.script_version;
+```
+
+Le node `:MigrationLog` est conservé en permanence pour audit historique (ne sera jamais purgé).
 
 ### 3.2 Phase A1.3 — Pipeline d'ingestion ClaimFirst
 
@@ -185,19 +213,41 @@ Ces 3 champs sont posés sur le nœud `:Document` créé à l'ingestion. Ils ali
 
 ```python
 # Pseudo-code pipeline ClaimFirst Phase 9 (persistance)
+
+# Précondition forte : document.valid_from est garanti par l'étape 1 (Document Profile)
+# Si absent → bug pipeline, on lève une exception (assertion stricte)
+assert document.valid_from is not None, f"Document {doc_id} has no valid_from after Phase 1 (Document Profile bug)"
+
+claim_valid_from = (
+    extracted_valid_from               # Si extrait du claim lui-même (rare, ex: "applicable from 2023-01-01")
+    or document.valid_from              # Héritage du document source (cf étape 1) — chemin nominal
+)
+
+# Règle drift soft : un claim peut être valid_from > document.valid_from (cas légitime SAP :
+# "ce paramètre s'appliquera à partir du 01/01/2024" dans un doc publié en 2023).
+# En revanche, claim.valid_from < document.valid_from est suspect (claim "vrai avant la
+# publication du document source"). On log un warning sans bloquer (la donnée peut
+# être légitime ; un bench en Phase A2 décidera si on durcit en assert).
+if claim_valid_from < document.valid_from:
+    logger.warning(
+        f"Drift temporel claim<document : claim_valid_from={claim_valid_from} "
+        f"< document.valid_from={document.valid_from} (doc_id={doc_id}, claim_id={claim_id})"
+    )
+
 claim_data = {
     # ... champs existants ...
-    "valid_from": (
-        extracted_valid_from               # Si extrait du claim lui-même (rare, ex: "applicable from 2023-01-01")
-        or document.valid_from              # Héritage du document source (cf étape 1)
-        or datetime.utcnow()                # Fallback (jamais utilisé en pratique car étape 1 garantit valid_from)
-    ),
+    "valid_from": claim_valid_from,
     "valid_until": extracted_valid_until,  # Si explicite (ex: "expires 2025-12-31"), sinon NULL
     "ingested_at": datetime.utcnow(),
     "invalidated_at": None,                # Toujours NULL à la création (sera mis en Phase A2 lors de classification claim-vs-claim)
     # ... autres champs (subject_canonical, predicate, value, evidence_id, etc.) ...
 }
 ```
+
+**Règle drift (décidée 2026-05-19)** :
+- `claim.valid_from >= document.valid_from` : nominal (cas attendu)
+- `claim.valid_from > document.valid_from` : **autorisé** (entrée en vigueur future décrite dans le doc)
+- `claim.valid_from < document.valid_from` : **warning log** (suspect mais pas bloquant — Phase A2 statuera sur durcissement)
 
 ### 3.3 Phase A1.4 — Validation Gate-B
 
@@ -221,11 +271,17 @@ Tests d'intégration **obligatoires** avant de marquer Phase A1 comme complété
    // Attendu : 0
    ```
 
-3. **Test queries point-in-time** : sur un échantillon de 10 claims du corpus SAP, vérifier que les 3 queries types (cf §2.4) retournent des résultats cohérents.
+3. **Test queries point-in-time** : sur un **échantillon stratifié de 10 claims du corpus SAP** (2 par doc_type : Operations Guide / Security Guide / Admin Guide / Release Notes / Integration Guide), vérifier que les 3 queries types (cf §2.4) retournent des résultats cohérents. La stratification garantit qu'on ne benchmarke pas sur un seul type de doc.
 
 4. **Test cross-tenant** : vérifier que les index `claim_active`, `claim_event_time`, `claim_ingested` sont utilisés (via `EXPLAIN`) et que les queries restent isolées par tenant.
 
-**Critère de succès Gate-B** : 100% des claims persistés portent les 4 timestamps. Si <100%, **Phase A1 échouée**, investiguer avant Phase A2.
+5. **Test performance query point-in-time** (nouveau, ajout post-review Claude Web) : sur le corpus SAP complet (~15 861 claims), mesurer la latence des 3 queries §2.4. **Seuils** :
+   - p50 < 100 ms
+   - **p95 < 500 ms** (critère bloquant)
+   - p99 < 1 s
+   - Si dépassement → analyse `EXPLAIN` + revue indexes avant Phase A2
+
+**Critère de succès Gate-B** : 100% des claims persistés portent les 4 timestamps **ET** queries p95 < 500ms. Si <100% sur timestamps OU p95 ≥ 500ms, **Phase A1 échouée**, investiguer avant Phase A2.
 
 ---
 
@@ -242,7 +298,7 @@ Tests d'intégration **obligatoires** avant de marquer Phase A1 comme complété
 ### 4.2 Conséquences négatives (assumées)
 
 - **Coût stockage Neo4j** : +3 champs DateTime par Claim × ~15 861 claims SAP = ~200 KB extra (négligeable)
-- **Complexité query runtime** : tous les Cypher du runtime devront inclure le filtre `WHERE c.invalidated_at IS NULL` par défaut, sauf modes "audit historique"
+- **Complexité query runtime** : tous les Cypher du runtime devront inclure le filtre `WHERE c.invalidated_at IS NULL` par défaut, sauf modes "audit historique" — **pattern obligatoire** documenté en §4.4 ci-dessous
 - **Migration Neo4j non-trivial** : impossible à rollback en cas de bug — la migration A1.2 doit être validée sur un dump avant d'être appliquée à la prod
 - **Pipeline ingestion légèrement plus complexe** : extraction de `document_valid_from` ajoute du LLM/regex à l'étape 1 (impact latence minimal, ~0.5s/doc)
 
@@ -250,10 +306,42 @@ Tests d'intégration **obligatoires** avant de marquer Phase A1 comme complété
 
 | Risque | Mitigation |
 |---|---|
-| `valid_from` mal extrait par LLM | Fallback à `ingested_at` ; `marker_type` à venir en Phase A2 trace si extraction explicite ou inférée |
-| Queries point-in-time lentes sur gros corpus | Indexes composites sur `tenant_id` (cf §2.5) ; bench performance dans Gate-B test 4 |
-| Migration bug perdant des claims existants | Migration idempotente + dump Neo4j avant migration + test post-migration count |
+| `valid_from` mal extrait par LLM | Fallback à `ingested_at` ; `marker_type` à venir en Phase A2 trace si extraction explicite ou inférée (cf §2.2) |
+| Queries point-in-time lentes sur gros corpus | Indexes composites sur `tenant_id` (cf §2.5) ; bench performance Gate-B test 5 avec seuil p95 < 500ms |
+| Migration bug perdant des claims existants | Migration idempotente + dump Neo4j avant migration + node `:MigrationLog` audit + plan rollback §6.4 |
 | Confusion sémantique `valid_from` vs `ingested_at` | ADR explicite (ce doc) + commentaires Cypher + tests qui exercent les 3 queries types §2.4 |
+| **Drift `claim.valid_from` vs `document.valid_from`** (ajout post-review Claude Web) | Règle soft : `>` autorisé (entrée vigueur future), `<` warning log (cf §3.2). Durcissement éventuel en assert tranché Phase A2 selon volume warnings observés |
+| **Taux extraction `document_valid_from` faible** sur PDFs SAP hétérogènes | **Spike A1.0** (0.5j) avant A1.3 : tester extraction sur 20 PDFs SAP représentatifs, mesurer taux succès, ajuster stratégie si <80% |
+
+### 4.4 Pattern runtime obligatoire — filtre `invalidated_at IS NULL`
+
+Toute query Cypher du runtime qui interroge les `:Claim` **doit** inclure le filtre `WHERE c.invalidated_at IS NULL`, sauf modes "audit historique" explicitement opt-in. Sinon les claims invalidés sont retournés et polluent les réponses.
+
+**Pattern à appliquer** :
+
+```cypher
+// ✅ CORRECT — claims actifs uniquement (cas nominal)
+MATCH (c:Claim)
+WHERE c.tenant_id = $tenant
+  AND c.invalidated_at IS NULL          // OBLIGATOIRE filtre actif
+  AND c.valid_from <= datetime()         // OBLIGATOIRE si on veut seulement le vrai aujourd'hui
+  AND (c.valid_until IS NULL OR c.valid_until > datetime())
+RETURN c
+
+// ❌ INCORRECT — oubli filtre invalidated_at, retourne claims obsolètes
+MATCH (c:Claim)
+WHERE c.tenant_id = $tenant
+RETURN c
+
+// ✅ AUDIT HISTORIQUE — opt-in explicite, claims invalidés inclus
+MATCH (c:Claim)
+WHERE c.tenant_id = $tenant
+  AND c.ingested_at <= datetime($point_in_time)
+// PAS de filtre invalidated_at : on veut voir l'historique complet
+RETURN c
+```
+
+Ce pattern sera codifié dans le DEV_GUIDE (à créer en Phase A1.3) et **enforced** par revue de code sur toute PR touchant un module Cypher.
 
 ---
 
@@ -291,11 +379,12 @@ Tests d'intégration **obligatoires** avant de marquer Phase A1 comme complété
 
 | # | Tâche | Estimation | Statut |
 |---|---|---|---|
-| #319 | PHASE A1.1 — Rédiger cet ADR | 0.5j | 🟡 in_progress |
+| #319 | PHASE A1.1 — Rédiger cet ADR | 0.5j | ✅ completed |
 | #320 | PHASE A1.2 — Migration schéma Neo4j (`migrations/v6_bitemporal_claims.cypher`) + tests idempotence | 1j | pending (blocked by #319) |
-| #321 | PHASE A1.3 — Pipeline ingestion : extraction `document_valid_from` + peuplement claim timestamps | 1.5-2j | pending (blocked by #320) |
-| #322 | PHASE A1.4 — Tests Gate-B (4 tests) — validation 100% claims OK | 0.5j | pending (blocked by #321) |
-| **Total Phase A1** | | **~4-5j** | |
+| **#A1.0** | **PHASE A1.0 spike (post-review Claude Web)** — tester extraction `document_valid_from` sur 20 PDFs SAP représentatifs, mesurer taux succès, valider stratégie regex+LLM. **Bloquant A1.3 si taux <80%**, déclenche revue stratégie | **0.5j** | **pending (blocked by #320)** |
+| #321 | PHASE A1.3 — Pipeline ingestion : extraction `document_valid_from` + peuplement claim timestamps | 1.5-2j (révisable selon A1.0) | pending (blocked by A1.0) |
+| #322 | PHASE A1.4 — Tests Gate-B (5 tests dont perf p95) — validation 100% claims OK + p95 < 500ms | 0.5j | pending (blocked by #321) |
+| **Total Phase A1** | | **~4.5-5.5j** (+0.5j spike) | |
 
 Conforme à l'estimation EXECUTION_ROADMAP §2 Phase A1 (1 semaine).
 
@@ -312,10 +401,38 @@ Si tous OK → Phase A1 fermée, démarrage Phase A2 (relations claim-vs-claim).
 ### 6.3 Dépendances et ordre
 
 ```
-A1.1 ADR (#319) — VALIDATED →  A1.2 Migration (#320) →  A1.3 Pipeline (#321) →  A1.4 Tests (#322) →  Phase A2
+A1.1 ADR (#319) ✅ →  A1.2 Migration (#320) →  A1.0 Spike (#A1.0) →  A1.3 Pipeline (#321) →  A1.4 Tests Gate-B (#322) →  Phase A2
 ```
 
-Strict séquentiel (chaque tâche débloque la suivante).
+Strict séquentiel (chaque tâche débloque la suivante). Le spike A1.0 (0.5j) est inséré entre A1.2 et A1.3 pour dérisquer l'extraction `document_valid_from` qui est le point de fragilité identifié par Claude Web.
+
+### 6.4 Plan de rollback (en cas d'échec migration A1.2)
+
+Avant exécution de la migration A1.2, **dump complet Neo4j** est obligatoire :
+
+```bash
+# 1. Backup pré-migration
+docker exec knowbase-neo4j neo4j-admin database dump neo4j \
+  --to-path=/data/backups/pre_v6_bitemporal_$(date +%Y%m%d_%H%M%S).dump
+```
+
+En cas d'échec de la migration ou de découverte d'un bug bloquant :
+
+```
+1. STOP immédiat du pipeline d'ingestion (kw.ps1 stop app — pas infra pour préserver le state du dump)
+2. Validation diagnostic : MATCH (m:MigrationLog {migration_id: 'v6_bitemporal_claims'}) RETURN m
+   → si présent : migration a tourné partiellement, rollback nécessaire
+   → si absent : migration n'a pas démarré, fix script et re-run
+3. Restore dump pré-migration :
+   docker exec knowbase-neo4j neo4j-admin database load neo4j \
+     --from-path=/data/backups/pre_v6_bitemporal_<timestamp>.dump --overwrite-destination=true
+4. Investigation cause racine (script Cypher → erreur sémantique ? volume ? lock ?)
+5. Fix script `migrations/v6_bitemporal_claims.cypher`
+6. Re-run migration sur dump test isolé avant prod
+7. Documenter post-mortem dans `doc/ongoing/sessions/POST_MORTEM_A1.2_<date>.md`
+```
+
+Le dump pré-migration est conservé **minimum 30 jours** après validation Gate-B (parachute en cas de découverte tardive de bug).
 
 ---
 
@@ -336,7 +453,17 @@ Strict séquentiel (chaque tâche débloque la suivante).
 
 | Acteur | Date | Statut |
 |---|---|---|
-| Fred (utilisateur produit) | _à valider_ | 📝 Proposed |
-| Vision-guardian | _audit auto à la première invocation post-publication_ | _pending_ |
+| Fred (utilisateur produit) | 2026-05-19 | ✅ Accepted |
+| Claude Web (review externe) | 2026-05-19 | ✅ "Production-ready" — 5 améliorations mineures + 1 spike de mitigation, tous intégrés |
+| Vision-guardian | _audit auto à la prochaine invocation_ | _pending_ |
 
-*ADR rédigé le 2026-05-19 dans le cadre de la Phase A1 (refondation runtime KG-first).*
+**Amendements appliqués post-review Claude Web (2026-05-19)** :
+1. §2.2 — Clarification ambiguïté `valid_from = ingested_at` + référence `marker_type` Phase A2
+2. §3.1 — Log de migration (node `:MigrationLog` avec audit count avant/après)
+3. §3.2 — Règle drift soft `claim.valid_from` vs `document.valid_from` (warning, pas assert)
+4. §3.3 — Échantillon Gate-B #4 stratifié par doc_type + test #5 perf p95 < 500ms
+5. §4.4 — Pattern runtime obligatoire `WHERE invalidated_at IS NULL` documenté
+6. §6.1 — Tâche **A1.0 spike** (0.5j) ajoutée avant A1.3 (extraction `document_valid_from` sur 20 PDFs)
+7. §6.4 — Plan de rollback explicite (procédure 7 étapes)
+
+*ADR rédigé le 2026-05-19 dans le cadre de la Phase A1 (refondation runtime KG-first). Amendé et validé le même jour post-review.*
