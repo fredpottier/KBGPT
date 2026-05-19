@@ -30,6 +30,8 @@ async def persist_hybrid_anchor_to_neo4j(
     chunks: Optional[List[Dict[str, Any]]] = None,
     document_name: Optional[str] = None,
     doc_context_frame: Optional["DocContextFrame"] = None,
+    document_valid_from: Optional[str] = None,
+    document_valid_from_marker: Optional[str] = None,
 ) -> Dict[str, int]:
     """
     Persiste les concepts Hybrid Anchor dans Neo4j.
@@ -91,7 +93,13 @@ async def persist_hybrid_anchor_to_neo4j(
         # Étape 0: Créer/mettre à jour le nœud Document (PR4)
         # ================================================================
         stats["document_created"] = _create_document_node(
-            neo4j_client, document_id, tenant_id, document_name, doc_context_frame
+            neo4j_client,
+            document_id,
+            tenant_id,
+            document_name,
+            doc_context_frame,
+            document_valid_from=document_valid_from,
+            document_valid_from_marker=document_valid_from_marker,
         )
 
         # ================================================================
@@ -165,9 +173,23 @@ def _create_document_node(
     document_id: str,
     tenant_id: str,
     document_name: Optional[str],
-    doc_context_frame: Optional["DocContextFrame"]
+    doc_context_frame: Optional["DocContextFrame"],
+    document_valid_from: Optional[str] = None,
+    document_valid_from_marker: Optional[str] = None,
 ) -> int:
-    """Crée ou met à jour le nœud Document."""
+    """Crée ou met à jour le nœud Document.
+
+    Phase A1.3 (ADR_BITEMPOREL_CLAIMS) :
+    - `document_valid_from` : date ISO YYYY-MM-DD extraite par DocumentValidFromExtractor
+      (cascade S2>S3>S1+batch>S4 LLM Qwen2.5-14B AWQ). None si aucun signal trouvé.
+    - `document_valid_from_marker` : trace l'origine de l'extraction pour Phase A2
+      classification temporelle. Valeurs : "explicit" | "ingestion_fallback".
+      None si pas encore branché (transition A1.3.C).
+
+    Si `document_valid_from` est None, le node Document n'aura pas `valid_from` (sera
+    posé en re-ingestion ultérieure quand l'extracteur sera branché partout). Les
+    Claims hériteront alors via `ingestion_fallback` au moment de leur création.
+    """
     doc_query = """
     MERGE (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
     ON CREATE SET
@@ -177,7 +199,9 @@ def _create_document_node(
         d.doc_scope = $doc_scope,
         d.edition = $edition,
         d.global_markers = $global_markers,
-        d.created_at = datetime()
+        d.created_at = datetime(),
+        d.valid_from = CASE WHEN $valid_from IS NOT NULL THEN datetime($valid_from) ELSE NULL END,
+        d.valid_from_marker = $valid_from_marker
     ON MATCH SET
         d.name = COALESCE($doc_name, d.name),
         d.detected_variant = COALESCE($detected_variant, d.detected_variant),
@@ -185,7 +209,12 @@ def _create_document_node(
         d.doc_scope = $doc_scope,
         d.edition = COALESCE($edition, d.edition),
         d.global_markers = $global_markers,
-        d.updated_at = datetime()
+        d.updated_at = datetime(),
+        d.valid_from = CASE
+            WHEN $valid_from IS NOT NULL THEN datetime($valid_from)
+            ELSE d.valid_from
+        END,
+        d.valid_from_marker = COALESCE($valid_from_marker, d.valid_from_marker)
     RETURN count(d) AS created
     """
 
@@ -223,6 +252,8 @@ def _create_document_node(
             doc_scope=doc_scope,
             edition=edition,
             global_markers=global_markers,
+            valid_from=document_valid_from,
+            valid_from_marker=document_valid_from_marker,
         )
         record = result.single()
         return record["created"] if record else 0
