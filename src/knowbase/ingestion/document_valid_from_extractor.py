@@ -2,18 +2,30 @@
 
 ADR_BITEMPOREL_CLAIMS.md §3.2 (Phase A1.3, cascade post-spike A1.0).
 
-Cascade en 4 stratégies, du plus fiable au moins fiable selon les findings du
-spike A1.0 (cf doc/ongoing/sessions/A1.0_SPIKE_DOCUMENT_VALID_FROM.md) :
+Cascade par défaut en 3 stratégies (S1 désactivé — voir décision 19/05/2026
+ci-dessous) :
 
   S2 — Texte page 1 proche d'un keyword sémantique (Published, Effective, ...)
   S3 — Nom de fichier enrichi (year + month_year FR/EN + YYYYMMDD + version)
-  S1 — Metadata /CreationDate avec WARNING si batch re-save détecté
-  S4 — LLM Qwen2.5-14B AWQ EC2 Burst (evidence-locked, prompt page 1)
-  Fallback — ingestion_fallback marker (jamais d'erreur bloquante)
+  S4 — LLM (evidence-locked, prompt page 1)
+  Fallback — valid_from=null + marker=ingestion_fallback (préférable à une date inventée)
 
-Le S1 est en 3e position (pas 1ère) parce que le spike A1.0 a montré que sur
-le corpus SAP, /CreationDate est massivement pourrie par les re-save batch
-locaux lors du téléchargement (9/15 PDFs avec date identique).
+DÉCISION 19/05/2026 — S1 désactivé par défaut. La metadata /CreationDate
+d'un PDF n'est PAS un signal de date de publication fiable :
+  - Un fichier peut être copié, déplacé, dupliqué, re-saved par un portail à
+    chaque téléchargement → la CreationDate reflète l'événement filesystem,
+    pas la date intellectuelle du document.
+  - Mettre `valid_from = today` quand on download un doc de 2019 induit un
+    biais grave : le runtime supposera que le doc n'existait pas hier, ce qui
+    fausse classification temporelle / supersession / filtres de fraîcheur.
+  - `valid_from=null` (marker=ingestion_fallback) est un signal honnête :
+    « date inconnue, à traiter comme non-filtrable temporellement ». Mille
+    fois préférable à une date fausse.
+
+S1 reste dans le code (opt-in via `enable_s1_metadata=True`) pour des
+contextes maîtrisés où le corpus n'est PAS soumis à re-save (ex : génération
+interne de PDFs avec CreationDate fiable). En production OSMOSE par défaut :
+off.
 
 Tous les chemins retournent un DocumentValidFromResult avec marker_type
 explicite (utilisé en Phase A2 pour filtrer les claims avec valid_from non
@@ -365,6 +377,25 @@ CRITICAL — evidence-locked extraction:
   document's date. Only fall back to them if no other temporal anchor exists.
 - Do NOT capture random dates from data tables, examples, or unrelated mentions
 
+CRITICAL — distinguish the document's OWN date from dates the document MENTIONS:
+The document's date is when this document was authored, published, issued, or
+otherwise produced. It is NOT the same as dates the document discusses in its
+content. Specifically, the following are NOT the document's date even when
+prominent on page 1:
+  - Dates describing events, products, contracts, regulations, cases, deadlines,
+    or any subject the document is ABOUT
+  - End-of-life, end-of-maintenance, sunset, expiry, deprecation dates of
+    products, standards, services, agreements, etc. (e.g. "Support ends 2027")
+  - Effective/applicable dates of an external object referenced in the document
+    (e.g. "Applicable from 2024" describes a regulation, not the document)
+  - Birth/death/incident/event dates mentioned in the narrative
+  - Validity windows of described items (e.g. "Valid 2022–2025" attached to a
+    product or license)
+When the page contains ONLY such referenced/described dates (not the document's
+own publication date), return value=null. **Returning null is correct and
+expected — do NOT pick a referenced date as a fallback.** A false document date
+is far worse for downstream consumers than no date at all.
+
 NORMALIZATION (the system normalizes your output to ISO YYYY-MM-DD):
 - Year+month → use YYYY-MM (system will set day=01)
 - Year only → use YYYY (system will set month=01, day=01)
@@ -501,9 +532,21 @@ class DocumentValidFromExtractor:
         self,
         s4_config: Optional[S4LLMConfig] = None,
         enable_s4_llm: bool = True,
+        enable_s1_metadata: bool = False,
     ):
+        """
+        Args:
+            s4_config: configuration pour S4 LLM (vLLM URL, model, timeout).
+            enable_s4_llm: active S4 (LLM evidence-locked sur page 1). Recommandé.
+            enable_s1_metadata: active S1 (PDF /CreationDate). **OFF par défaut**.
+                S1 utilise la metadata `/CreationDate` du PDF qui n'est pas fiable
+                (re-save batch, copie, re-générée par portail). Voir module docstring
+                pour le raisonnement complet. À activer uniquement sur un corpus
+                maîtrisé (génération interne).
+        """
         self.s4_config = s4_config or S4LLMConfig()
         self.enable_s4_llm = enable_s4_llm
+        self.enable_s1_metadata = enable_s1_metadata
         self._suspect_dates: set[str] = set()
 
     def precompute_batch_re_save(self, pdf_paths: list[Path]) -> set[str]:
@@ -533,20 +576,11 @@ class DocumentValidFromExtractor:
             result.source = s3["source"]
             return result
 
-        # S1 — Metadata avec batch-check (priorité 3)
-        s1 = extract_s1_metadata(pdf_path)
-        result.strategies_tried["s1_metadata"] = s1
-        if s1["found"]:
-            if s1["value"] in self._suspect_dates:
-                result.warning = f"s1_disqualified_batch_re_save:{s1['value']}"
-                # Continue vers S4
-            else:
-                result.value = s1["value"]
-                result.marker_type = MarkerType.EXPLICIT
-                result.source = s1["source"]
-                return result
-
-        # S4 — LLM Qwen2.5-14B AWQ EC2 Burst (priorité 4, opt-in)
+        # S4 — LLM (priorité 3, evidence-locked sur le contenu page 1).
+        # S4 lit le texte réel du document, donc la date qu'il trouve correspond à
+        # ce que le document affiche explicitement. Si la page 1 ne contient pas
+        # de date de publication explicite, S4 retourne None — c'est le bon
+        # comportement (préférable à inventer une date).
         if self.enable_s4_llm:
             s4 = extract_s4_llm(pdf_path, self.s4_config)
             result.strategies_tried["s4_llm"] = s4
@@ -560,6 +594,29 @@ class DocumentValidFromExtractor:
                 result.source = s4["source"]
                 return result
 
-        # Fallback ultime — aucun signal trouvé
+        # S1 — Metadata /CreationDate (LAST RESORT, OPT-IN UNIQUEMENT — décision 19/05/2026).
+        # Volatile (copie, re-save batch, re-génération portail) → ne reflète pas la date
+        # intellectuelle du document. Désactivé par défaut. Si l'opérateur a explicitement
+        # opt-in `enable_s1_metadata=True` (corpus maîtrisé), S1 ne tranche qu'après
+        # échec de S2/S3/S4, avec un warning systématique sur la fiabilité.
+        if self.enable_s1_metadata:
+            s1 = extract_s1_metadata(pdf_path)
+            result.strategies_tried["s1_metadata"] = s1
+            if s1["found"]:
+                if s1["value"] in self._suspect_dates:
+                    result.warning = (
+                        result.warning + ";" if result.warning else ""
+                    ) + f"s1_disqualified_batch_re_save:{s1['value']}"
+                else:
+                    result.value = s1["value"]
+                    result.marker_type = MarkerType.EXPLICIT
+                    result.source = s1["source"]
+                    result.warning = (
+                        result.warning + ";" if result.warning else ""
+                    ) + "s1_low_reliability_metadata"
+                    return result
+
+        # Fallback ultime — aucun signal fiable trouvé. valid_from=null est intentionnel :
+        # mieux que mettre une fausse date qui fausserait le runtime temporel.
         result.marker_type = MarkerType.INGESTION_FALLBACK
         return result
