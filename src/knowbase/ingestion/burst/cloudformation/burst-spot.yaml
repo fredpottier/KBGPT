@@ -445,7 +445,7 @@ Resources:
                 # Inerte pour les appels sans tools (ex: extraction claims) — donc safe.
                 # Parser "hermes" = standard Qwen 2.5. Pour Qwen3, override via env :
                 # VLLM_TOOL_CALL_PARSER=qwen3 (et set --reasoning-parser à la place).
-                TOOL_CALL_PARSER="${VLLM_TOOL_CALL_PARSER:-hermes}"
+                TOOL_CALL_PARSER="${!VLLM_TOOL_CALL_PARSER:-hermes}"
                 VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-auto-tool-choice --tool-call-parser $TOOL_CALL_PARSER"
                 echo "  Auto tool choice: ENABLED (parser=$TOOL_CALL_PARSER)"
 
@@ -790,7 +790,7 @@ Resources:
 
                 # Tool calling activé pour runtime V5.1 agent (tool_choice=auto).
                 # Inerte pour les appels sans tools (extraction claims) — safe.
-                TOOL_CALL_PARSER="${VLLM_TOOL_CALL_PARSER:-hermes}"
+                TOOL_CALL_PARSER="${!VLLM_TOOL_CALL_PARSER:-hermes}"
                 VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-auto-tool-choice --tool-call-parser $TOOL_CALL_PARSER"
                 echo "  Auto tool choice: ENABLED (parser=$TOOL_CALL_PARSER)"
 
