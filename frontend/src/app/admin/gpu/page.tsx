@@ -124,6 +124,47 @@ interface ActiveStack {
   spot_fleet_id: string | null
 }
 
+// CH-BURST.REL : AWS-as-source-of-truth
+type DivergenceType = 'coherent' | 'zombie_local' | 'orphan_aws' | 'ip_mismatch' | 'both'
+
+interface AwsTruth {
+  aws: {
+    instances_running: Array<{
+      instance_id: string | null
+      state: string | null
+      public_ip: string | null
+      instance_type: string | null
+      availability_zone: string | null
+      launch_time: string | null
+    }>
+    stacks_active: Array<{
+      stack_name: string
+      status: string
+      created: string | null
+    }>
+    has_instance: boolean
+    has_stack: boolean
+  }
+  local: {
+    singleton_instance_ip: string | null
+    singleton_instance_id: string | null
+    singleton_stack_name: string | null
+    redis_state_present: boolean
+    redis_state_vllm_url: string | null
+    redis_live_present: boolean
+    redis_live_instance_ip: string | null
+    file_present: boolean
+    has_any_state: boolean
+    best_known_ip: string | null
+  }
+  divergence_type: DivergenceType
+  divergence_details: string
+  can_start: boolean
+  can_force_cleanup: boolean
+  can_auto_resync: boolean
+  computed_at: string
+}
+
 // ============================================================================
 // API
 // ============================================================================
@@ -172,6 +213,35 @@ const fetchBurstConfig = async (): Promise<BurstConfig> => {
 const fetchActiveStacks = async (): Promise<{ stacks: ActiveStack[]; count: number }> => {
   const res = await fetch(`${API_BASE_URL}/api/burst/active-stacks`, { headers: getAuthHeaders() })
   if (!res.ok) throw new Error('Failed to fetch active stacks')
+  return res.json()
+}
+
+// CH-BURST.REL : AWS-as-source-of-truth + dézombie
+const fetchAwsTruth = async (): Promise<AwsTruth> => {
+  const res = await fetch(`${API_BASE_URL}/api/burst/aws-truth`, { headers: getAuthHeaders() })
+  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to fetch AWS truth')
+  return res.json()
+}
+
+const postAutoResync = async (): Promise<any> => {
+  const res = await fetch(`${API_BASE_URL}/api/burst/auto-resync`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) throw new Error((await res.json()).detail || 'Auto-resync failed')
+  return res.json()
+}
+
+const postForceCleanup = async (body: {
+  clean_local: boolean
+  clean_aws_orphans: boolean
+}): Promise<any> => {
+  const res = await fetch(`${API_BASE_URL}/api/burst/force-cleanup`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error((await res.json()).detail || 'Force cleanup failed')
   return res.json()
 }
 
@@ -352,6 +422,69 @@ export default function GpuAdminPage() {
     staleTime: 60000,
   })
 
+  // CH-BURST.REL : source de vérité AWS + divergence detection
+  // refetchOnMount: 'always' → check AWS à chaque arrivée sur la page
+  // refetchInterval: 300000 (5 min) → détecte respawn AWS en arrière-plan
+  const { data: awsTruth, refetch: refetchAwsTruth } = useQuery({
+    queryKey: ['gpu', 'aws-truth'],
+    queryFn: fetchAwsTruth,
+    refetchOnMount: 'always',
+    refetchInterval: 300000,
+  })
+
+  // Auto-resync silencieux quand ip_mismatch détecté (spot interruption + respawn)
+  const autoResyncMutation = useMutation({
+    mutationFn: postAutoResync,
+    onSuccess: (data) => {
+      if (data.resynced) {
+        toast({
+          title: 'Instance remplacée par AWS',
+          description: `Spot interruption détectée. IP locale ${data.old_ip} → IP AWS ${data.new_ip}. Worker notifié.`,
+          status: 'info',
+          duration: 6000,
+        })
+        queryClient.invalidateQueries({ queryKey: ['gpu'] })
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Auto-resync échoué', description: error.message, status: 'error', duration: 4000 })
+    },
+  })
+
+  useEffect(() => {
+    if (awsTruth?.can_auto_resync && !autoResyncMutation.isPending) {
+      autoResyncMutation.mutate()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [awsTruth?.can_auto_resync, awsTruth?.computed_at])
+
+  // Force cleanup mutation (utilisateur explicite via modal)
+  const [cleanupOptions, setCleanupOptions] = useState({
+    clean_local: true,
+    clean_aws_orphans: false,
+  })
+  const { isOpen: isCleanupOpen, onOpen: openCleanup, onClose: closeCleanup } = useDisclosure()
+
+  const forceCleanupMutation = useMutation({
+    mutationFn: postForceCleanup,
+    onSuccess: (data) => {
+      const parts = []
+      if (data.clean_local_done) parts.push('local purgé')
+      if (data.stacks_deleted?.length) parts.push(`${data.stacks_deleted.length} stack(s) supprimée(s)`)
+      toast({
+        title: 'Nettoyage effectué',
+        description: parts.length ? parts.join(' + ') : 'Aucune action requise',
+        status: 'success',
+        duration: 5000,
+      })
+      queryClient.invalidateQueries({ queryKey: ['gpu'] })
+      closeCleanup()
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Nettoyage échoué', description: error.message, status: 'error', duration: 4000 })
+    },
+  })
+
   const { data: activeStacks } = useQuery({
     queryKey: ['gpu', 'active-stacks'],
     queryFn: fetchActiveStacks,
@@ -479,15 +612,144 @@ export default function GpuAdminPage() {
             <Icon as={globalStatus.icon} boxSize={3} />
             {globalStatus.label}
           </Badge>
-          <IconButton
-            aria-label="Refresh"
-            icon={<FiRefreshCw />}
-            size="sm"
-            variant="ghost"
-            onClick={() => queryClient.invalidateQueries({ queryKey: ['gpu'] })}
-          />
+          <Tooltip label="Vérifier l'état réel sur AWS (source de vérité)">
+            <IconButton
+              aria-label="Refresh"
+              icon={<FiRefreshCw />}
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                queryClient.invalidateQueries({ queryKey: ['gpu'] })
+                refetchAwsTruth()
+              }}
+            />
+          </Tooltip>
         </HStack>
       </Flex>
+
+      {/* ================================================================ */}
+      {/* CH-BURST.REL : Banner divergence AWS ↔ local */}
+      {/* ================================================================ */}
+      {awsTruth && awsTruth.divergence_type !== 'coherent' && awsTruth.divergence_type !== 'ip_mismatch' && (
+        <Box
+          mb={3} p={3} rounded="md"
+          bg="orange.900" borderLeft="4px solid" borderColor="orange.400"
+        >
+          <HStack justify="space-between" align="start">
+            <Box flex={1}>
+              <HStack mb={1}>
+                <Icon as={FiAlertTriangle} color="orange.300" />
+                <Text fontWeight="bold" color="orange.100">
+                  Divergence détectée : {awsTruth.divergence_type.replace('_', ' ')}
+                </Text>
+              </HStack>
+              <Text fontSize="sm" color="orange.50" mb={2}>
+                {awsTruth.divergence_details}
+              </Text>
+              {awsTruth.local.best_known_ip && (
+                <Text fontSize="xs" color="orange.200" fontFamily="mono">
+                  Local pense : {awsTruth.local.best_known_ip} •
+                  AWS instances : {awsTruth.aws.instances_running.length} •
+                  AWS stacks : {awsTruth.aws.stacks_active.length}
+                </Text>
+              )}
+            </Box>
+            <Button
+              size="sm" colorScheme="orange" variant="solid"
+              onClick={() => {
+                // Pré-cocher selon le type de divergence
+                if (awsTruth.divergence_type === 'zombie_local') {
+                  setCleanupOptions({ clean_local: true, clean_aws_orphans: false })
+                } else if (awsTruth.divergence_type === 'orphan_aws') {
+                  setCleanupOptions({ clean_local: true, clean_aws_orphans: true })
+                } else {
+                  setCleanupOptions({ clean_local: true, clean_aws_orphans: true })
+                }
+                openCleanup()
+              }}
+            >
+              Forcer le nettoyage
+            </Button>
+          </HStack>
+        </Box>
+      )}
+
+      {/* Modal Forcer le nettoyage */}
+      {isCleanupOpen && (
+        <Box
+          position="fixed" top={0} left={0} right={0} bottom={0}
+          bg="blackAlpha.700" zIndex={1000}
+          display="flex" alignItems="center" justifyContent="center"
+          onClick={closeCleanup}
+        >
+          <Box
+            bg="gray.800" rounded="lg" p={5} maxW="500px" w="90%"
+            border="1px solid" borderColor="whiteAlpha.300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Text fontSize="lg" fontWeight="bold" mb={3} color="text.primary">
+              Forcer le nettoyage
+            </Text>
+            <Text fontSize="sm" color="text.secondary" mb={4}>
+              Choisis ce que tu veux nettoyer. Recommandation pré-cochée selon
+              le type de divergence détecté.
+            </Text>
+
+            <VStack align="start" spacing={3} mb={4}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={cleanupOptions.clean_local}
+                  onChange={(e) => setCleanupOptions({ ...cleanupOptions, clean_local: e.target.checked })}
+                  style={{ marginTop: 4 }}
+                />
+                <Box>
+                  <Text fontSize="sm" fontWeight="bold" color="text.primary">État local</Text>
+                  <Text fontSize="xs" color="text.muted">
+                    Reset singleton FastAPI + purge Redis (state + state:live) + delete fichier .burst_state.json
+                  </Text>
+                </Box>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={cleanupOptions.clean_aws_orphans}
+                  onChange={(e) => setCleanupOptions({ ...cleanupOptions, clean_aws_orphans: e.target.checked })}
+                  style={{ marginTop: 4 }}
+                />
+                <Box>
+                  <Text fontSize="sm" fontWeight="bold" color="text.primary">
+                    Stack(s) AWS orpheline(s) {awsTruth?.aws.stacks_active.length ? `(${awsTruth.aws.stacks_active.length})` : ''}
+                  </Text>
+                  <Text fontSize="xs" color="text.muted">
+                    delete_stack pour chaque knowwhere-burst-* détecté sur AWS (irréversible, ~1-2 min de teardown AWS)
+                  </Text>
+                  {awsTruth?.aws.stacks_active.map(s => (
+                    <Text key={s.stack_name} fontSize="xs" color="orange.300" fontFamily="mono" mt={1}>
+                      • {s.stack_name} ({s.status})
+                    </Text>
+                  ))}
+                </Box>
+              </label>
+            </VStack>
+
+            <HStack justify="flex-end" spacing={2}>
+              <Button size="sm" variant="ghost" onClick={closeCleanup}>
+                Annuler
+              </Button>
+              <Button
+                size="sm" colorScheme="orange"
+                isLoading={forceCleanupMutation.isPending}
+                isDisabled={!cleanupOptions.clean_local && !cleanupOptions.clean_aws_orphans}
+                onClick={() => forceCleanupMutation.mutate(cleanupOptions)}
+              >
+                Exécuter le nettoyage
+              </Button>
+            </HStack>
+          </Box>
+        </Box>
+      )}
 
       {/* ================================================================ */}
       {/* Boutons d'action */}
