@@ -2151,13 +2151,69 @@ async def stop_standalone(
         orchestrator = get_burst_orchestrator()
 
         if not orchestrator.state:
-            # Vérifier quand même si des providers sont actifs
+            # Singleton in-memory perdu (cas typique : restart du container
+            # knowbase-app après création de la stack). Tenter une recovery AWS
+            # pour retrouver et supprimer les stacks orphelines avant de répondre.
             deactivate_burst_providers()
+
+            if request.terminate_infrastructure:
+                try:
+                    orphan_stacks = orchestrator.find_active_burst_stacks()
+                except Exception as scan_err:
+                    logger.warning(
+                        f"[BURST] Orphan stacks scan failed during stop recovery: {scan_err}"
+                    )
+                    orphan_stacks = []
+
+                if orphan_stacks:
+                    deleted: list[str] = []
+                    errors: list[str] = []
+                    for stack in orphan_stacks:
+                        stack_name = stack.get("stack_name")
+                        if not stack_name:
+                            continue
+                        try:
+                            orchestrator.cf_client.delete_stack(StackName=stack_name)
+                            deleted.append(stack_name)
+                            logger.info(
+                                f"[BURST] Orphan stack deletion initiated: {stack_name}"
+                            )
+                        except Exception as del_err:
+                            errors.append(f"{stack_name}: {del_err}")
+                            logger.error(
+                                f"[BURST] Failed to delete orphan stack {stack_name}: {del_err}"
+                            )
+
+                    if deleted:
+                        msg = (
+                            f"Recovery (state perdu) : suppression initiée pour "
+                            f"{len(deleted)} stack(s) orpheline(s) : {', '.join(deleted)}."
+                        )
+                        if errors:
+                            msg += f" Erreurs : {'; '.join(errors)}"
+                        return StopStandaloneResponse(
+                            success=True,
+                            infrastructure_terminated=True,
+                            fleet_hibernated=False,
+                            message=msg,
+                        )
+
+                    if errors:
+                        return StopStandaloneResponse(
+                            success=False,
+                            infrastructure_terminated=False,
+                            fleet_hibernated=False,
+                            message=(
+                                "Recovery échouée — stacks détectées mais non "
+                                f"supprimées : {'; '.join(errors)}"
+                            ),
+                        )
+
             return StopStandaloneResponse(
                 success=True,
                 infrastructure_terminated=False,
                 fleet_hibernated=False,
-                message="Aucune infrastructure active. Providers désactivés par précaution."
+                message="Aucune infrastructure active (singleton vide, 0 stack AWS orpheline). Providers désactivés."
             )
 
         # Désactiver les providers d'abord
