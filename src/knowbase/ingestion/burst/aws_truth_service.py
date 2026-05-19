@@ -320,16 +320,31 @@ def _compute_divergence(aws: AwsView, local: LocalView) -> tuple[DivergenceType,
             "container backend redémarré pendant que l'infra AWS tournait.",
         )
 
-    # Les deux ont des données : comparer les IPs
+    # Les deux ont des données : comparer chaque source locale vs AWS IP
     aws_ip = aws.primary_instance.get("public_ip") if aws.primary_instance else None
-    local_ip = local.best_known_ip
+    if not aws_ip:
+        return DivergenceType.COHERENT, "AWS et local cohérents (instance active)"
 
-    if aws_ip and local_ip and aws_ip != local_ip:
+    # Inventaire des IPs annoncées par les différentes sources locales
+    local_sources: list[tuple[str, str]] = []  # (source_name, ip)
+    if local.singleton_instance_ip:
+        local_sources.append(("singleton", local.singleton_instance_ip))
+    if local.redis_live_instance_ip:
+        local_sources.append(("redis:live", local.redis_live_instance_ip))
+    if local.redis_state_vllm_url:
+        m = re.search(r"http://([^:/]+)", local.redis_state_vllm_url)
+        if m:
+            local_sources.append(("redis:state", m.group(1)))
+
+    # Une source diverge de AWS → IP_MISMATCH (couvre spot respawn ET :live périmé)
+    mismatched = [(name, ip) for name, ip in local_sources if ip != aws_ip]
+    if mismatched:
+        sources_str = ", ".join(f"{name}={ip}" for name, ip in mismatched)
         return (
             DivergenceType.IP_MISMATCH,
-            f"AWS pointe sur {aws_ip} mais le local croit que l'instance est sur "
-            f"{local_ip}. Cause probable : spot interruption + respawn automatique "
-            "(SpotFleet a recréé une instance avec une nouvelle IP).",
+            f"AWS pointe sur {aws_ip} mais source(s) locale(s) divergent(s) : "
+            f"{sources_str}. Cause probable : spot interruption + respawn (SpotFleet "
+            "a recréé une instance) ou clé Redis :live périmée non rafraîchie.",
         )
 
     return DivergenceType.COHERENT, "AWS et local cohérents (instance active)"
@@ -434,7 +449,23 @@ def auto_resync_to_aws(truth: Optional[AwsTruth] = None) -> dict[str, Any]:
     except Exception as e:
         result["action_log"].append(f"Redis state update failed: {e}")
 
-    # 3. Publish pub/sub event for worker (immediate refresh)
+    # 3. Purge la clé :live (stale heartbeat) — le prochain heartbeat la reconstruira
+    # avec la bonne IP. Sans ça, le cockpit continue d'afficher l'ancienne IP.
+    try:
+        from knowbase.ingestion.burst.provider_switch import (
+            REDIS_BURST_LIVE_KEY,
+            _get_redis_client,
+        )
+
+        redis = _get_redis_client()
+        if redis and redis.client.delete(REDIS_BURST_LIVE_KEY):
+            result["action_log"].append(
+                f"Redis {REDIS_BURST_LIVE_KEY} purgé (sera reconstruit au prochain heartbeat)"
+            )
+    except Exception as e:
+        result["action_log"].append(f"Redis :live purge failed: {e}")
+
+    # 4. Publish pub/sub event for worker (immediate refresh)
     try:
         published = publish_burst_resync_event(
             new_vllm_url=new_vllm_url,

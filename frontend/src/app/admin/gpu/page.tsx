@@ -618,9 +618,52 @@ export default function GpuAdminPage() {
               icon={<FiRefreshCw />}
               size="sm"
               variant="ghost"
-              onClick={() => {
+              onClick={async () => {
                 queryClient.invalidateQueries({ queryKey: ['gpu'] })
-                refetchAwsTruth()
+                const { data } = await refetchAwsTruth()
+                if (!data) {
+                  toast({
+                    title: 'Vérification AWS',
+                    description: 'Impossible de joindre AWS',
+                    status: 'warning',
+                    duration: 3000,
+                  })
+                  return
+                }
+                const nbInstances = data.aws.instances_running.length
+                const nbStacks = data.aws.stacks_active.length
+                if (data.divergence_type === 'coherent') {
+                  if (nbInstances === 0 && nbStacks === 0) {
+                    toast({
+                      title: 'État confirmé',
+                      description: 'Aucune instance EC2 active sur AWS',
+                      status: 'success',
+                      duration: 3000,
+                    })
+                  } else {
+                    const ip = data.aws.instances_running[0]?.public_ip || '?'
+                    toast({
+                      title: 'État confirmé',
+                      description: `${nbInstances} instance(s) active(s) • IP ${ip}`,
+                      status: 'success',
+                      duration: 3000,
+                    })
+                  }
+                } else if (data.divergence_type === 'ip_mismatch') {
+                  toast({
+                    title: 'IP a changé sur AWS',
+                    description: 'Auto-resync en cours…',
+                    status: 'info',
+                    duration: 3000,
+                  })
+                } else {
+                  toast({
+                    title: 'Divergence détectée',
+                    description: data.divergence_details,
+                    status: 'warning',
+                    duration: 4000,
+                  })
+                }
               }}
             />
           </Tooltip>
