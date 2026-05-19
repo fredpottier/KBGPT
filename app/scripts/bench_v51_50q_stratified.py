@@ -72,13 +72,17 @@ def stratified_sample(qs, seed=42):
     return selected
 
 
-def submit(base_url, tenant, question, shape, idemp):
+def submit(base_url, tenant, question, shape, idemp, llm_model=None):
+    payload = {"question": question, "answer_shape_hint": shape}
+    if llm_model:
+        payload["llm_model"] = llm_model
+    # timeout=180 : l'app peut être saturée par 3 benchs concurrents
     r = requests.post(
         f"{base_url}/api/runtime_v5/answer",
         headers={"X-Tenant-ID": tenant, "X-Idempotency-Key": idemp,
                  "Content-Type": "application/json"},
-        json={"question": question, "answer_shape_hint": shape},
-        timeout=60,
+        json=payload,
+        timeout=180,
     )
     return r.json() if r.status_code == 202 else {"_error": f"HTTP {r.status_code}: {r.text[:300]}"}
 
@@ -115,6 +119,11 @@ def main():
     parser.add_argument("--sleep-between-q", type=int, default=3)
     parser.add_argument("--timeout-s", type=int, default=300)
     parser.add_argument("--tag", default="postfix")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="if >0, keep only first N questions of stratified sample (preserves seed order)")
+    parser.add_argument("--model", default="",
+                        help="LLM model override (bench bake-off). Ex: meta-llama/Llama-3.3-70B-Instruct. "
+                             "Si vide, le runtime utilise V5_LLM_MODEL.")
     args = parser.parse_args()
 
     root = Path("/app") if Path("/app").exists() else Path(__file__).resolve().parents[2]
@@ -123,6 +132,8 @@ def main():
     qs_all = panel if isinstance(panel, list) else panel.get("questions", [])
 
     selected = stratified_sample(qs_all, seed=args.seed)
+    if args.limit > 0:
+        selected = selected[: args.limit]
     print(f"=== Re-bench 50q stratifié ({args.tag}) ===")
     print(f"Selected: {len(selected)} / {len(qs_all)}")
     dist = Counter(q.get("primary_type") for q in selected)
@@ -133,13 +144,12 @@ def main():
     output_path = root / f"benchmark/runs/v51_bench_50q_{args.tag}_{ts}.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Health check
+    # Health check (timeout généreux quand benchs concurrents saturent l'app)
     try:
-        r = requests.get(f"{args.url}/docs", timeout=10)
+        r = requests.get(f"{args.url}/docs", timeout=30)
         print(f"Health: HTTP {r.status_code}")
     except Exception as e:
-        print(f"Health ERR: {e}")
-        return 1
+        print(f"Health WARN: {e} — continuing anyway (transient load)")
 
     results = []
     t_global = time.time()
@@ -158,7 +168,8 @@ def main():
         print(f"  Q: {question[:120]}...")
 
         t_q = time.time()
-        sub = submit(args.url, tenant, question, ptype, idemp)
+        sub = submit(args.url, tenant, question, ptype, idemp,
+                     llm_model=args.model or None)
         if "_error" in sub:
             print(f"  ❌ submit: {sub['_error'][:150]}")
             results.append({**q, "qid": qid, "primary_type": ptype,

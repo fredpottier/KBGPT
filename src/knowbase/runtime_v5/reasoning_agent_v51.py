@@ -233,7 +233,21 @@ class ReasoningAgentV51:
 
         # ─── Init messages ───────────────────────────────────────────────────
         sys_p = system_prompt or _DEFAULT_SYSTEM_PROMPT
-        user_p = self._build_user_prompt(question, tenant_id, user_prompt_extra)
+
+        # Voie A — Multi-formulation query (pattern EKX P1)
+        reformulations: list[str] = []
+        try:
+            from knowbase.runtime_v5 import query_reformulator
+            if query_reformulator.is_enabled():
+                reformulations = await query_reformulator.reformulate_async(question)
+        except Exception as exc:
+            logger.warning("[V51] reformulation skipped: %s", exc)
+
+        user_p = self._build_user_prompt(
+            question, tenant_id, user_prompt_extra,
+            reformulations=reformulations,
+            answer_shape=answer_shape,
+        )
         messages = [
             {"role": "system", "content": sys_p},
             {"role": "user", "content": user_p},
@@ -602,7 +616,13 @@ class ReasoningAgentV51:
     # ─── Helpers ─────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _build_user_prompt(question: str, tenant_id: str, extra: str) -> str:
+    def _build_user_prompt(
+        question: str,
+        tenant_id: str,
+        extra: str,
+        reformulations: Optional[list[str]] = None,
+        answer_shape: Optional[str] = None,
+    ) -> str:
         # Listing enrichi (A6) + Domain Pack hints (A10).
         from knowbase.runtime_v5.doc_topics_loader import (
             format_available_docs_listing,
@@ -637,6 +657,23 @@ class ReasoningAgentV51:
             except Exception as exc:
                 logger.warning("[V51] domain_pack hints failed: %s", exc)
 
+        # Voie A — Multi-formulation block (pattern EKX P1)
+        reform_block = ""
+        if reformulations:
+            try:
+                from knowbase.runtime_v5.query_reformulator import format_reformulations_block
+                reform_block = format_reformulations_block(reformulations)
+            except Exception as exc:
+                logger.warning("[V51] reformulations formatting failed: %s", exc)
+
+        # Voie A — Answer template block (pattern EKX P3)
+        template_block = ""
+        try:
+            from knowbase.runtime_v5.answer_templates import format_template_block
+            template_block = format_template_block(answer_shape)
+        except Exception as exc:
+            logger.warning("[V51] template formatting failed: %s", exc)
+
         out = (
             f"Question: {question}\n\n"
             f"Tenant: {tenant_id}\n\n"
@@ -644,6 +681,10 @@ class ReasoningAgentV51:
         )
         if pack_hints_block:
             out += f"\n{pack_hints_block}\n"
+        if reform_block:
+            out += f"\n{reform_block}\n"
+        if template_block:
+            out += f"\n{template_block}\n"
         if extra:
             out += f"\n{extra}\n"
         out += (

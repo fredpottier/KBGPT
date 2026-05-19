@@ -108,6 +108,15 @@ class AnswerRequest(BaseModel):
         le=MAX_ITER_HARD_CAP,
         description="Override default budget max_iter (clamped 1..12)",
     )
+    llm_model: Optional[str] = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "Override le modèle LLM pour cette request (bench bake-off). "
+            "Format provider/model (ex: meta-llama/Llama-3.3-70B-Instruct). "
+            "Si None, utilise V5_LLM_MODEL ou DeepSeek-V3.1 par défaut."
+        ),
+    )
 
     @field_validator("doc_ids")
     @classmethod

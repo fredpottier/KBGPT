@@ -1,0 +1,122 @@
+{
+  "_meta": {
+    "name": "gold_set_reference_mini",
+    "purpose": "Mini gold-set 10q reference-heavy pour mesurer V6-J2 (find_references tool).",
+    "created": "2026-05-18",
+    "based_on": "Réf. réelles persistées Neo4j (8797 Reference, distribution 55% external_doc / 20% internal_section / 15% url / 10% other / 5% standard+regulation).",
+    "note": "Chaque question DOIT favoriser invocation find_references (cite explicitement document + demande des références externes/internes).",
+    "scoring_target": "DS-V3.1 et Qwen-72B doivent répondre par énumération des refs persistées. Score = match avec ground_truth (substring lowercase)."
+  },
+  "questions": [
+    {
+      "id": "REF_001",
+      "primary_type": "listing",
+      "question": "Dans le SAP S/4HANA 2023 Upgrade Guide, quels outils et guides externes SAP sont référencés pour préparer une conversion ou un upgrade (Readiness Check, Simplification Item Catalog, Software Update Manager, etc.) ?",
+      "language": "fr",
+      "ground_truth": {
+        "answer": "Le Upgrade Guide 2023 référence notamment : SAP Readiness Check, Simplification Item Catalog, Software Update Manager 2.0, Maintenance Planner User Guide, Custom Code Migration Guide for SAP S/4HANA.",
+        "exact_identifiers": ["SAP Readiness Check", "Simplification Item Catalog", "Software Update Manager", "Maintenance Planner", "Custom Code Migration"],
+        "supporting_doc_ids": ["003_SAP_S4HANA_2023_Upgra"]
+      }
+    },
+    {
+      "id": "REF_002",
+      "primary_type": "listing",
+      "question": "Quelles régulations internationales de transport de matières dangereuses (CFR, ADR, IATA, IMDG) sont citées dans la documentation SAP TM 2023 / DG Compliance ?",
+      "language": "fr",
+      "ground_truth": {
+        "answer": "Régulations citées : CFR 49 (USA), ADR 2023 (Europe routier), ADG 2023 (Australie), ANTT 2023 (Brésil), IATA-DGR 2024 (aérien), IMDG Code 2022 (maritime).",
+        "exact_identifiers": ["CFR 49", "ADR 2023", "IATA-DGR 2024", "IMDG Code", "ANTT 2023", "ADG 2023"],
+        "supporting_doc_ids": ["004_SAP-016_SAP_S_4HANA_C"]
+      }
+    },
+    {
+      "id": "REF_003",
+      "primary_type": "factual",
+      "question": "Quel standard ISO de management de la sécurité de l'information est cité dans le SAP S/4HANA PCE Access Control document ?",
+      "language": "fr",
+      "ground_truth": {
+        "answer": "ISO 27001 (norme management sécurité de l'information).",
+        "exact_identifiers": ["ISO 27001", "ISO 270001"],
+        "supporting_doc_ids": ["007_SAP_S4HANA_PCE"]
+      }
+    },
+    {
+      "id": "REF_004",
+      "primary_type": "listing",
+      "question": "Quels protocoles ou standards techniques (RFC, OData, etc.) sont mentionnés dans le SAP S/4HANA 2021 Installation Guide ?",
+      "language": "fr",
+      "ground_truth": {
+        "answer": "Standards techniques cités : RFC (Remote Function Call), OData version 2.0.",
+        "exact_identifiers": ["RFC", "Remote Function Call", "OData", "OData version 2.0"],
+        "supporting_doc_ids": ["012_SAP_S4HANA_2021_Insta"]
+      }
+    },
+    {
+      "id": "REF_005",
+      "primary_type": "listing",
+      "question": "Quelles URLs SAP Help/Launchpad/Support sont fournies dans l'Upgrade Guide S/4HANA 2023 (sap.com/readinesscheck, support.sap.com, launchpad, etc.) ?",
+      "language": "fr",
+      "ground_truth": {
+        "answer": "URLs citées : sap.com/readinesscheck, launchpad.support.sap.com, help.sap.com/s4hana_op_2023, support.sap.com/sltoolset.",
+        "exact_identifiers": ["sap.com/readinesscheck", "launchpad.support.sap.com", "help.sap.com/s4hana_op_2023", "support.sap.com/sltoolset"],
+        "supporting_doc_ids": ["003_SAP_S4HANA_2023_Upgra"]
+      }
+    },
+    {
+      "id": "REF_006",
+      "primary_type": "listing",
+      "question": "Quelles sections du SAP S/4HANA 2023 Upgrade Guide décrivent les étapes overview, preparation et realization du processus d'upgrade ?",
+      "language": "fr",
+      "ground_truth": {
+        "answer": "Sections : 'Overview of the Upgrade Process' (page 8), 'Preparing the Upgrade' (page 14), 'Realizing the Upgrade' (page 34), '2.2 Overview of the Upgrade Process'.",
+        "exact_identifiers": ["Overview of the Upgrade Process", "Preparing the Upgrade", "Realizing the Upgrade"],
+        "supporting_doc_ids": ["003_SAP_S4HANA_2023_Upgra"]
+      }
+    },
+    {
+      "id": "REF_007",
+      "primary_type": "factual",
+      "question": "Quelle norme comptable IFRS est référencée comme cadre dans le S/4HANA 1809 Business Scope ?",
+      "language": "fr",
+      "ground_truth": {
+        "answer": "IFRS 15 (Revenue from Contracts with Customers).",
+        "exact_identifiers": ["IFRS 15"],
+        "supporting_doc_ids": ["018_S4HANA_1809"]
+      }
+    },
+    {
+      "id": "REF_008",
+      "primary_type": "factual",
+      "question": "Quelle URL SAP Support permet d'accéder au SLToolset (Software Logistics Toolset) ?",
+      "language": "fr",
+      "ground_truth": {
+        "answer": "https://support.sap.com/sltoolset",
+        "exact_identifiers": ["support.sap.com/sltoolset"],
+        "supporting_doc_ids": ["003_SAP_S4HANA_2023_Upgra"]
+      }
+    },
+    {
+      "id": "REF_009",
+      "primary_type": "factual",
+      "question": "Quel outil de contrôle de version (version control system) open-source est référencé dans les Operations Guides S/4HANA 2021 et 2023 ?",
+      "language": "fr",
+      "ground_truth": {
+        "answer": "Apache Subversion (SVN).",
+        "exact_identifiers": ["Apache Subversion", "SVN"],
+        "supporting_doc_ids": ["014_SAP_S4HANA_2021_Opera", "017_SAP_S4HANA_2023_Opera"]
+      }
+    },
+    {
+      "id": "REF_010",
+      "primary_type": "factual",
+      "question": "Quelle régulation brésilienne pour le transport routier de marchandises dangereuses est citée dans la documentation SAP TM ?",
+      "language": "fr",
+      "ground_truth": {
+        "answer": "ANTT 2023 (Agência Nacional de Transportes Terrestres).",
+        "exact_identifiers": ["ANTT 2023", "ANTT"],
+        "supporting_doc_ids": ["004_SAP-016_SAP_S_4HANA_C"]
+      }
+    }
+  ]
+}

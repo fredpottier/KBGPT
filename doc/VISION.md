@@ -79,7 +79,7 @@ Ces principes ne sont pas négociables. Toute proposition qui en viole un doit �
 |---|---|---|
 | **AX-1** | **Pas d'assertion sans preuve localisable** | Toute affirmation doit être ancrée à un span de texte (`charspan_start`, `charspan_end`) d'un document source. |
 | **AX-2** | **Périmètre corpus strict** | Jamais d'inférence "bon sens", jamais de résolution automatique de conflits hors documents. |
-| **AX-3** | **LLM = extracteur evidence-locked, jamais arbitre** | Le LLM extrait ce qui est écrit, pas ce qu'il "comprend". |
+| **AX-3** | **LLM = extracteur evidence-locked à l'ingestion, ET confiné aux 3 points contrôlés au runtime (Parse + Evaluate + Format)** | À l'**ingestion** : le LLM extrait ce qui est écrit, pas ce qu'il "comprend". Au **runtime** : le LLM intervient à 3 points clairement bornés — (1) Parse de la question en sub-goals, (2) Evaluate lightweight des résultats déterministes, (3) Format de la réponse finale. Tout entre ces 3 points est déterministe (Cypher, Qdrant, mapping tools). Jamais d'arbitrage LLM entre claims contradictoires (AX-5). |
 | **AX-4** | **Un gap sans justification = défaillance système** | Tout résultat non-conclusif DOIT être adossé à au moins un extrait observable (preuve d'absence). |
 | **AX-5** | **Contradictions exposées, jamais résolues arbitrairement** | Le système ne tranche pas entre documents — il informe et qualifie la nature de la tension. |
 | **AX-6** | **Le statut (SUPPORTED/PARTIAL/NOT_SUPPORTED) est dérivé, jamais décidé par LLM** | Règle déterministe : `all(SUPPORTED) → SUPPORTED`, `any(SUPPORTED) → PARTIAL`, sinon `NOT_SUPPORTED`. |
@@ -192,31 +192,66 @@ Déclenche par défaut : "pour les questions ouvertes, ignorer v1.2 et utiliser 
 
 État de l'art : VersionRAG atteint **90% de précision sur changements explicites** et **60% sur changements implicites** sur 100 questions / 34 documents versionnés. C'est notre référence chiffrée pour cette détection.
 
-### 3.5 Probability Isolation
+### 3.5 Probability Isolation + récupération d'erreur (Parse → Evaluate → Re-plan)
 
-> **"L'incertitude LLM est confinée à la traduction `question utilisateur → query graph`. Tout le reste — traversée graphe, agrégation claims, derivation status — est déterministe."**
+> **"L'incertitude LLM est confinée à TROIS points contrôlés : Parse (décomposition en sub-goals), Evaluate (jugement qualité), Format (rédaction humaine). Tout le reste — sélection tools, traversée graphe, agrégation claims — est déterministe. Et l'incertitude initiale de Parse n'est jamais irréversible : un évaluateur léger permet de re-planifier si le résultat ne répond pas aux sub-goals."**
 
-Concrètement :
+#### 3.5.1 Pourquoi 3 points et pas 1 ?
+
+L'état de l'art 2026 (Corrective RAG / CRAG, Iterative Routing, QAgent — cf §10.4) montre qu'une architecture **single-shot classifier** (1 LLM décide irréversiblement du routing) est **fragile par construction** : si la classification initiale se trompe, tout l'aval tombe. C'est précisément le diagnostic V5.1 (plafond 0.61, anti-pattern §8.1).
+
+La solution prescrite est l'**architecture en 5 modules avec feedback loop** :
 
 ```
 Question utilisateur
-       │
-       ▼ [LLM ICI — incertitude bornée]
-Intent + Entités + Type de question
-       │
-       ▼ [DÉTERMINISTE — pas de LLM]
-Cypher query sur Neo4j
-       │
-       ▼ [DÉTERMINISTE]
-Résultat structuré (claims + relations + timestamps)
-       │
-       ▼ [LLM ICI — formatage humain, no création de fait]
-Réponse rédigée pour l'utilisateur
+        │
+        ▼ [LLM 1 — Parse] (incertitude #1, bornée à la décomposition)
+sub_goals[], entities, time_filter, hints
+        │
+        ▼ [DÉTERMINISTE — Plan]
+Pour chaque sub_goal → tool sélectionné (Cypher | Qdrant | Contradiction | Lifecycle)
+        │
+        ▼ [DÉTERMINISTE — Execute]
+Résultats structurés (claims + relations + timestamps)
+        │
+        ▼ [LLM 2 — Evaluate, ~200-500 tokens, lightweight] (incertitude #2)
+Verdict ∈ {CORRECT, AMBIGUOUS, INCORRECT}
+        │
+        ├─ CORRECT    → suite (Synthesize)
+        ├─ AMBIGUOUS  → BOUCLE retour à Plan (re-decompose, +tools, max 2 iter)
+        └─ INCORRECT  → fallback TEXT_ONLY (Qdrant brut) OU abstention motivée
+        │
+        ▼ [LLM 3 — Synthesize/Format, optionnel] (incertitude #3)
+Réponse rédigée pour l'utilisateur (zéro nouveau fait)
 ```
 
-Conséquence directe : la fiabilité ≥80% n'est pas un objectif de prompt-engineering, c'est un **objectif architectural**. Moins de LLM dans le chemin critique = plus de déterminisme = plus de fiabilité.
+#### 3.5.2 Trois principes architecturaux non-négociables
 
-C'est la rupture majeure avec l'architecture V5.1 actuelle (Reading Agent qui fait 6-8 itérations LLM par question, multiform×5, verifier LLM, etc. — cf §6.4).
+1. **Decomposition > Classification** : Parse produit des **sub-goals** (objectifs concrets : "trouver claim X sur sujet Y à date Z") au lieu de classer la question dans un bucket figé. Les tools émergent du besoin, pas d'une typologie a priori.
+
+2. **Lightweight Evaluator obligatoire** : un LLM léger (~200-500 tokens) juge la qualité avant synthèse. C'est le **chaînon manquant** de V5.1. Sans lui, pas de récupération d'erreur de routing.
+
+3. **Hard cap anti-thrash** : maximum 2 boucles `Plan → Execute → Evaluate`. Au-delà : fallback ou abstention forcée. Évite la boucle infinie de re-planning.
+
+#### 3.5.3 Comptage LLM calls par requête
+
+| Cas | Calls LLM |
+|---|---|
+| Heureux (CORRECT au 1er essai, sans Synthesize séparé) | **2** (Parse + Evaluate) |
+| Heureux + Synthesize | **3** (Parse + Evaluate + Format) |
+| AMBIGUOUS 1 fois → re-plan → OK | **4** (Parse + Eval + Eval + Format) |
+| AMBIGUOUS 2 fois max → fallback | **5** + fallback Qdrant déterministe |
+
+vs V5.1 actuel : **12-15 LLM calls/q**. Réduction massive avec **gain de robustesse**, pas perte.
+
+#### 3.5.4 Conséquence sur les axiomes
+
+Cette section enrichit (sans contredire) :
+- **AX-3** (LLM evidence-locked) : reste valide. Le LLM n'invente pas, il décompose ou évalue.
+- **AX-6** (statut dérivé déterministe) : reste valide. Le verdict de l'évaluateur n'est pas "le statut" — c'est seulement la décision de re-planifier ou non.
+- **AX-14** (abstention qualifiée) : renforcée. Le verdict INCORRECT → fallback ou abstention motivée. On ne force jamais une réponse douteuse.
+
+C'est la rupture majeure avec V5.1 (Reading Agent agentique, 6-8 itérations multiform×5, verifier LLM passif inopérant) — cf §6.4 + §8.1 anti-pattern "single-shot classification routing".
 
 ---
 
@@ -297,31 +332,55 @@ Le pipeline actuel `ARCH_CLAIMFIRST.md` reste valide, à enrichir des éléments
 
 **Ajout vs pipeline mars 2026** : étape 8 doit produire les **relations claim-vs-claim bitemporelles** (avec marker_type + invalidated_at), pas seulement détecter des tensions à la requête.
 
-### 4.4 Pipeline runtime (Probability Isolation)
+### 4.4 Pipeline runtime (5 modules + feedback loop, conforme §3.5)
 
 ```
-1. INTENT LLM        — Question → {type, entities, predicates, time_filter}
-                       (UN SEUL appel LLM, bornée, courte)
+1. PARSE [LLM #1] — Question → décomposition structurée
+   Output: {sub_goals: [{predicate, subject_hint, time_filter, expected_value_kind}, ...],
+            entities[], language, raw_question}
+   Pas de classification figée, pas de "type" — sub-goals concrets directement actionnables.
 
-2. PLAN DÉTERMINISTE — Construire Cypher query selon intent
-                       (PAS DE LLM)
+2. PLAN [DÉTERMINISTE] — Pour chaque sub_goal :
+   - Mapping sub_goal → tool ∈ {kg_claims, qdrant_sections, contradiction_surface, lifecycle_query, ...}
+   - Construction Cypher query OU Qdrant params selon tool
+   - Ordonnancement (séquentiel si dépendances, parallèle sinon)
 
-3. QUERY NEO4J      — Récupérer claims actives à la date demandée
-                       (PAS DE LLM)
+3. EXECUTE [DÉTERMINISTE] — Lance les tools, agrège les résultats par sub_goal :
+   - kg_claims : Cypher Neo4j → claims actives (filter invalidated_at IS NULL + valid_from/until)
+   - qdrant_sections : recherche vectorielle (mode fallback ou enrichissement)
+   - contradiction_surface : claims liés par CONTRADICTS → expose les deux versions
+   - lifecycle_query : suit EVOLUTION_OF / SAME_AS / SUPERSEDES
 
-4. CONTRADICTION    — Si claims contradictoires détectées → branche dédiée
-   SURFACE           (PAS DE LLM)
+4. EVALUATE [LLM #2, lightweight ~200-500 tokens]
+   Input: {sub_goals, résultats agrégés par sub_goal, confidence scores}
+   Output: verdict ∈ {CORRECT, AMBIGUOUS, INCORRECT, INSUFFICIENT_EVIDENCE}
+   - CORRECT : tous sub_goals couverts par evidence → goto 5
+   - AMBIGUOUS : couverture partielle ou ambiguïté détectée → BOUCLE goto 2
+     (re-plan : élargir scope, ajouter tools, décomposer plus finement)
+     Hard cap : max 2 retours (anti-thrash)
+   - INCORRECT : evidence contradictoire avec sub_goal OU rien de pertinent → fallback Qdrant TEXT_ONLY
+   - INSUFFICIENT_EVIDENCE : tools ont retourné peu/rien → abstention motivée (AX-14)
 
-5. FALLBACK QDRANT  — Si KG silencieux, retrieval vectoriel standard
-                       (PAS DE LLM)
-
-6. FORMAT RÉPONSE   — LLM rédacteur (zéro nouveau fait, juste mise en forme)
-                       (UN appel LLM, output structuré pour UI)
+5. SYNTHESIZE [LLM #3, optionnel selon mode] — Rédaction réponse humaine
+   - Input: evidence agrégée + verdict + sub_goals couverts/non couverts
+   - Contraintes: zéro création de fait, citation cliquable obligatoire (§5.3),
+     mention explicite des sub_goals non couverts (transparence)
+   - Output: réponse structurée pour UI (texte + claims_verbatim[] + citations[])
 ```
 
-Total LLM calls par requête : **2** (vs 12-15 actuellement en V5.1).
+#### Comptage LLM calls par requête
 
-Cible latence : **<30s** sur questions simples, **<60s** sur questions multi-doc/comparaison.
+| Scénario | Calls LLM | Latence cible |
+|---|---|---|
+| Heureux (CORRECT 1er essai, format inline) | 2 (Parse + Eval) | < 15s |
+| Heureux + Synthesize séparé | 3 | < 25s |
+| AMBIGUOUS → re-plan → OK | 4 (Parse + 2×Eval + Format) | < 45s |
+| AMBIGUOUS 2× → fallback | 5 + Qdrant TEXT_ONLY | < 60s |
+| INCORRECT / INSUFFICIENT | 3 (Parse + Eval + Format abstention) | < 20s |
+
+vs V5.1 : 12-15 LLM calls, 135-173s. **Gain de robustesse ET latence simultanés.**
+
+Cibles latence VISION §5.2 : **p50 <30s, p95 <60s** → atteignables si Parse et Evaluate sont efficacement implémentés.
 
 ### 4.5 Trois modes de dégradation gracieuse
 
@@ -539,6 +598,7 @@ Pendant la refondation, ces conditions doivent rester vérifiées sinon **stop e
 | Texte LLM-généré indexé dans Qdrant | Hallucination indexée = vérité fausse | Violation AX-1 | ADR hybrid anchor — 12/2024 |
 | Règles hardcodées par domaine métier | Non-maintenable, anti-agnosticité | Whitelist `GENERIC_VERBS = {"be"…}` was EN-only | KG_AGNOSTIC_ARCHITECTURE — 02/2026 |
 | KG sémantique riche + raisonnement traversée | Pass3 = 97% abstention sur procéduraux | Bench corpus SAP | ADR decision defense — 03/2026 |
+| **Single-shot classification routing rigide** (1 classifier décide irréversiblement `answer_shape` → template tool) | **Si classification fausse, toute la réponse tombe**. Pas de mécanisme de récupération | V5.1 avec DeBERTa S2 cascade : plafond C1=0.61 (mai 2026) malgré tweaks A1-A10. Diagnostic confirmé par état de l'art 2026 (CRAG, Iterative Routing, QAgent) | Analyse 19/05/2026 + état de l'art externe — remplacé par §3.5 Parse → Plan → Execute → Evaluate avec feedback loop |
 
 ### 8.2 Anti-patterns produit (verboten en présence du PO)
 

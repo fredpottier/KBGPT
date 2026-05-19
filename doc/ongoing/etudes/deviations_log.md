@@ -45,6 +45,49 @@
 
 <!-- L'agent ajoute ici les nouvelles entrées au-dessus -->
 
+### 2026-05-19 — Architecture Parse+Evaluate pour query understanding (vs single-shot classifier)
+
+- **Type** : exploration → integrated immédiatement (correction architecturale critique)
+- **Signal** : analyse de l'état de l'art 2026 sur "query understanding + tool routing" demandée par utilisateur produit (19/05/2026)
+- **Description** : V5.1 et l'EXECUTION_ROADMAP Phase A3 (état initial) reposent sur un **single-shot classifier** (`answer_shape` factual/list/temporal/comparison/causal) qui détermine **irréversiblement** le routing tool. État de l'art 2026 (CRAG arxiv 2401.15884, Iterative Routing arxiv 2501.07813, QAgent arxiv 2510.08383, Adaptive RAG) prescrit une architecture en 5 étapes : **Parse (sub-goals) → Plan (déterministe) → Execute → Evaluate (lightweight evaluator CRAG-style) → (Re-plan if AMBIG)**, avec feedback loop max 2 itérations + hard cap anti-thrash.
+- **Pourquoi c'est une déviation** : ne se rattache PAS à un élément actuel de VISION ou ROADMAP. **MAIS** correspond à une **lacune architecturale fondamentale** : sans ce mécanisme de récupération d'erreur de classification, le système plafonne quel que soit le LLM utilisé (cf observation V5.1 plafond 0.61 + V6-J1/J2 outils dormants). Le principe "Decomposition over Classification" + "Lightweight Evaluator" est documenté comme **prérequis** dans l'état de l'art 2026 pour atteindre 80%+ de fiabilité.
+- **Bénéfice potentiel** :
+  - Robustesse aux erreurs de classification initiale (rattrapage par evaluator)
+  - Conformité Probability Isolation (parser + evaluator + format = 2-3 LLM calls max)
+  - Cible C1 ≥80% et C3 ≥80% deviennent atteignables (vs plafonnement V5.1)
+- **Coût d'opportunité** : 0j car correction effectuée AVANT démarrage Phase A3. Si on n'avait pas intégré cette idée, on aurait construit runtime_v6 sur le pattern single-shot et atteint le même plafond.
+- **Recommandation agent** :
+  - [x] **Faire évoluer VISION/ROADMAP** — amendement immédiat (avant Phase A3) :
+    - VISION.md §3.5 : enrichir Probability Isolation avec "parse + evaluate + format" (vs "intent + format")
+    - VISION.md §4.4 : refondre pipeline runtime cible avec boucle Parse → Plan → Execute → Evaluate
+    - VISION.md §8.1 : ajouter "single-shot classification routing rigide" comme anti-pattern documenté
+    - EXECUTION_ROADMAP §1.2 : ajouter composant "Runtime Parse+Evaluate Architecture" à la matrice maturité
+    - EXECUTION_ROADMAP §2 Phase A3 : refonte explicite intégrant 5 modules (Parse / Plan / Execute / Evaluate / Synthesize)
+    - EXECUTION_ROADMAP §4 : ajouter `ADR_PARSE_EVALUATE_RUNTIME.md` en P0 (à rédiger avant code Phase A3)
+- **Statut** : `integrated` (arbitré 2026-05-19 par utilisateur produit)
+
+**Sources externes consultées** :
+- Iterative Routing in Multi-agent Systems — [arxiv 2501.07813](https://arxiv.org/pdf/2501.07813)
+- QAgent — Interactive Query Understanding — [arxiv 2510.08383](https://arxiv.org/pdf/2510.08383)
+- Corrective RAG (CRAG) — [arxiv 2401.15884](https://arxiv.org/pdf/2401.15884)
+- Adaptive RAG — [Meilisearch 2026](https://www.meilisearch.com/blog/adaptive-rag)
+
+**Amendement enrichi par retour Claude Web (2026-05-19) — 4 risques addressed** :
+
+Claude Web a passé les amendements appliqués (VISION.md + EXECUTION_ROADMAP.md Phase A3) en revue critique le 2026-05-19. 4 points soulevés, tous validés par utilisateur produit, intégrés au plan :
+
+1. **AX-3 ne couvrait pas le runtime** (critique) — L'axiome AX-3 disait "LLM = extracteur evidence-locked à l'ingestion" mais ne mentionnait pas les 3 points de contrôle au runtime (Parse + Evaluate + Format). Risque : ambiguïté qui pouvait laisser passer un LLM ailleurs dans le pipeline. **Résolution** : AX-3 amendé pour couvrir explicitement runtime + ingestion (cf VISION.md §2 AX-3).
+
+2. **Evaluator = SPOF non-mesuré** (risque) — Le module Evaluate (CRAG lightweight) devient le composant qui décide si re-plan ou pas. Si son accuracy est faible, soit on re-plan inutilement (latence explose) soit on accepte des mauvais résultats (qualité chute). **Résolution** : sous-tâche **A3.4-bis** ajoutée à EXECUTION_ROADMAP §2 Phase A3 — bench evaluator isolé sur cas synthétiques (correct/partial/incorrect/ambiguous), gate **≥85% accuracy** avant intégration runtime.
+
+3. **Pas de mesure delta vs alternatives** (risque) — Sans ablation study, on ne sait pas si le gain de runtime_v6 (Parse+Evaluate+KG) vient réellement de l'architecture ou si V5.1 + prompt-tuning aurait obtenu pareil. **Résolution** : sous-tâche **A3.9** ajoutée — ablation study comparant runtime_v6 vs V5.1 + meilleur prompt-tuning possible sur bench 100q. Gate **delta ≥10pp** sinon revoir le choix d'architecture.
+
+4. **Latence p95 non quantifiée + manque kill switch** (risque) — Architecture Parse → Plan → Execute → Evaluate → (Re-plan) ajoute 2-3 LLM calls + boucle. Si Parse échoue souvent (re_plan_rate élevé), latence p95 peut dépasser 60s. **Résolution** : Kill switch **K-7** ajouté à EXECUTION_ROADMAP §3 — surveille `re_plan_rate >30%`, `evaluator_accuracy <85%`, et `latency_p95 >60s` avec re-plan. Pause si déclenché.
+
+Statut : 4 amendements appliqués en séquence après validation utilisateur ("oui je valide tout cela"). Aucun ne remet en cause le pivot d'architecture lui-même — c'est un durcissement des gates et garde-fous.
+
+---
+
 ### 2026-05-19 — 11 tâches héritées non rattachées à la roadmap A→D
 
 - **Type** : chantier nouveau (gouvernance backlog)

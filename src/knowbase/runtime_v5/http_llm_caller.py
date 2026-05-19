@@ -59,7 +59,9 @@ class HTTPLLMCaller(LLMCaller):
         model : modèle LLM (default DeepSeek-V3.1, charte open-source)
         timeout_s : timeout HTTP par call (default 300s)
         max_retries : retries avec exponential backoff (default 3)
-        force_provider : override auto-detection ("together" | "deepinfra" | None)
+        force_provider : override auto-detection ("together" | "deepinfra" | "vllm" | None)
+        endpoint_url : override complet de l'URL (priorité sur force_provider).
+                       Utile pour brancher vLLM self-hosted (EC2, on-prem).
     """
 
     def __init__(
@@ -68,13 +70,15 @@ class HTTPLLMCaller(LLMCaller):
         timeout_s: int = DEFAULT_TIMEOUT_S,
         max_retries: int = DEFAULT_MAX_RETRIES,
         force_provider: Optional[str] = None,
+        endpoint_url: Optional[str] = None,
     ):
         self.model = model
         self.timeout_s = timeout_s
         self.max_retries = max_retries
         self.force_provider = force_provider
+        self.endpoint_url = endpoint_url
         endpoint, key, provider = self._endpoint()
-        if not key:
+        if not key and provider != "vllm":
             logger.warning(
                 "[HTTPLLMCaller] No API key found in env "
                 "(TOGETHER_API_KEY or DEEPINFRA_API_KEY). "
@@ -82,12 +86,19 @@ class HTTPLLMCaller(LLMCaller):
             )
 
     def _endpoint(self) -> tuple[str, str, str]:
+        # endpoint_url explicite (ex: vLLM self-hosted EC2) prime sur tout
+        if self.endpoint_url:
+            # vLLM ne valide pas le Bearer par défaut, on passe une string dummy
+            return (self.endpoint_url, "no-auth-vllm", "vllm")
         if self.force_provider == "together":
             key = os.getenv("TOGETHER_API_KEY", "").strip()
             return ("https://api.together.xyz/v1/chat/completions", key, "together")
         if self.force_provider == "deepinfra":
             key = os.getenv("DEEPINFRA_API_KEY", "").strip()
             return ("https://api.deepinfra.com/v1/openai/chat/completions", key, "deepinfra")
+        if self.force_provider == "vllm":
+            url = os.getenv("V5_VLLM_URL", "").strip()
+            return (url, "no-auth-vllm", "vllm")
         return _resolve_endpoint_key()
 
     def call(

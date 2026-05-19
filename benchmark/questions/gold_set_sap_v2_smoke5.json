@@ -1,0 +1,123 @@
+[
+  {
+    "id": "V2_T1_T1_HUM_0097",
+    "question": "Quelle transaction est utilisee pour la Labeling Workbench dans Global Label Management ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "La transaction CBGLWB (Labeling Workbench) est utilisee pour filtrer les print requests par etat.",
+      "exact_identifiers": [
+        "Transaction CBGLWB (Labeling Workbench, filter by state)"
+      ],
+      "supporting_doc_ids": [
+        "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0017",
+    "question": "Quel role SAP est fourni pour le team lead dans le Payroll Control Center ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Le role SAP_HR_PYC_TM_MNG est fourni pour le team lead, avec l'objet d'autorisation P_PYD_INST.",
+      "exact_identifiers": [
+        "Team lead sample role: SAP_HR_PYC_TM_MNG; authorization object P_PYD_INST"
+      ],
+      "supporting_doc_ids": [
+        "027_SAP_S4HANA_2023_Security_Guide_c160af0e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_V1_GOLD_SAP_Q4_1",
+    "question": "Quelles sont les différences précises de scope fonctionnel entre S/4HANA Cloud Private Edition et S/4HANA Cloud Public Edition ?",
+    "primary_type": "comparison",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Public Edition = SaaS standardisé, scope plus prescriptif, upgrades SAP fréquents, extensibilité plus contrôlée. Private Edition = scope proche on-premise, plus de flexibilité, conversion brownfield possible, custom code plus large, opérations managées SAP. SAP Learning distingue bien RISE/PCE et les scénarios greenfield/brownfield. Mais la liste exhaustive des différences n'est pas précisée.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "Cloud Public Edition",
+        "Private Edition",
+        "Public Edition",
+        "RISE/PCE",
+        "S/4HANA",
+        "HANA",
+        "RISE",
+        "PCE",
+        "FI"
+      ],
+      "supporting_doc_ids": [
+        "SAP_internal_PreSales_Support_Master20251010_Speaker_Notes_ca51b0a0",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    },
+    "source_set": "gold_set_sap_v1",
+    "category": "comparison"
+  },
+  {
+    "id": "V2_T4_T4_HUM_0018",
+    "question": "Que disent les documents sur la connectivite reseau et les options VPN/Express Route pour SAP Cloud Private Edition ?",
+    "primary_type": "multi_hop",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "La connectivité réseau pour SAP S/4HANA Cloud Private Edition repose sur un modèle multi-hyperscaler (AWS, Azure, GCP, IBM Cloud) avec plusieurs options de connexion documentées dans le RISE with SAP Cloud ERP Private deck ([doc=020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357]) et le SAP S/4HANA PCE Access to Customer Systems deck ([doc=007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896]).\n\n**Options de connectivité client (Customer Connectivity Options)** ([doc=020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357]) :\n\n1. **Dedicated Private Connectivity** : connexion privée dédiée avec redondance, **recommandée pour les workloads productifs** car elle garantit la qualité de service et des niveaux de SLA plus élevés. Les solutions hyperscaler utilisées sont :\n   - **AWS Direct Connect** pour les déploiements AWS\n   - **Azure ExpressRoute** pour les déploiements Azure\n   - **GCP Cloud Interconnect** pour les déploiements Google Cloud\n   Les informations sur les edge locations et networking partners se trouvent dans la documentation de chaque hyperscaler.\n\n2. **IPSec Site-to-Site (S2S) VPN over Internet** : les clients peuvent utiliser un VPN IPSec basé sur S2S pour se connecter à leur réseau virtuel dédié dans le cloud. Cette option transite par Internet via un Network Service Provider. Les configurations VPN dépendent de la plate-forme hyperscaler de déploiement (AWS, Azure et GCP ont chacun leur documentation).\n\n3. **Restriction explicite** : le scénario **Point-to-Site (P2S) VPN n'est PAS supporté** ([doc=020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357]) — seul le S2S est offert.\n\n**Architecture AWS exemple** ([doc=020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357]) : Le paysage AWS inclut un Customer Subscription avec SAP S/4HANA PCE (3 environnements DEV/QA/PROD), un External Load Balancer, SAP Cloud Connector, ABAP Server, HANA DB, Internal Load Balancer, SAP Web Dispatcher, SAC Agent. La connexion entre Customer Enterprise VPC et SAP S/4HANA PCE se fait via VPC Peering ou AWS Direct Connect/IPSec. Outbound Internet pour BTP transite via Internet Proxy avec TLS 1.2 Secure Tunnel via Cloud Connector.\n\n**Accès Support SAP** ([doc=007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896]) : Trois options offertes à SAP Cloud Application Services (CAS) :\n- Onboarding CAS directement sur le réseau client (par exemple CAS au bureau client)\n- VPN IPSec établi depuis le SAP Corporate Network vers le réseau client via Jump Host / Virtual Desktop\n- Utilisation du SAPRouter sur le Customer Gateway System (CGS), avec connexion certifiée SHA256 / clé 4096, port tcp/3299, ouverture contrôlée par le client.\n\n**Connectivity to SAP BTP** ([doc=020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357]) : Le trafic depuis le VPC RISE vers les services BTP passe par Cloud Connector et Internet Proxy en sortie via TLS 1.2 Secure Tunnel.\n\nLa connectivité aux services cloud (Connectivity to Cloud Services) figure dans la \"Shared Security Responsibility Model\" comme un élément géré par le client (Dedicated Private Connectivity to Hyperscaler), pendant que SAP gère la Resilient Network Connectivity et la Network Availability avec protection DDoS basique built-in ([doc=020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357]).",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357",
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      ],
+      "answerability": "answerable",
+      "false_premise": false,
+      "entity": "Cloud networking and connectivity",
+      "expected_claim_count": 6,
+      "expected_contradiction_count": 0
+    },
+    "source_set": "T4_audit:human_derived",
+    "category": "multi_hop_audit"
+  },
+  {
+    "id": "V2_V1_GOLD_SAP_Q1_2",
+    "question": "Quelle est la procédure de migration directe depuis SAP Business One vers S/4HANA Cloud Private Edition ?",
+    "primary_type": "false_premise",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "SAP ne propose pas de procédure standard de system conversion directe depuis SAP Business One vers SAP S/4HANA Cloud Private Edition. Les conversions SUM/DMO concernent SAP ECC et SAP Business Suite. Pour SAP Business One, l’approche recommandée est généralement une nouvelle implémentation (greenfield) avec migration de données via SAP Migration Cockpit, SAP Data Services ou outils partenaires.",
+      "exact_identifiers": [
+        "SUM",
+        "DMO",
+        "greenfield",
+        "Migration Cockpit",
+        "SAP Business One"
+      ],
+      "supporting_doc_ids": [
+        "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+        "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"
+      ],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    },
+    "source_set": "gold_set_sap_v1",
+    "category": "false_premise"
+  }
+]

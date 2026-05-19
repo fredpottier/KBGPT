@@ -54,6 +54,7 @@ from knowbase.runtime_v5.tools.registry import (
     reset_default_registry,
 )
 from knowbase.runtime_v5.tools.v2_tools_registration import register_v2_tools
+from knowbase.runtime_v5.tools.v6_tools_registration import register_v6_tools
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,10 @@ _admission: AdmissionController | None = None
 _idempotency: IdempotencyStore | None = None
 _job_store: InMemoryJobStore | None = None
 _agent: ReasoningAgentV51 | None = None
+
+# Cache d'agents par model (pour bake-off bench parallèle)
+# Évite de recréer un agent à chaque request quand on bench plusieurs modèles
+_agents_by_model: dict[str, ReasoningAgentV51] = {}
 
 
 def _get_admission() -> AdmissionController:
@@ -100,6 +105,9 @@ def _get_agent() -> ReasoningAgentV51:
         registry = get_default_registry()
         register_poc_tools(registry)
         register_v2_tools(registry)
+        # V6-J1 — find_procedures (additif, expose les Procedure Neo4j à l'agent).
+        # Nécessite que l'extraction V6-J1 ait été lancée (v6_j1_extract_corpus.py).
+        register_v6_tools(registry)
 
         # LLM caller — switch via env V5_LLM_PROVIDER (calibration uniquement)
         # Default = Together AI / DeepInfra (charte open-source serverless).
@@ -114,8 +122,12 @@ def _get_agent() -> ReasoningAgentV51:
                 f"calibration bench ONLY, hors charte runtime"
             )
         else:
-            llm = HTTPLLMCaller(model="deepseek-ai/DeepSeek-V3.1")
-            logger.info("[V5 Router] HTTPLLMCaller (DeepSeek-V3.1 via Together AI)")
+            # V5_LLM_MODEL permet le bake-off de modèles open-source serverless
+            # (DeepSeek-V3.1, Llama-3.3-70B, Qwen2.5-72B, Mistral-Small, Qwen-14B, ...).
+            # Default = DeepSeek-V3.1 (charte historique).
+            open_model = os.getenv("V5_LLM_MODEL", "deepseek-ai/DeepSeek-V3.1")
+            llm = HTTPLLMCaller(model=open_model)
+            logger.info(f"[V5 Router] HTTPLLMCaller (model={open_model})")
 
         # A8 prewarm find_in caches en background (TF-IDF + embeddings)
         # Évite la latence 20s du premier find_in() en production
@@ -153,6 +165,48 @@ def _get_agent() -> ReasoningAgentV51:
     return _agent
 
 
+def _get_agent_for_model(llm_model: str) -> ReasoningAgentV51:
+    """Retourne (ou crée) un agent V5.1 dédié à un modèle LLM spécifique.
+
+    Usage : bench bake-off LLM en parallèle. Le default `_get_agent()` reste
+    pour les requests sans override (production).
+
+    L'agent ad-hoc partage registry/tracer/metrics/verifier avec le default
+    pour économiser les ressources ; seul le LLMCaller est dédié.
+
+    Support vLLM self-hosted : si llm_model == V5_VLLM_MODEL (env var),
+    utilise V5_VLLM_URL comme endpoint (au lieu de DeepInfra/Together).
+    """
+    import os
+    global _agents_by_model
+    if llm_model in _agents_by_model:
+        return _agents_by_model[llm_model]
+    # S'assure que le default est initialisé pour pouvoir partager ses deps
+    default = _get_agent()
+
+    # Détection vLLM self-hosted via env var (bench Qwen-14B AWQ EC2)
+    vllm_model = os.getenv("V5_VLLM_MODEL", "").strip()
+    vllm_url = os.getenv("V5_VLLM_URL", "").strip()
+    if vllm_model and vllm_url and llm_model == vllm_model:
+        custom_llm = HTTPLLMCaller(model=llm_model, endpoint_url=vllm_url)
+        logger.info(f"[V5 Router] vLLM custom agent : model={llm_model} url={vllm_url}")
+    else:
+        custom_llm = HTTPLLMCaller(model=llm_model)
+        logger.info(f"[V5 Router] Created custom agent for model={llm_model}")
+
+    custom_agent = ReasoningAgentV51(
+        llm_caller=custom_llm,
+        registry=default.registry,
+        sanitizer=default.sanitizer,
+        max_message_history=default.max_message_history,
+        tracer=default.tracer,
+        metrics=default.metrics,
+        verifier=default.verifier,
+    )
+    _agents_by_model[llm_model] = custom_agent
+    return custom_agent
+
+
 # ─── JobRunner adapter (wraps agent for endpoint) ────────────────────────────
 
 
@@ -166,7 +220,12 @@ class V51JobRunner(JobRunner):
         request: AnswerRequest,
         cancellation_token: CancellationToken,
     ) -> AnswerResponse:
-        agent = _get_agent()
+        # Si llm_model override fourni (bench bake-off), créer agent ad-hoc
+        # avec un HTTPLLMCaller spécifique pour cette request.
+        if getattr(request, "llm_model", None):
+            agent = _get_agent_for_model(request.llm_model)
+        else:
+            agent = _get_agent()
         result = await agent.run_async(
             question=request.question,
             tenant_id=tenant_id,

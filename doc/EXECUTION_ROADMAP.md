@@ -49,7 +49,10 @@ Donc on travaille **d'abord** sur la qualité (KG-first runtime, bitemporel, agn
 | **Supersession doc-level** | `SUPERSEDES` (§3.3) | REAFFIRMS existe (CH-02.3), SUPERSEDES partiel | 🟡 50% |
 | **Relations claim-vs-claim** | SAME_AS / EVOLUTION_OF / CONTRADICTS (§3.3) | LIFECYCLE_RELATION + LOGICAL_RELATION existent mais sémantique différente | 🟡 40% — refacto à faire |
 | **Schéma Qdrant projection** | `knowbase_chunks_v2` (§4.2) | Existant et fonctionnel | 🟢 Production |
-| **Runtime KG-first (intent-first)** | Pipeline §4.4, 2 LLM calls | V5.1 = ~12-15 LLM calls/q (boucle 6-8 iter + multiform×5 + verifier) | 🔴 0% — à construire (cf §2 Phase A3, audit estime 8-10j) |
+| **Runtime KG-first (Parse → Plan → Execute → Evaluate → Synthesize)** | Pipeline §4.4 VISION (5 modules + feedback loop) | V5.1 = ~12-15 LLM calls/q (boucle 6-8 iter + multiform×5 + verifier passif) | 🔴 0% — à construire (cf §2 Phase A3, estimation revue) |
+| **Parse module** (query decomposition en sub-goals) | §3.5/§4.4 VISION — 1 LLM call structuré | V5.1 utilise `answer_shape` classifier (DeBERTa S2) ; à remplacer par décomposition sub-goals | 🔴 0% — à construire |
+| **Evaluate module** (CRAG-style lightweight ~200-500 tokens) | §3.5 VISION — 1 LLM call jugement {CORRECT/AMBIG/INCORRECT/INSUFFICIENT} | V5.1 GroundingVerifier HHEM passif Mode A inopérant (corrélation outcome↔score nulle) | 🔴 0% — à construire (chaînon manquant critique de V5.1) |
+| **Plan module + Tool Registry** (mapping sub_goal → tool déterministe) | §4.4 VISION — pas de LLM | Existe partiellement (ToolRegistry CH-52.4.1 réutilisable) | 🟡 40% — infra OK, mapping à construire |
 | **3 modes dégradation** (REASONED/ANCHORED/TEXT_ONLY) | §4.5 | `graph_first_search.py` existe mais désactivé en runtime | 🟡 30% — code base existant mais inactif |
 | **Probability Isolation** | LLM uniquement intent+format (§3.5) | V5.1 contraire — agent multi-itérations + multiform LLM | 🔴 0% |
 | **Domain Pack mécanisme** | Pluggable JSON (§2.3 AX-11) | Concept défini ; `domain_pack_loader.py` actuel injecte context_defaults dans prompt V5.1 → contraire à agnosticité stricte, à supprimer puis re-concevoir | 🔴 10% — design + impl à reprendre |
@@ -100,19 +103,106 @@ Donc on travaille **d'abord** sur la qualité (KG-first runtime, bitemporel, agn
 - Migration : exécuter cette classification sur le corpus SAP existant
 - Test : sur le bench T2 contradictions, atteindre ≥90% de surface correcte (vs 100% mars 2026 à recalibrer)
 
-#### A3. Runtime intent-first (2 sem)
+#### A3. Runtime KG-first — architecture Parse → Plan → Execute → Evaluate → Synthesize (3 sem)
 
-*Estimation post-audit : 8-10 jours full-stack (1 personne soutenue) + buffer ≈ 2 semaines.*
+*Estimation revue post-amendement 19/05/2026 : 12-15 jours full-stack (l'ajout du module Evaluate + boucle feedback ajoute ~3-5j vs estimation initiale 8-10j). Buffer historique ×1.5 → 3 semaines.*
 
-- ADR `ADR_PROBABILITY_ISOLATION.md` validé
-- Nouveau module `runtime_v6/` avec : `IntentResolver` (1 LLM call) → `Cypher templates` (déterministe, génération de plan basée sur intent type) → `Format response` (1 LLM call, formatage humain zéro création de fait)
-- **Réutilisation infrastructure V5.1** (estimation 0j d'effort net) : API Pydantic models, AdmissionController, IdempotencyStore, JobStore, SSE, OTel/metrics, ToolRegistry, Verifier (post-synthèse, mode active désormais), BudgetTracker, CancellationToken
-- **Suppressions ciblées (1-2j)** : `query_reformulator.py`, `loop_signature.py`, `execution_plan.py`, `domain_pack_loader.py`, `doc_topics_loader.py`, `anthropic_llm_caller.py` (hors charte open-source)
-- **Adaptations (2-3j)** : HTTPLLMCaller (2 callsites seulement en V6), Workspace schema (champs evidence_from_kg au lieu de tool_calls), thresholds verifier (recalibration potentielle), Reading tools (déplacer en module séparé `fallback_text_only/`, accessible uniquement quand KG silencieux)
-- Migration **shadow mode au niveau API** (confirmé faisable par audit) : `/api/runtime_v5/answer` (V5.1 boucle agent) et `/api/runtime_v6/answer` (KG-first) coexistent. Le bench tape les deux endpoints en parallèle sur le panel. Ramp progressive du trafic (0 → 10 → 50 → 100%) sur 2-3 semaines post-A3
-- Bench latence : cible p50 <30s, p95 <60s
-- Bench qualité : cible C1 ≥0.75, C3 ≥0.50 sur 50q SAP stratifiées
-- Kill switch K-3 (cf §3) si non atteint
+**Architecture cible** (conforme VISION §3.5 + §4.4 amendés) :
+
+```
+┌─ 1. PARSE [LLM #1] ────────────────────────────────────────────┐
+│  Décompose la question en sub-goals structurés                  │
+│  Output: {sub_goals[], entities[], language, time_filter, hints}│
+│  PAS de classification figée — sub-goals concrets actionnables  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+┌─ 2. PLAN [DÉTERMINISTE] ───────────────────────────────────────┐
+│  Pour chaque sub_goal → mapping vers tool                       │
+│  Tools : kg_claims, qdrant_sections, contradiction_surface,     │
+│          lifecycle_query (utilise relations claim-claim A2)     │
+│  Génère Cypher / Qdrant params, ordonnance séquentiel/parallèle │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+┌─ 3. EXECUTE [DÉTERMINISTE] ────────────────────────────────────┐
+│  Lance les tools, agrège résultats par sub_goal                 │
+│  Filtre temporel natif : invalidated_at IS NULL + valid_from/until│
+└─────────────────────────────────────────────────────────────────┘
+                              │
+┌─ 4. EVALUATE [LLM #2, lightweight ~200-500 tokens] ────────────┐
+│  Verdict ∈ {CORRECT, AMBIGUOUS, INCORRECT, INSUFFICIENT}        │
+│   ├─ CORRECT          → step 5                                  │
+│   ├─ AMBIGUOUS        → BOUCLE step 2 (max 2 iter, anti-thrash) │
+│   ├─ INCORRECT        → fallback Qdrant TEXT_ONLY               │
+│   └─ INSUFFICIENT     → abstention motivée (AX-14)              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+┌─ 5. SYNTHESIZE [LLM #3, optionnel] ─────────────────────────────┐
+│  Rédaction réponse humaine, zéro création de fait               │
+│  Citation cliquable obligatoire + mention sub_goals non couverts│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Tâches A3 décomposées** :
+
+- **A3.0** — ADR `ADR_PARSE_EVALUATE_RUNTIME.md` (P0 prérequis) — 1j
+  - Décrit en détail les schémas Pydantic (ParseOutput, SubGoal, EvaluateOutput),
+  - les contrats Plan→Execute déterministes,
+  - les prompts Parse + Evaluate (courts, structurés),
+  - et le hard cap anti-thrash (max 2 retours).
+
+- **A3.1** — Module `parse/` (1.5-2j)
+  - Prompt Parse → output Pydantic structuré (sub_goals, entities, time_filter)
+  - Tests : 30q variées (factual, lifecycle, comparison, listing, unanswerable) → vérifier décomposition cohérente
+
+- **A3.2** — Module `plan/` (1.5j)
+  - Mapping déterministe `sub_goal.kind → tool` (tables de correspondance)
+  - Construction Cypher templates paramétrés (réutilise ADR_BITEMPOREL §2.4 queries)
+  - Ordonnancement (dépendances simples : ex. compare nécessite 2 retrievals)
+
+- **A3.3** — Module `execute/` (1.5j)
+  - Adapter sur ToolRegistry V5.1 (réutilisable selon audit 18/05)
+  - Tools : kg_claims, qdrant_sections, contradiction_surface, lifecycle_query
+  - Récolte structurée des résultats + scores de couverture par sub_goal
+
+- **A3.4** — Module `evaluate/` (2-3j, chaînon critique)
+  - Prompt CRAG-style ~200-500 tokens
+  - Output verdict {CORRECT/AMBIGUOUS/INCORRECT/INSUFFICIENT}
+  - Logique branches : si AMBIGUOUS → re-plan ; si INCORRECT → fallback ; si INSUFFICIENT → abstention
+  - Hard cap (max 2 boucles) + métriques de drift
+
+- **A3.4-bis** — **Bench evaluator isolé** (1-1.5j, BLOQUANT avant A3.7) — *ajouté 19/05 sur retour Claude Web*
+  - Risque identifié : evaluator = nouveau SPOF si mal calibré (cf HHEM V5.1 inopérant en MEMORY)
+  - Construire 50 cas synthétiques (triplets `query + résultats agrégés + label gold ∈ {CORRECT/AMBIGUOUS/INCORRECT/INSUFFICIENT}`)
+  - Bench accuracy classification sur ces 50 cas
+  - **Gate** : ≥85% accuracy requis avant d'intégrer evaluator dans le runtime (sinon A3.4 à revoir avant A3.7)
+  - Inclut tests cross-modèle : DS-V3.1 vs Qwen-72B-Turbo vs Llama-3.3-70B pour identifier le meilleur evaluator
+
+- **A3.5** — Module `synthesize/` (1j)
+  - Prompt Format final, contrainte zéro création de fait
+  - Output structuré (texte + claims_verbatim + citations) pour UI
+
+- **A3.6** — Suppressions ciblées V5.1 (1j)
+  - `query_reformulator.py`, `loop_signature.py`, `execution_plan.py`, `domain_pack_loader.py`, `doc_topics_loader.py`, `anthropic_llm_caller.py`
+  - Cf `ADR_DEPRECATIONS_V51` (P0 backlog §4)
+
+- **A3.7** — Mount endpoint `/api/runtime_v6/answer` parallèle V5.1 (0.5j)
+  - Shadow mode confirmé faisable par audit. Bench tape les 2 endpoints en parallèle pour comparaison.
+
+- **A3.8** — Bench A3 final (1j)
+  - Cible C1 ≥0.75, C3 ≥0.50 sur 50q SAP stratifiées + bench cas AMBIGUOUS (où V5.1 plafonne)
+  - Latence : cible p50 <30s, p95 <60s
+  - Métriques additionnelles : `re_plan_rate` (cf K-7), distribution latence avec/sans re-plan
+  - Kill switch K-3 + K-7 si non atteints
+
+- **A3.9** — **Ablation study** (1j) — *ajouté 19/05 sur retour Claude Web*
+  - Risque identifié : complexité Parse+Evaluate vs quick wins (prompt tuning V5.1)
+  - Bench parallèle : runtime_v6 (Parse+Evaluate) vs V5.1 baseline avec prompt tuning du classifier amélioré
+  - **Gate** : delta runtime_v6 vs baseline-améliorée ≥10pp sur C1 ou C3, sinon ré-évaluer la complexité (peut-être que tweak V5.1 suffit, ce qui serait surprenant mais à vérifier empiriquement)
+  - Anti-overconfidence : si l'ablation montre que la baseline+prompt tuning fait ~95% du gain, simplifier l'architecture
+
+**Total Phase A3** : ~14-17j effectifs + buffer = **3-4 semaines** (vs estimation initiale 2 sem, +1 sem avec sous-tâches A3.4-bis et A3.9 ajoutées).
+
+**Réutilisation infrastructure V5.1** (audit 18/05 — 65% réutilisable) : API Pydantic models, AdmissionController, IdempotencyStore, JobStore, SSE, OTel/metrics, ToolRegistry, Verifier (devient `evaluate/` module), BudgetTracker, CancellationToken.
 
 ### Phase B — Validation cross-domain (2 semaines)
 
@@ -213,6 +303,7 @@ Ces conditions sont **non-négociables**. Si une est atteinte, on **arrête** la
 | **K-4** | Verifier HHEM-2.1 reste inopérant (corrélation outcome↔score <0.2) après refactoring | Hypothèse : verifier passif Mode A est utile en production | **Décision** : soit refactor profond, soit abandon verifier (acceptation que validation passe par autres mécanismes) |
 | **K-5** | Coût LLM mensuel >€500 sur usage interne dev | Hypothèse : DeepInfra serverless est tenable économiquement | **Investiguer** : caching plus agressif, self-hosting vLLM EC2, ou bascule modèle plus petit |
 | **K-6** *(nouveau, 19/05)* | Auto-évaluation utilisateur produit (Fred) sur 20 questions presales SAP type **après Phase A** : qualité subjective <"acceptable" sur la majorité | Hypothèse : un produit à 0.75 C1 a une valeur perçue par un utilisateur expert | **Pause** : pas de Phase B/C avant clarification de ce qui manque réellement à la perception de valeur (peut-être pas seulement le score factual, mais aussi la latence, la traçabilité, l'expression, etc.) |
+| **K-7** *(nouveau, 19/05 post-amendement Parse+Evaluate)* | (a) `re_plan_rate` >30% sur bench 100q OU (b) `evaluator_accuracy` <85% sur bench A3.4-bis OU (c) `latency_p95` >60s avec re-plan activé | Hypothèses : (a) le module Parse est efficace pour décomposer correctement la majorité des questions du premier coup, (b) l'evaluator lightweight est un classifieur fiable, (c) le feedback loop ne fait pas exploser la latence | **Investiguer** lequel des 3 sous-modules échoue : (a) revoir prompt Parse ou décomposition sub-goals ; (b) revoir prompt evaluator ou changer modèle (DS-V3.1 → Qwen-72B-Turbo ?) ; (c) réduire hard cap à 1 itération + accepter plus de fallback TEXT_ONLY |
 
 Si un kill switch déclenche, **mise à jour de VISION.md** : soit assouplir l'axiome concerné (et justifier par ADR), soit re-prioriser les capacités.
 
@@ -264,9 +355,9 @@ C'est un trade-off conscient. Le re-questionnement viendra naturellement à la s
 
 | Priorité | ADR | Pour quelle Phase | Statut |
 |---|---|---|---|
-| **P0** | `ADR_BITEMPOREL_CLAIMS.md` | Phase A1 | À créer |
-| **P0** | `ADR_PROBABILITY_ISOLATION.md` | Phase A3 | À créer |
-| **P0** | `ADR_DEPRECATIONS_V51.md` *(nouveau post-audit)* — Décommission de query_reformulator, loop_signature, execution_plan, domain_pack_loader, doc_topics_loader, anthropic_llm_caller. Justification par AX-11 (agnosticité) + Probability Isolation. | Phase A3 | À créer |
+| **P0** | `ADR_BITEMPOREL_CLAIMS.md` | Phase A1 | ✅ Rédigé 19/05/2026 (Proposed, à valider) |
+| **P0** | `ADR_PARSE_EVALUATE_RUNTIME.md` *(nouveau 19/05)* — Architecture Parse → Plan → Execute → Evaluate → Synthesize. Schémas Pydantic (ParseOutput, SubGoal, EvaluateOutput), prompts Parse + Evaluate, hard cap anti-thrash. Remplace l'ADR_PROBABILITY_ISOLATION précédemment listé (qui aurait été plus restrictif). | Phase A3 (prérequis A3.0) | À créer |
+| **P0** | `ADR_DEPRECATIONS_V51.md` — Décommission de query_reformulator, loop_signature, execution_plan, domain_pack_loader, doc_topics_loader, anthropic_llm_caller. Justification par AX-11 (agnosticité) + §3.5 Parse/Evaluate (anti single-shot classifier). | Phase A3 (A3.6) | À créer |
 | **P1** | `ADR_VALIDATION_CROSS_DOMAIN.md` | Phase B | À créer |
 | **P1** | `ADR_RELATIONS_CLAIM_CLAIM.md` (SAME_AS / EVOLUTION_OF / CONTRADICTS / REFINES / QUALIFIES) | Phase A2 | À créer |
 | **P2** | `ADR_CLICK_TO_SOURCE_FRONTEND.md` | Phase C | À créer |
