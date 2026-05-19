@@ -86,6 +86,31 @@ logger = logging.getLogger(__name__)
 _document_context_cache: Dict[str, str] = {}
 
 
+def _resolve_vllm_url_for_doc_extraction() -> Optional[str]:
+    """Résout l'URL vLLM pour le S4 LLM du DocumentValidFromExtractor.
+
+    A1.3.C — Priorité Redis burst state actif > env VLLM_URL > None (skip S4).
+    Reste cohérent avec la charte "1 LLM = 1 lifecycle = 1 monitoring" pour
+    l'ingestion : on utilise le même vLLM EC2 Burst que ClaimFirst Phase 2.
+    """
+    # 1. Redis burst state (instance EC2 active)
+    try:
+        from knowbase.ingestion.burst.provider_switch import (
+            get_burst_state_from_redis,
+        )
+
+        state = get_burst_state_from_redis()
+        if state and state.get("active") and state.get("vllm_url"):
+            return state["vllm_url"]
+    except Exception:
+        pass
+
+    # 2. Env var VLLM_URL (fallback explicite si configuré)
+    import os
+
+    return os.getenv("VLLM_URL") or None
+
+
 class OsmoseAgentiqueService:
     """
     Service d'intégration OSMOSE Architecture Agentique Phase 1.5.
@@ -1183,6 +1208,7 @@ class OsmoseAgentiqueService:
                 tenant_id=tenant,
                 chunks=None,  # 2026-01: Ne pas créer chunks ici, utiliser Dual Chunking
                 doc_context_frame=doc_context_frame,
+                document_path=document_path,  # A1.3.C : pour extraction document_valid_from
             )
 
             # ================================================================
@@ -1326,12 +1352,53 @@ class OsmoseAgentiqueService:
         chunks: Optional[List[Dict[str, Any]]] = None,
         document_name: Optional[str] = None,
         doc_context_frame: Optional[DocContextFrame] = None,
+        document_path: Optional[Path] = None,
     ) -> Dict[str, int]:
         """
         Persiste les concepts Hybrid Anchor dans Neo4j.
 
         Délègue à osmose_persistence.persist_hybrid_anchor_to_neo4j().
+
+        Phase A1.3.C (ADR_BITEMPOREL_CLAIMS) :
+        Si `document_path` fourni, extrait `document_valid_from` via la cascade
+        S2 > S3 > S1+batch > S4 LLM (DocumentValidFromExtractor) et le persiste
+        sur le noeud :Document avec son marker_type.
         """
+        document_valid_from: Optional[str] = None
+        document_valid_from_marker: Optional[str] = None
+
+        if document_path is not None and document_path.exists():
+            try:
+                from knowbase.ingestion.document_valid_from_extractor import (
+                    DocumentValidFromExtractor,
+                    S4LLMConfig,
+                )
+
+                # Résoudre URL vLLM (Redis burst state > env VLLM_URL > skip S4)
+                vllm_url = _resolve_vllm_url_for_doc_extraction()
+                s4_config = S4LLMConfig(vllm_url=vllm_url) if vllm_url else S4LLMConfig()
+                extractor = DocumentValidFromExtractor(
+                    s4_config=s4_config,
+                    enable_s4_llm=vllm_url is not None,
+                )
+
+                # Extraction synchrone (PDF I/O + regex + httpx) — to_thread pour ne pas bloquer
+                result = await asyncio.to_thread(extractor.extract, document_path)
+                document_valid_from = result.value
+                document_valid_from_marker = result.marker_type.value
+
+                logger.info(
+                    f"[OSMOSE:DocValidFrom] doc_id={document_id} "
+                    f"valid_from={document_valid_from} marker={document_valid_from_marker} "
+                    f"source={result.source}"
+                )
+            except Exception as e:
+                # Comportement gracieux : si extraction échoue, on persiste sans valid_from
+                # (le claim héritera de ingested_at via le fallback bitemporel)
+                logger.warning(
+                    f"[OSMOSE:DocValidFrom] extraction failed for {document_id}: {e}"
+                )
+
         return await persist_hybrid_anchor_to_neo4j(
             proto_concepts=proto_concepts,
             canonical_concepts=canonical_concepts,
@@ -1340,6 +1407,8 @@ class OsmoseAgentiqueService:
             chunks=chunks,
             document_name=document_name,
             doc_context_frame=doc_context_frame,
+            document_valid_from=document_valid_from,
+            document_valid_from_marker=document_valid_from_marker,
         )
 
     # NOTE: Le reste de l'ancienne implémentation a été supprimé.

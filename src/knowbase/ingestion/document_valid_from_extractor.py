@@ -328,34 +328,58 @@ def detect_batch_re_save(pdf_paths: list[Path], min_cluster_size: int = 3) -> se
 # S4 — LLM Qwen2.5-14B AWQ via EC2 Burst (evidence-locked extraction)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_S4_PROMPT_SYSTEM = """You are a document metadata analyst extracting the document's publication or effective date.
+_S4_PROMPT_SYSTEM = """You are a document metadata analyst extracting the document's date.
 
 You receive the FIRST PAGE TEXT of a PDF document (any language, any domain).
 
-Your task: extract the date when this document was published, became effective, or was
-formally issued. Look in:
-- The header or footer (often contains "Document Version X.Y, March 2024" patterns)
-- The cover page (publication date, version date, effective date)
-- The signature/approval lines (sometimes show approval date)
-- Any explicit statement "this document is dated...", "published in...", "effective from..."
+Your task: extract the date that best represents WHEN this document was produced,
+published, dated, presented, released, issued, effective, or otherwise temporally
+anchored. This is the date a librarian would use to file the document.
 
-You handle multilingual content (EN/FR/DE/ES/IT/...) and any domain.
+WHERE TO LOOK:
+- Header or footer ("Document Version X.Y, March 2024", "v2.0 — 09/2023")
+- Cover page below the title or under the author name (presentation/slide-deck date,
+  typical pattern: "Author Name\\nMonth YYYY" or "Author, Org\\nQ3 2025")
+- The signature/approval/issue date line
+- Any standalone date that visibly anchors the document in time
+
+ACCEPTED FORMATS (non-exhaustive — your job is to recognize date semantics, not
+pattern-match a closed list):
+- Full dates: "15 March 2024", "March 15, 2024", "15/03/2024", "2024-03-15"
+- Month + year: "March 2024", "Mar 2024", "März 2024", "mars 2024"
+- Compact: "03/2024", "2024-03", "Q1 2024", "FY24"
+- Year only (only as last resort if nothing more precise)
+
+You handle multilingual content (EN/FR/DE/ES/IT/...) and any domain. Trust the
+semantic clue more than a specific keyword — a date placed prominently on a cover
+slide IS the document date, even without an explicit "Published:" label.
 
 CRITICAL — evidence-locked extraction:
 - Extract ONLY a date that is EXPLICITLY written in the page
-- Provide an evidence_quote that appears VERBATIM in the input text
-- If no clear publication/effective date is stated, return null
-- Do NOT infer from copyright years, table dates, or unrelated mentions
+- Provide an evidence_quote that appears VERBATIM in the input text (case-insensitive
+  but otherwise character-exact within the chosen span)
+- If no date is visible at all on the page, return value=null
+- Do NOT capture copyright years from boilerplate ("© 2010-2024 SAP SE") unless that
+  is the only temporal anchor on the page
+- Do NOT capture random dates from data tables, examples, or unrelated mentions
+
+NORMALIZATION (the system normalizes your output to ISO YYYY-MM-DD):
+- Year+month → use YYYY-MM (system will set day=01)
+- Year only → use YYYY (system will set month=01, day=01)
+- Full date → use YYYY-MM-DD
+- Quarter → resolve to first month of quarter (Q1=01, Q2=04, Q3=07, Q4=10) at YYYY-MM
+- Fiscal year (FY24, FY2024) → use YYYY at January (unless context says otherwise)
 
 Output JSON schema (strict):
 {
   "value": "YYYY-MM-DD" | "YYYY-MM" | "YYYY" | null,
-  "date_role": "publication" | "effective" | "version" | "issued" | "approved" | null,
+  "date_role": "publication" | "effective" | "version" | "issued" | "approved" | "presentation" | "other" | null,
   "evidence_quote": "..." | null,
   "confidence": "high" | "medium" | "low"
 }
 
-If `value` is non-null, `evidence_quote` MUST also be non-null and appear verbatim in the input."""
+If `value` is non-null, `evidence_quote` MUST also be non-null and appear verbatim
+in the input text."""
 
 
 @dataclass
