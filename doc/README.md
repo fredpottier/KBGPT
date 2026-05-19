@@ -1,54 +1,81 @@
 # Documentation OSMOSIS
 
-**Version :** 3.0 — Rationalisation Mars 2026
+**Version :** 4.0 — Refondation Vision Mai 2026
 **Projet :** OSMOSIS (Organic Semantic Memory Organization & Smart Extraction)
+
+> Cette documentation a été refondée le 18 mai 2026 suite à la validation d'une nouvelle vision (modèle hiérarchique 2-niveaux Document+Claim, bitemporel, Probability Isolation, multi-domaines, traçabilité click-to-source). Le doc **VISION.md** absorbe et remplace les anciennes fondations (NORTH_STAR.md, VISION_PRODUIT.md, HISTORIQUE_PIVOTS.md) qui sont archivées dans `archive/2026-05_pre-vision-cleanup/`.
 
 ---
 
-## Structure
+## Structure simplifiée
 
-Cette documentation a été rationalisée le 29 mars 2026. Les 232 fichiers originaux sont archivés dans `archive/pre-rationalization-2026-03/`. La matrice de traçabilité garantit qu'aucune substance décisionnelle n'a été perdue.
+```
+doc/
+├── README.md                  # Ce fichier — guide de navigation
+├── VISION.md                  # ⭐ Source de vérité produit + architecturale
+├── EXECUTION_ROADMAP.md       # ⭐ Plan d'exécution (phases, kill switches, maturité)
+├── ARCH_PIPELINE.md           # Pipeline stratifié Pass 0→3
+├── ARCH_CLAIMFIRST.md         # Pipeline ClaimFirst 9 phases
+├── ARCH_RETRIEVAL.md          # Graph-Guided RAG, Signal-Driven
+├── ARCH_STOCKAGE.md           # Neo4j + Qdrant + PostgreSQL + Redis
+├── OPS.md                     # Docker, kw.ps1, AWS, monitoring
+├── DEV_GUIDE.md               # Structure code, conventions, endpoints
+├── ongoing/
+│   ├── adr/                   # 17 ADR structurants (architecture decisions)
+│   ├── chantiers/             # 76 chantiers (historiques + en cours)
+│   ├── etudes/                # 16 études exploratoires + reviews externes
+│   └── sessions/              # 16 snapshots datés (bilans, rapports)
+└── archive/
+    ├── pre-rationalization-2026-03/   # 232 fichiers (archive de mars 2026)
+    └── 2026-05_pre-vision-cleanup/    # 8 fichiers absorbés par VISION.md
+```
 
-### Fondations (3 docs)
+---
 
-| Document | Contenu |
-|----------|---------|
-| [NORTH_STAR.md](./NORTH_STAR.md) | **Invariants inviolables**, principes fondateurs, Decision Defense, pistes écartées critiques, profils de visibilité |
-| [VISION_PRODUIT.md](./VISION_PRODUIT.md) | Positionnement produit, 5 capacités, différenciation vs Copilot/RAG, marché cible, usages A/B/C |
-| [HISTORIQUE_PIVOTS.md](./HISTORIQUE_PIVOTS.md) | Timeline chronologique, pivots architecturaux, phases complétées, leçons apprises |
+## Documents fondateurs
 
-### Architecture (4 docs)
+### ⭐ Référence active (à lire en priorité)
 
-| Document | Contenu |
-|----------|---------|
-| [ARCH_PIPELINE.md](./ARCH_PIPELINE.md) | **Pipeline stratifié Pass 0→3**, Docling, vision gating, extraction, linking — vérifié contre le code |
-| [ARCH_CLAIMFIRST.md](./ARCH_CLAIMFIRST.md) | **Pipeline ClaimFirst** 9 phases, Facet Engine V2, marker normalization, corpus promotion |
-| [ARCH_RETRIEVAL.md](./ARCH_RETRIEVAL.md) | **Graph-Guided RAG**, Signal-Driven search, Concept Matching, Layer R, synthèse tiered |
-| [ARCH_STOCKAGE.md](./ARCH_STOCKAGE.md) | **Neo4j + Qdrant + PostgreSQL + Redis** — schémas, collections, configuration |
+| Document | Contenu | Quand le lire |
+|----------|---------|---------------|
+| [VISION.md](./VISION.md) | **Source de vérité unique** — mission, axiomes (AX-1 à AX-16), modèle épistémique bitemporel, capacités produit C1-C5, anti-vision, gouvernance | À chaque début de session, avant tout chantier |
+| [EXECUTION_ROADMAP.md](./EXECUTION_ROADMAP.md) | **Plan d'exécution** — matrice de maturité composants, phasage A→D, kill switches K-1 à K-5, backlog ADR | Pour situer une tâche dans la roadmap |
 
-### Chantiers actifs (5 docs)
-
-| Document | Contenu |
-|----------|---------|
-| [CHANTIER_BENCHMARK.md](./CHANTIER_BENCHMARK.md) | Framework 320 questions, dual-judge, scores Sprint 0→2, architecture LLM tiered |
-| [CHANTIER_CHUNKING.md](./CHANTIER_CHUNKING.md) | Diagnostic chunking (70% < 100 chars), stratégie rechunking, unité preuve vs lecture |
-| [CHANTIER_ATLAS.md](./CHANTIER_ATLAS.md) | Atlas cognitif 3 phases, Concept Assembly Engine, Wikipedia OSMOSIS |
-| [CHANTIER_COCKPIT.md](./CHANTIER_COCKPIT.md) | Cockpit opérationnel, 6 widgets, design system, architecture indépendante |
-| [CHANTIER_KG_QUALITY.md](./CHANTIER_KG_QUALITY.md) | 6 chantiers qualité KG, Entity Resolution, déduplication acronymes |
-
-### Ops & Dev (2 docs)
-
-| Document | Contenu |
-|----------|---------|
-| [OPS.md](./OPS.md) | Docker multi-compose, kw.ps1, Burst EC2 Spot, AWS, backup, monitoring, purge |
-| [DEV_GUIDE.md](./DEV_GUIDE.md) | Structure code, API endpoints, frontend pages, feature flags, conventions |
-
-### Suivi & Traçabilité
+### Architecture détaillée
 
 | Document | Contenu |
 |----------|---------|
-| [TODOLIST.md](./TODOLIST.md) | **Plan d'exécution** : 4 phases, tâches ordonnancées, critères GO/NO-GO. Tâche terminée → mise à jour doc source → suppression ici. |
-| [MATRICE_TRACABILITE_RATIONALIZATION.md](./MATRICE_TRACABILITE_RATIONALIZATION.md) | Preuve du refacto : 19 invariants, 27 pistes écartées, 20+ travaux non terminés, mapping sources→cibles |
+| [ARCH_PIPELINE.md](./ARCH_PIPELINE.md) | Pipeline stratifié Pass 0→3, Docling, vision gating, extraction |
+| [ARCH_CLAIMFIRST.md](./ARCH_CLAIMFIRST.md) | Pipeline ClaimFirst 9 phases, Facet Engine V2, marker normalization |
+| [ARCH_RETRIEVAL.md](./ARCH_RETRIEVAL.md) | Graph-Guided RAG, Signal-Driven search, Concept Matching, Layer R |
+| [ARCH_STOCKAGE.md](./ARCH_STOCKAGE.md) | Neo4j + Qdrant + PostgreSQL + Redis — schémas, collections |
+
+### Opérationnel
+
+| Document | Contenu |
+|----------|---------|
+| [OPS.md](./OPS.md) | Docker multi-compose, kw.ps1, Burst EC2 Spot, AWS, backup, monitoring |
+| [DEV_GUIDE.md](./DEV_GUIDE.md) | Structure code, API endpoints, frontend pages, conventions |
+
+---
+
+## Documents de travail (`ongoing/`)
+
+| Dossier | Contenu | Cas d'usage |
+|---------|---------|-------------|
+| [ongoing/adr/](./ongoing/adr/) | 17 ADR (Architecture Decision Records) | Décisions techniques majeures avec rationale et alternatives écartées |
+| [ongoing/chantiers/](./ongoing/chantiers/) | 76 chantiers (CH-XX numérotés + récents) | Spécifications + résultats de chantiers d'implémentation |
+| [ongoing/etudes/](./ongoing/etudes/) | 16 études exploratoires + reviews externes (Codex, Sonnet) | Recherches préliminaires, propositions non encore tranchées |
+| [ongoing/sessions/](./ongoing/sessions/) | 16 snapshots datés (bilans de session, rapports, statuts) | Historique opérationnel |
+
+---
+
+## Documents archivés
+
+| Dossier archive | Contenu |
+|-----------------|---------|
+| `archive/pre-rationalization-2026-03/` | 232 fichiers de l'avant-rationalisation (mars 2026) |
+| `archive/2026-05_pre-vision-cleanup/` | 8 fichiers absorbés par VISION.md (NORTH_STAR, VISION_PRODUIT, HISTORIQUE_PIVOTS, MATRICE_TRACABILITE, TODOLIST, et brouillons obsolètes) |
 
 ---
 
@@ -64,10 +91,16 @@ Cette documentation a été rationalisée le 29 mars 2026. Les 232 fichiers orig
 
 ---
 
-## Archive
+## Pour un nouveau venu
 
-`doc/archive/pre-rationalization-2026-03/` contient les 232 fichiers originaux organisés par répertoire (adr/, specs/, ongoing/, research/, etc.). Consulter la matrice de traçabilité pour retrouver l'origine de chaque décision.
+Ordre de lecture recommandé :
+
+1. **VISION.md** (~15 min) — comprendre ce qu'on construit et pourquoi
+2. **EXECUTION_ROADMAP.md** (~10 min) — comprendre où on en est et où on va
+3. **ARCH_PIPELINE.md** + **ARCH_CLAIMFIRST.md** (~30 min) — pipeline d'ingestion
+4. **ARCH_RETRIEVAL.md** + **ARCH_STOCKAGE.md** (~30 min) — pipeline runtime et stockage
+5. **OPS.md** + **DEV_GUIDE.md** (~20 min) — exploitation et conventions code
 
 ---
 
-*Dernière mise à jour : 2026-03-29*
+*Dernière mise à jour : 2026-05-18 (refondation Vision)*

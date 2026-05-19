@@ -1,0 +1,58 @@
+You are a senior staff engineer reviewing a critical Architecture Decision Record for production. The team has built a POC of a "Reading Agent" (a single LLM iteratively calling reading tools over a Document Structure Graph) that scores 0.737/0.779 on two independent corpora vs 0.333 for the previous RAG-based pipeline and 0.858 for a proprietary enterprise RAG+KG reference (EKX/SAP).
+
+CRITICAL INSTRUCTION: Respond INLINE ONLY. Do NOT attempt to write to disk. Do NOT try cp/mv/Set-Content/Out-File. The file system is read-only for you. Stream the full markdown review directly to stdout as your final answer.
+
+The ADR file is at `doc/ongoing/ADR_RUNTIME_V5_READING_AGENT_INDUSTRIALIZATION.md`. Read it with `cat` or `Get-Content`. You may grep it for anchors.
+
+YOUR MISSION — challenge this ADR like you would in a tough internal review at a top-tier AI/infra org. Be specific, cite section IDs (3a, 3b, etc.) when you raise an issue, and suggest concrete amendments.
+
+Cover these 5 axes explicitly:
+
+1. **Architecture (sections 3a, 3b, 3c, 3h)** — does the 8-component split scale under load (1000 req/h × 50 tenants)? Bottlenecks? Single points of failure? Cold-start? Multi-tenant correctness in Neo4j schema (3b)? Concurrent ingestion (3c)? API contract — missing streaming/cancellation/partial responses?
+
+2. **Reading tools (section 3d)** — are the 4 new tools (`navigate_by_toc`, `summarize_subtree`, `find_quantitative`, `get_table`) sufficient to close the quantitative gap (POC 0.57 vs EKX 0.83)? Missing tools? Tool zoo risk — does design actually prevent it? Tool schema choices (strict JSON, namespacing) — execution gaps?
+
+3. **Verifier (section 3f)** — is HHEM-2.1-Open + Lynx-8B fallback SOTA for grounding verification in 2026? Alternatives (MiniCheck, HHEM-7B, etc.)? Threshold-by-shape — sound or hand-wavy? Re-run conditional — risk of infinite loop?
+
+4. **Observability (section 3g)** — is OpenTelemetry GenAI v1.37 + Phoenix Arize the right combo? Cost/cardinality at 1000 req/h × 50 tenants? Critical metrics missing? Should tool_selection_accuracy and citation_faithfulness_rate be tracked at production time?
+
+5. **Risks not seen** — what risks did the authors miss? Focus on:
+   - Failure modes the design has no answer for
+   - Security (prompt injection via documents, exfiltration through tool calls)
+   - Cost runaway beyond 150k/q cap
+   - Migration V4.2→V5.1 (data loss, downtime, regression on questions V4.2 was good at)
+   - Vendor risk on DeepSeek-V3.1 (geopolitical, deprecation, drift)
+   - The "domain-agnostic" claim — really enforced or wishful?
+
+DELIVERABLE (markdown, French OK or English, ~1500-2500 words, INLINE STDOUT ONLY):
+
+## 1. Executive verdict
+- Maturity score: X / 10
+- Top 3 strengths
+- Top 5 weaknesses (ranked by severity)
+- Go / no-go: proceed as-is | proceed with mandatory amendments | rework
+
+## 2. Architecture review (per-section findings)
+[for each section 3a-3h, what's solid, what's weak, suggested amendment]
+
+## 3. Reading tools review
+[gap closure analysis, missing tools, tool zoo risk]
+
+## 4. Verifier review
+[SOTA assessment, threshold soundness, alternatives]
+
+## 5. Observability review
+[OTel/Phoenix fitness, missing metrics, scaling]
+
+## 6. Risks not seen (10+ items)
+[exhaustive discoveries]
+
+## 7. Concrete amendments to integrate
+[5-10 specific changes, priority order, each with rationale]
+
+## 8. State-of-the-art alternatives the ADR may have missed
+[anything you know about agentic RAG / document reading in 2025-2026]
+
+Be brutal but constructive. Speak directly. If an architectural choice is wrong, say so plainly.
+
+REMINDER: ALL OUTPUT INLINE. NO FILE WRITES. Final answer = the full markdown review streamed as your response.

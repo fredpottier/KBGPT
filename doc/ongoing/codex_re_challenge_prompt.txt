@@ -1,0 +1,63 @@
+You previously reviewed ADR V1.0 for OSMOSIS V5 Reading Agent industrialization and gave it a maturity score of 6.8/10 with "proceed with mandatory amendments". The team has now produced V1.1 integrating the 12 mandatory amendments you and Sonnet identified.
+
+CRITICAL INSTRUCTION: Respond INLINE ONLY. Do NOT attempt to write to disk. Stream the full markdown review directly to stdout as your final answer. Use `cat` or `Get-Content` to read files.
+
+YOUR PREVIOUS 12 KEY CONCERNS (consolidated from your review + Sonnet's):
+
+1. Multi-tenant Neo4j isolation insufficient (tenant_id as property only)
+2. API §3h under-specified for long-running agent (no streaming/cancel/async/idempotency)
+3. Verifier "threshold-by-shape" hand-wavy, no claim segmentation, no answer-level consistency
+4. Reading tools insufficient for quantitative gap (only first-order lookup, missing numeric tools)
+5. Tool zoo risk not actually prevented by strict JSON Schema + namespacing alone
+6. Scaling 1000 req/h × 50 tenants not defended quantitatively
+7. Prompt injection via documents not addressed
+8. DeepSeek-V3.1 vendor risk (sanctions, deprecation, drift)
+9. "Domain-agnostic" enforcement weak (grep CI naive)
+10. Verifier Goodharting risk (no production-time citation faithfulness measurement)
+11. Regression on V4.2 strengths (contextual category -10pp confirmed)
+12. Migration risks (cache invalidation, ID stability)
+
+YOUR MISSION : Read the AMENDED ADR at `doc/ongoing/ADR_RUNTIME_V5_READING_AGENT_INDUSTRIALIZATION.md` (now version V1.1, ~880 lines).
+
+For EACH of the 12 concerns:
+- Verify which section/lines now address it
+- Verdict: RESOLVED ✓ | PARTIALLY ADDRESSED ⚠ | STILL OPEN ✗
+- If not fully resolved, specify exactly what's still missing
+
+Then:
+- Updated maturity score /10
+- Final verdict: ACCEPT | ACCEPT WITH MINOR EDITS | REWORK | REJECT
+- Top 3 remaining concerns (if any)
+- 3 to 5 specific minor improvements that would push score to ≥9/10
+
+Be specific. Cite section IDs (3a, 3a.2, 3b, 3c, 3d, 3e, 3f, 3g, 3h, 3i, 4, 4.1, 7, 8, 10, 11) when referencing the new ADR. Do NOT re-paraphrase the ADR — focus on whether your previous concerns are now addressed.
+
+DELIVERABLE format (markdown, ~1000-1500 words):
+
+## Re-challenge ADR V5.1 V1.1 — Codex final pass
+
+### 1. Verdict
+- Maturity score V1.1: X / 10 (was 6.8 in V1.0)
+- Final: [ACCEPT | ACCEPT WITH MINOR EDITS | REWORK | REJECT]
+
+### 2. Concern-by-concern resolution table
+
+| # | Concern V1.0 | Section V1.1 addressing it | Status | Remaining gap |
+|---|---|---|---|---|
+| 1 | Multi-tenant Neo4j isolation | 3b, 3i.3 | ✓/⚠/✗ | ... |
+| 2 | API streaming/cancel/async | 3h | | |
+| ... | | | | |
+| 12 | Migration risks | 3c | | |
+
+### 3. Top 3 remaining concerns (if any)
+
+[detailed analysis]
+
+### 4. Specific improvements to reach ≥9/10
+
+[5 concrete suggestions]
+
+### 5. Final go/no-go recommendation
+[1-2 paragraphs]
+
+REMINDER: ALL OUTPUT INLINE. NO FILE WRITES. Streaming the markdown as your final answer.

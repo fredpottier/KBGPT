@@ -1,0 +1,56 @@
+You are a senior staff engineer reviewing a critical Architecture Decision Record for production. The team has built a POC of a "Reading Agent" (a single LLM iteratively calling reading tools over a Document Structure Graph) that scores 0.737/0.779 on two independent corpora vs 0.333 for the previous RAG-based pipeline and 0.858 for a proprietary enterprise RAG+KG reference (EKX/SAP).
+
+Read the ADR at `doc/ongoing/ADR_RUNTIME_V5_READING_AGENT_INDUSTRIALIZATION.md` carefully.
+
+YOUR MISSION — challenge this ADR like you would in a tough internal review at a top-tier AI/infra org. Be specific, cite line numbers / section IDs (3a, 3b, etc.) when you raise an issue, and suggest concrete amendments.
+
+Cover these 5 axes explicitly:
+
+1. **Architecture (section 3a, 3b, 3c, 3h)** — does the 8-component split scale under load? Bottlenecks? Single points of failure? Cold-start issues? Multi-tenant correctness in Neo4j schema (3b)? Concurrent ingestion (3c)? Stateless API contract (3h)? Endpoint design — anything missing (streaming? cancellation? partial responses)?
+
+2. **Reading tools (section 3d)** — are the 4 new tools (`navigate_by_toc`, `summarize_subtree`, `find_quantitative`, `get_table`) sufficient to close the quantitative gap (POC scored 0.57 vs EKX 0.83)? What's missing? Risks of "tool zoo" mentioned in §7 — does the design actually prevent it? Tool schema choices (strict JSON, namespacing) sound but execution gaps?
+
+3. **Verifier (section 3f)** — is HHEM-2.1-Open (184M) + Patronus Lynx-8B fallback the state-of-the-art for grounding verification in 2026? Alternatives? Threshold-by-shape — is it actually sound or hand-wavy? Re-run conditional — risk of infinite loop or coverage gaps?
+
+4. **Observability (section 3g)** — is OpenTelemetry GenAI v1.37 + Phoenix Arize the right combo? Cost / cardinality issues at 1000 req/h × 50 tenants? Critical metrics missing? Should anything else be tracked (tool selection accuracy, citation faithfulness rate at production time)?
+
+5. **Risks not seen** — what risks did the authors miss? Look at the full ADR risk matrix (§7) and identify gaps. Particularly focus on:
+   - Failure modes the design has no answer for
+   - Security risks (prompt injection via documents, exfiltration through tool calls)
+   - Cost runaway scenarios beyond the 150k/q cap
+   - Migration risks from V4.2 to V5.1 (data loss, downtime, regression on questions V4.2 was good at)
+   - Vendor risk on DeepSeek-V3.1 specifically (geopolitical, deprecation, model drift)
+   - The "domain-agnostic" claim — is it really enforced or just wishful?
+
+DELIVERABLE (markdown, French OK or English, ~1500-2500 words):
+
+## 1. Executive verdict
+- Maturity score: X / 10
+- Top 3 strengths
+- Top 5 weaknesses (ranked by severity)
+- Go / no-go recommendation: proceed as-is | proceed with mandatory amendments | rework
+
+## 2. Architecture review (per-section findings)
+[for each section 3a-3h, what's solid, what's weak, suggested amendment]
+
+## 3. Reading tools review
+[gap closure analysis, missing tools, tool zoo risk assessment]
+
+## 4. Verifier review
+[SOTA assessment, threshold soundness, alternatives if any]
+
+## 5. Observability review
+[OTel/Phoenix fitness, missing metrics, scaling concerns]
+
+## 6. Risks not seen (10+ items)
+[your discoveries — be exhaustive]
+
+## 7. Concrete amendments to integrate
+[5-10 specific changes to make to the ADR — in priority order, each with rationale]
+
+## 8. State-of-the-art alternatives the ADR may have missed
+[anything you know about agentic RAG / document reading in 2025-2026 that the authors don't seem aware of]
+
+Be brutal but constructive. The team genuinely wants to ship production-grade code, and a soft review now means painful rework in 3 months. If you think an architectural choice is wrong, say so plainly. If you think they nailed it, say that too.
+
+Write the review to `doc/ongoing/CODEX_REVIEW_ADR_V5.md` when done.
