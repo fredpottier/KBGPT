@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 # === Clés Redis pour l'état du burst (partagé entre tous les processus) ===
 REDIS_BURST_STATE_KEY = "osmose:burst:state"
+REDIS_BURST_LIVE_KEY = "osmose:burst:state:live"  # Cockpit live state (TTL 1h)
 
 # === Fichier persistant sur le volume /data (survit aux rebuilds + évictions Redis) ===
 BURST_STATE_FILE = os.path.join(os.getenv("KNOWBASE_DATA_DIR", "/data"), ".burst_state.json")
@@ -123,7 +124,11 @@ def clear_burst_state_in_redis() -> bool:
 
     try:
         redis.client.delete(REDIS_BURST_STATE_KEY)
-        logger.info("[BURST:REDIS] State cleared (burst deactivated)")
+        # Supprimer aussi le live state du cockpit (TTL 1h sinon — laisserait des
+        # données zombies pendant 1h après teardown, faisant apparaître une instance
+        # active inexistante dans le frontend /admin/gpu)
+        redis.client.delete(REDIS_BURST_LIVE_KEY)
+        logger.info("[BURST:REDIS] State + live state cleared (burst deactivated)")
         return True
     except Exception as e:
         logger.error(f"[BURST:REDIS] Failed to clear state: {e}")
