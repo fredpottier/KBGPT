@@ -1,9 +1,23 @@
 """
 OSMOSE Agentique - Phase 1.5 Integration
 
-Remplace SemanticPipelineV2 par Architecture Agentique (6 agents).
+⚠️  DEPRECATED — voie d'ingestion désactivée (19/05/2026) ⚠️
+─────────────────────────────────────────────────────────────────────────────
+Ce module est la voie « Stratified V2 » qui est SKIPPÉE par défaut depuis
+`INGESTION_SKIP_STRATIFIED_V2=true` dans la config worker. Tous les imports
+de documents passent désormais directement par la voie ClaimFirst
+(`src/knowbase/claimfirst/orchestrator.py` + `claim_persister.py`).
 
-Architecture:
+Le branchement Phase A1.3 (DocumentValidFromExtractor) a été déplacé vers
+ClaimPersister — ne PAS rajouter de logique métier ici, elle ne s'exécutera
+pas en production.
+
+À supprimer lors du grand cleanup projet (non prioritaire). En attendant,
+le code est conservé pour référence historique (Stratified V2 contient encore
+de la logique de persistance hybrid-anchor utile pour l'archéo).
+─────────────────────────────────────────────────────────────────────────────
+
+Architecture historique :
     Document → OsmoseAgentique → SupervisorAgent (FSM) → Proto-KG
                                       ↓
                      ExtractorOrchestrator → PatternMiner

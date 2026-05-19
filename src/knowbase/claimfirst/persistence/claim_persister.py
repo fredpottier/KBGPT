@@ -18,6 +18,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from knowbase.claimfirst.models.claim import Claim
@@ -35,6 +38,26 @@ from knowbase.claimfirst.models.entity import EntityType
 logger = logging.getLogger(__name__)
 
 
+# Phase A1.3 — répertoires où chercher le PDF original pour DocumentValidFromExtractor.
+# Ordre : docs_done (cas standard post-extraction V2) puis docs_in (cas re-process).
+_PDF_SEARCH_DIRS = ("/data/docs_done", "/data/docs_in")
+
+
+def _resolve_pdf_path_from_doc_id(doc_id: str) -> Optional[Path]:
+    """Reconstruit le chemin PDF d'origine à partir d'un doc_id.
+
+    Format doc_id : `<filename_sans_ext>_<8_hex_chars>`.
+    Tente d'abord l'extension .pdf (DocumentValidFromExtractor n'accepte que les PDFs).
+    Retourne None si fichier introuvable.
+    """
+    base_name = re.sub(r"_[0-9a-f]{8,12}$", "", doc_id)
+    for directory in _PDF_SEARCH_DIRS:
+        candidate = Path(directory) / f"{base_name}.pdf"
+        if candidate.exists():
+            return candidate
+    return None
+
+
 class ClaimPersister:
     """
     Persiste les résultats du pipeline Claim-First dans Neo4j.
@@ -42,16 +65,30 @@ class ClaimPersister:
     Utilise MERGE pour garantir l'idempotence.
     """
 
-    def __init__(self, driver, tenant_id: str = "default"):
+    def __init__(
+        self,
+        driver,
+        tenant_id: str = "default",
+        document_valid_from_extractor: Optional[Any] = None,
+    ):
         """
         Initialise le persister.
 
         Args:
             driver: Neo4j driver
             tenant_id: Tenant ID par défaut
+            document_valid_from_extractor: instance DocumentValidFromExtractor (Phase A1.3).
+                Si fournie, _persist_document_context extrait la date de publication du PDF
+                et l'écrit sur DocumentContext + propage `valid_from` aux Claims. Sinon les
+                claims n'auront pas les 4 timestamps bitemporels (mode legacy).
         """
         self.driver = driver
         self.tenant_id = tenant_id
+        self.document_valid_from_extractor = document_valid_from_extractor
+
+        # Phase A1.3 — cache doc_id → valid_from_iso (utilisé par _persist_claims_batch
+        # pour hériter le valid_from du document sur chaque claim).
+        self._doc_valid_from_by_id: Dict[str, Optional[str]] = {}
 
         self.stats = {
             "passages_created": 0,
@@ -319,6 +356,44 @@ class ClaimPersister:
             "extraction_method": context.extraction_method,
             "created_at": context.created_at.isoformat(),
         }
+
+        # Phase A1.3 — Extraction document_valid_from via cascade S2/S3/S1/S4 si extractor disponible.
+        # Le résultat (date + marker + source) enrichit DocumentContext et est caché pour propagation
+        # aux Claims dans _persist_claims_batch (héritage doc→claim).
+        valid_from_iso: Optional[str] = None
+        if self.document_valid_from_extractor is not None:
+            pdf_path = _resolve_pdf_path_from_doc_id(doc_id)
+            if pdf_path is None:
+                logger.info(
+                    f"[ClaimPersister:A1.3] PDF introuvable pour doc_id={doc_id} "
+                    f"(cherché dans {', '.join(_PDF_SEARCH_DIRS)}) — valid_from=null sur DocumentContext"
+                )
+                props["valid_from_marker"] = "ingestion_fallback"
+                props["valid_from_warning"] = "pdf_not_found_at_persist_time"
+            else:
+                try:
+                    vf_result = self.document_valid_from_extractor.extract(pdf_path)
+                    valid_from_iso = vf_result.value
+                    props["valid_from"] = vf_result.value  # None acceptable
+                    props["valid_from_marker"] = vf_result.marker_type.value
+                    props["valid_from_source"] = vf_result.source
+                    if vf_result.warning:
+                        props["valid_from_warning"] = vf_result.warning
+                    logger.info(
+                        f"[ClaimPersister:A1.3] doc={pdf_path.name}: "
+                        f"valid_from={vf_result.value or 'None'} "
+                        f"marker={vf_result.marker_type.value} "
+                        f"source={vf_result.source or 'fallback'}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[ClaimPersister:A1.3] Extraction failed for {pdf_path.name}: {e}"
+                    )
+                    props["valid_from_marker"] = "ingestion_fallback"
+                    props["valid_from_warning"] = f"extractor_error: {type(e).__name__}"
+
+        # Cache le valid_from (ou None) pour le batch claims du même doc
+        self._doc_valid_from_by_id[context.doc_id] = valid_from_iso
 
         # Créer/mettre à jour le DocumentContext
         query = """
@@ -945,9 +1020,27 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
         """Persiste les Claims en batch via UNWIND (avec passage props si applicable)."""
         if not claims:
             return
+
+        # Phase A1.3 — 4 timestamps bitemporels par claim (ADR_BITEMPOREL_CLAIMS.md §2) :
+        #   - valid_from        : hérité du DocumentContext (résolu juste avant via extractor)
+        #   - valid_until        : null à la création (sera mis à jour par invalidation chaîne A2)
+        #   - ingested_at        : moment d'écriture en KG (timestamp système)
+        #   - invalidated_at     : null à la création (sera mis à jour par invalidation A2)
+        # `valid_from` peut être None si l'extractor n'a rien trouvé — ce n'est pas une erreur,
+        # ça signale au runtime que la date doit être traitée comme inconnue (fallback ingested_at).
+        ingested_at_iso = datetime.now(timezone.utc).isoformat()
+
         batch = []
         for claim in claims:
             props = claim.to_neo4j_properties()
+
+            # Héritage valid_from depuis le DocumentContext (cache rempli juste avant)
+            inherited_valid_from = self._doc_valid_from_by_id.get(claim.doc_id)
+            props["valid_from"] = inherited_valid_from
+            props["valid_until"] = None
+            props["ingested_at"] = ingested_at_iso
+            props["invalidated_at"] = None
+
             if skip_passage_persist:
                 p_id = claim_passage_map.get(claim.claim_id)
                 passage = passage_index.get(p_id) if p_id else None

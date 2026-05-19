@@ -185,9 +185,30 @@ class ClaimFirstOrchestrator:
             predicate_normalization_map=self._effective_predicate_norm_map,
         )
 
+        # Phase A1.3 — Extractor `document_valid_from` (cascade S2/S3/S1/S4).
+        # Singleton léger : un seul instance par orchestrator (réutilisé entre docs d'un batch).
+        # En cas d'erreur d'import (ex: pypdf manquant), on désactive proprement plutôt
+        # que de bloquer toute la pipeline — les DocumentContext seront simplement créés
+        # sans `valid_from` (marker=ingestion_fallback).
+        self.document_valid_from_extractor: Optional[Any] = None
+        try:
+            from knowbase.ingestion.document_valid_from_extractor import (
+                DocumentValidFromExtractor,
+            )
+            self.document_valid_from_extractor = DocumentValidFromExtractor()
+        except Exception as _exc:
+            logger.warning(
+                f"[ClaimFirstOrchestrator] DocumentValidFromExtractor unavailable: {_exc} — "
+                "claims persistés sans `valid_from` document-inherited."
+            )
+
         # Persistance
         if neo4j_driver:
-            self.persister = ClaimPersister(neo4j_driver, tenant_id)
+            self.persister = ClaimPersister(
+                neo4j_driver,
+                tenant_id,
+                document_valid_from_extractor=self.document_valid_from_extractor,
+            )
         else:
             self.persister = None
 
