@@ -200,12 +200,53 @@ Deux étapes du pipeline 9-phases (cf VISION.md §4.3) sont impactées :
 
 Ajouter à la détection de profil documentaire l'extraction de :
 - **`document_valid_from`** : date d'effet ou de publication du document, si présente
-  - Sources prioritaires : metadata PDF (`/CreationDate`, `/ModDate`), première page (date publication), nom de fichier (`*_2023*`, `*_v2.1*`)
-  - Si introuvable : `valid_from` du document = `ingested_at`
 - **`document_version`** : version explicite (string libre)
 - **`document_source_authority`** : hiérarchie de fiabilité (officielle, draft, archive...)
 
 Ces 3 champs sont posés sur le nœud `:Document` créé à l'ingestion. Ils alimenteront `:Claim.valid_from` par défaut (héritage du document) lors de l'étape 9.
+
+**Cascade extraction `document_valid_from` (révisée post-spike A1.0 — 2026-05-19)** :
+
+Le spike A1.0 (cf `doc/ongoing/sessions/A1.0_SPIKE_DOCUMENT_VALID_FROM.md`) a invalidé la stratégie naïve "metadata PDF d'abord" : sur le corpus SAP, 9/15 PDFs ont une `/CreationDate` identique au jour (signal batch re-save local par l'utilisateur lors du téléchargement, **pas** la date de publication SAP réelle). La cascade est donc inversée pour privilégier le **contenu sémantique** plutôt que la metadata système.
+
+```python
+def extract_document_valid_from(pdf_path) -> tuple[date | None, marker_type]:
+    """
+    Cascade post-spike A1.0 : contenu sémantique d'abord, metadata en dernier recours.
+    Retourne (date, marker_type) où marker_type ∈ {explicit, document_inherited, ingestion_fallback}.
+    """
+    # S2 — Texte page 1 proche d'un keyword sémantique (Published, Effective, etc.)
+    #      Le plus fiable car contenu *officiel* du document
+    if (d := extract_from_page1_keyword(pdf_path)):
+        return d, "explicit"
+
+    # S3 — Nom de fichier enrichi (year + month_year FR/EN + YYYYMMDD compact + version)
+    if (d := extract_from_filename_enriched(pdf_path)):
+        return d, "explicit"
+
+    # S1 — Metadata /CreationDate (avec WARNING si batch re-save détecté)
+    if (d := extract_from_metadata_with_batch_check(pdf_path)):
+        return d, "explicit"
+
+    # S4 — LLM Qwen2.5-14B AWQ (EC2 Burst déjà allumé pour ingestion ClaimFirst)
+    #      Prompt evidence-locked : extraire date publication depuis texte page 1
+    if (d := extract_from_llm_qwen_burst(pdf_path)):
+        return d, "explicit"
+
+    # Fallback ultime — pas de signal trouvé, on hérite ingested_at avec marker explicite
+    return None, "ingestion_fallback"
+```
+
+**Détection batch re-save** : pre-pass d'audit du corpus avant ingestion. Si ≥3 PDFs partagent la même `/CreationDate` au jour près, S1 est **disqualifié** pour ce batch (forcer escalade S2→S3→S4 directe).
+
+**Choix S4 LLM : Qwen2.5-14B AWQ sur EC2 Burst** (motifs §6.1.1) :
+- Déjà utilisé par ClaimFirst Phase 2 (extraction claims) sur ce corpus → battle-tested
+- AWQ quantization perte <1pp sur extraction simple (litérature publique)
+- Zéro coût marginal : instance déjà allumée pour ingestion
+- Fallback gracieux si EC2 indisponible : passer à S1+warning (ne pas bloquer ingestion)
+- Reste evidence-locked (AX-3) : prompt extrait ce qui est écrit page 1, n'infère pas
+
+**`marker_type` (champ Phase A2)** : déjà prévu §2.2, sert à filtrer les claims dont `valid_from` est fiable (S2/S3/S4 = "explicit") vs incertain (fallback = "ingestion_fallback") lors de la classification claim-vs-claim (`EVOLUTION_OF` / `CONTRADICTS`).
 
 #### Étape 9 — Persistance (extension)
 
@@ -382,11 +423,25 @@ Ce pattern sera codifié dans le DEV_GUIDE (à créer en Phase A1.3) et **enforc
 | #319 | PHASE A1.1 — Rédiger cet ADR | 0.5j | ✅ completed |
 | #320 | PHASE A1.2 — Migration schéma Neo4j (`migrations/v6_bitemporal_claims.cypher`) + tests idempotence | 1j | pending (blocked by #319) |
 | **#A1.0** | **PHASE A1.0 spike (post-review Claude Web)** — tester extraction `document_valid_from` sur 20 PDFs SAP représentatifs, mesurer taux succès, valider stratégie regex+LLM. **Bloquant A1.3 si taux <80%**, déclenche revue stratégie | **0.5j** | **pending (blocked by #320)** |
-| #321 | PHASE A1.3 — Pipeline ingestion : extraction `document_valid_from` + peuplement claim timestamps | 1.5-2j (révisable selon A1.0) | pending (blocked by A1.0) |
+| #321 | PHASE A1.3 — Pipeline ingestion : extraction `document_valid_from` (cascade S2>S3>S1>S4 LLM Qwen2.5-14B AWQ) + peuplement claim timestamps + détection batch re-save | **2.5-3j** (révisé post-spike A1.0 : +1j pour cascade enrichie + S4 LLM + batch detection) | pending |
 | #322 | PHASE A1.4 — Tests Gate-B (5 tests dont perf p95) — validation 100% claims OK + p95 < 500ms | 0.5j | pending (blocked by #321) |
-| **Total Phase A1** | | **~4.5-5.5j** (+0.5j spike) | |
+| **Total Phase A1** | | **~5-6j** (révisé post-spike A1.0) | |
 
-Conforme à l'estimation EXECUTION_ROADMAP §2 Phase A1 (1 semaine).
+Légèrement au-dessus de l'estimation initiale EXECUTION_ROADMAP §2 Phase A1 (1 semaine). À noter : le surcoût A1.3 (+1j) est compensé par la valeur du spike A1.0 (a évité un rework potentiel de plusieurs jours en Phase A2).
+
+### 6.1.1 Choix S4 LLM — Qwen2.5-14B AWQ sur EC2 Burst (validé 2026-05-19)
+
+Le S4 du cascade A1.3 nécessite un LLM pour extraire la date depuis page 1 quand S2/S3/S1 ont échoué. Bake-off implicite documenté ci-dessous :
+
+| Modèle | Aptitude S4 | Coût marginal ingestion | Motif rejet/sélection |
+|---|---|---|---|
+| **Qwen2.5-14B AWQ EC2 Burst** | ✅ Battle-tested ClaimFirst Phase 2 sur ce corpus | **$0** (instance déjà allumée) | **Sélectionné** — cohérence opérationnelle |
+| Qwen2.5-14B Together AI serverless | ✅ | $0.20/M tokens | Rejeté : duplique le modèle, ajoute provider |
+| Mistral-Small-3.2-24B DeepInfra | ✅ Bon ratio | $0.10/$0.30 | Alternative valable, mais ajoute un LLM externe |
+| DeepSeek-V3.1 (runtime V5.1) | ⚠️ Surdimensionné | $0.40/$0.40 | Rejeté : overkill pour extraction simple |
+| Llama-3.3-70B-Turbo | ❌ Levier 4 piège (129/132 abstentions sur structuré) | $0.88/$0.88 | Rejeté formellement |
+
+**Précaution opérationnelle** : si EC2 Burst indisponible au moment de l'ingestion (vLLM down), S4 est **skip** gracieusement et la cascade retombe sur S1+warning. Pas de fallback sur LLM externe pour garder le principe "1 LLM = 1 lifecycle = 1 monitoring".
 
 ### 6.2 Critères de réussite Phase A1 (Gate-B)
 
