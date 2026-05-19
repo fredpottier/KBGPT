@@ -134,7 +134,8 @@ def _normalize_match(pattern_type: str, groups: tuple[str, ...]) -> Optional[str
                 return None
             return f"{y}-{m:02d}-01"
         if pattern_type == "slash":
-            # Hypothèse EU : DD/MM/YYYY (corpus SAP majoritairement FR + EN-UK)
+            # Hypothèse européenne : DD/MM/YYYY (ambiguïté avec MM/DD/YYYY US assumée
+            # côté EU — domain-agnostic, à override via Domain Pack si corpus US dominant).
             d, m, y = groups
             datetime(int(y), int(m), int(d))
             return f"{y}-{int(m):02d}-{int(d):02d}"
@@ -359,8 +360,9 @@ CRITICAL — evidence-locked extraction:
 - Provide an evidence_quote that appears VERBATIM in the input text (case-insensitive
   but otherwise character-exact within the chosen span)
 - If no date is visible at all on the page, return value=null
-- Do NOT capture copyright years from boilerplate ("© 2010-2024 SAP SE") unless that
-  is the only temporal anchor on the page
+- Do NOT capture copyright year ranges from boilerplate footers (e.g. "© year-year
+  [organization]") — they reflect the lifetime of the document family, not a single
+  document's date. Only fall back to them if no other temporal anchor exists.
 - Do NOT capture random dates from data tables, examples, or unrelated mentions
 
 NORMALIZATION (the system normalizes your output to ISO YYYY-MM-DD):
