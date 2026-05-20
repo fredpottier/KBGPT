@@ -513,16 +513,25 @@ def extract_s4_llm(pdf_path: Path, config: S4LLMConfig) -> dict[str, Any]:
 
 
 class DocumentValidFromExtractor:
-    """Cascade S2 > S3 > S1 (avec batch-check) > S4 LLM > Fallback.
+    """Cascade par défaut : S2 → S3 → S4 LLM → Fallback NULL.
+
+    S1 (PDF /CreationDate metadata) est désactivé par défaut depuis 2026-05-19
+    (cf module docstring). Si opt-in via `enable_s1_metadata=True`, S1 est
+    positionné en *last resort* (après S4) et marque toujours
+    `warning="s1_low_reliability_metadata"` sur le résultat.
+
+    Le fallback final retourne `value=None` (marker=ingestion_fallback) plutôt
+    qu'une date arbitraire — voir ADR_BITEMPOREL_CLAIMS.md §9.3.
 
     Usage :
 
         extractor = DocumentValidFromExtractor()
 
-        # Mode single doc (S1 batch-check désactivé)
+        # Mode single doc (S1 désactivé même si enable_s1_metadata=True car batch_check off)
         result = extractor.extract(pdf_path)
 
-        # Mode batch (S1 batch-check activé sur le dossier)
+        # Mode batch (batch_check S1 utile UNIQUEMENT si enable_s1_metadata=True)
+        extractor = DocumentValidFromExtractor(enable_s1_metadata=True)
         extractor.precompute_batch_re_save([pdf1, pdf2, ...])
         for p in pdfs:
             result = extractor.extract(p)

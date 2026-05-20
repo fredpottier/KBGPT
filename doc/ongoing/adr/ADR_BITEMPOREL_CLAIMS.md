@@ -64,7 +64,7 @@ C'est le modèle prescrit par VISION.md §3.2.
 
 | Timestamp | Type Neo4j | Nullable | Sémantique opérationnelle |
 |---|---|---|---|
-| `valid_from` | `DateTime` | **Non** (default = `document.valid_from` ou `ingested_at` en dernier recours) | Date à partir de laquelle le claim est vrai dans le monde réel. Cascade : (1) extraction explicite dans le claim, (2) héritage `document.valid_from`, (3) fallback `ingested_at`. **Ambiguïté connue** : un claim avec `valid_from = ingested_at` peut résulter de "fallback faute de signal" OU "extraction réussie qui tombe sur la date d'ingestion". Cette distinction sera tracée par le champ **`marker_type`** ajouté en Phase A2 (`explicit | document_inherited | ingestion_fallback`), qui permettra à la classification claim-vs-claim (`EVOLUTION_OF` / `CONTRADICTS`) de filtrer les claims dont `valid_from` est non-fiable. Pas de pollution A1.1 : on accepte l'ambiguïté ici, marqueur A2 corrigera |
+| `valid_from` | `DateTime` | **Oui** (NULL = "date inconnue, à traiter comme toujours valide jusqu'à preuve du contraire", cf §9.1) | Date à partir de laquelle le claim est vrai dans le monde réel. Cascade : (1) extraction explicite dans le claim, (2) héritage `document.valid_from` (qui peut lui-même être NULL si aucune source fiable détectée — voir §9.2), (3) NULL final accepté. **NULL est intentionnel et préférable à une valeur fausse** (cf principe §9.3). Le champ **`valid_from_marker`** (sur DocumentContext aujourd'hui ; à propager au Claim en pré-A2 cf §9.6) trace l'origine du `valid_from` (`explicit | document_inherited | ingestion_fallback`) et permet à la classification claim-vs-claim (`EVOLUTION_OF` / `CONTRADICTS`) de distinguer les claims fiables des claims sans signal |
 | `valid_until` | `DateTime` | **Oui** | Date après laquelle le claim n'est plus vrai. `NULL` = encore actif dans le monde réel. Renseigné explicitement (marqueur textuel "expires", "until", "until vX.Y") OU implicitement (claim contradictoire dans doc plus récent → Phase A2) |
 | `ingested_at` | `DateTime` | **Non** | Timestamp système au moment de la persistance Neo4j. Sert d'audit trail. Déjà partiellement présent dans le pipeline actuel (champ existant à compléter pour systématisation) |
 | `invalidated_at` | `DateTime` | **Oui** | Timestamp système au moment où ce claim a été invalidé (suite à contradiction, supersession, retrait du corpus). `NULL` = claim actif dans le KG. **Jamais de suppression** : on invalide, on ne supprime pas (AX-1 préserve la preuve) |
@@ -205,14 +205,17 @@ Ajouter à la détection de profil documentaire l'extraction de :
 
 Ces 3 champs sont posés sur le nœud `:Document` créé à l'ingestion. Ils alimenteront `:Claim.valid_from` par défaut (héritage du document) lors de l'étape 9.
 
-**Cascade extraction `document_valid_from` (révisée post-spike A1.0 — 2026-05-19)** :
+**Cascade extraction `document_valid_from` (en vigueur depuis 2026-05-19 soir — cf §9.2)** :
 
-Le spike A1.0 (cf `doc/ongoing/sessions/A1.0_SPIKE_DOCUMENT_VALID_FROM.md`) a invalidé la stratégie naïve "metadata PDF d'abord" : sur le corpus SAP, 9/15 PDFs ont une `/CreationDate` identique au jour (signal batch re-save local par l'utilisateur lors du téléchargement, **pas** la date de publication SAP réelle). La cascade est donc inversée pour privilégier le **contenu sémantique** plutôt que la metadata système.
+> ⚠️ **Cette cascade a été révisée le 2026-05-19 soir** suite au test live RISE Bootcamp Cloud ALM. La version originale post-spike A1.0 plaçait S1 en 3e position ; elle est superseded par la version ci-dessous qui désactive S1 par défaut. Voir §9.2 pour le raisonnement complet et §9.3 pour le principe transverse "NULL > valeur probablement fausse".
+
+Le spike A1.0 (cf `doc/ongoing/sessions/A1.0_SPIKE_DOCUMENT_VALID_FROM.md`) avait déjà montré que sur le corpus SAP, 9/15 PDFs ont une `/CreationDate` identique au jour (signal batch re-save local par l'utilisateur lors du téléchargement, **pas** la date de publication SAP réelle). Le test live a confirmé l'incompatibilité opérationnelle de S1 même hors batch (un seul PDF téléchargé a sa CreationDate réécrite par le portail). **S1 est donc désactivé par défaut** ; il reste opt-in (`enable_s1_metadata=True`) pour corpus maîtrisé où la CreationDate est fiable.
 
 ```python
 def extract_document_valid_from(pdf_path) -> tuple[date | None, marker_type]:
     """
-    Cascade post-spike A1.0 : contenu sémantique d'abord, metadata en dernier recours.
+    Cascade en vigueur depuis 2026-05-19 soir : contenu sémantique uniquement,
+    S1 metadata désactivé par défaut (opt-in last resort).
     Retourne (date, marker_type) où marker_type ∈ {explicit, document_inherited, ingestion_fallback}.
     """
     # S2 — Texte page 1 proche d'un keyword sémantique (Published, Effective, etc.)
@@ -224,20 +227,22 @@ def extract_document_valid_from(pdf_path) -> tuple[date | None, marker_type]:
     if (d := extract_from_filename_enriched(pdf_path)):
         return d, "explicit"
 
-    # S1 — Metadata /CreationDate (avec WARNING si batch re-save détecté)
-    if (d := extract_from_metadata_with_batch_check(pdf_path)):
+    # S4 — LLM evidence-locked sur texte page 1
+    #      Prompt strict : retourne None si pas de date explicite (cf §9.2)
+    if (d := extract_from_llm_evidence_locked(pdf_path)):
         return d, "explicit"
 
-    # S4 — LLM Qwen2.5-14B AWQ (EC2 Burst déjà allumé pour ingestion ClaimFirst)
-    #      Prompt evidence-locked : extraire date publication depuis texte page 1
-    if (d := extract_from_llm_qwen_burst(pdf_path)):
-        return d, "explicit"
+    # S1 — Metadata /CreationDate (DÉSACTIVÉ par défaut, opt-in via enable_s1_metadata=True)
+    #      Si opt-in et succès : ajoute warning="s1_low_reliability_metadata"
+    if S1_ENABLED_FOR_THIS_CORPUS and (d := extract_from_metadata_with_batch_check(pdf_path)):
+        return d, "explicit"  # warning trace la faible fiabilité
 
-    # Fallback ultime — pas de signal trouvé, on hérite ingested_at avec marker explicite
+    # Fallback ultime — pas de signal fiable. **valid_from = NULL est intentionnel** (§9.3).
+    # Une date fausse propage le biais ; NULL signale honnêtement "à traiter comme indéterminé".
     return None, "ingestion_fallback"
 ```
 
-**Détection batch re-save** : pre-pass d'audit du corpus avant ingestion. Si ≥3 PDFs partagent la même `/CreationDate` au jour près, S1 est **disqualifié** pour ce batch (forcer escalade S2→S3→S4 directe).
+**Détection batch re-save** (héritée du design initial, conservée pour opt-in S1) : pre-pass d'audit du corpus avant ingestion. Si ≥3 PDFs partagent la même `/CreationDate` au jour près, S1 est disqualifié pour ce batch — mais en pratique, S1 étant off par défaut, ce mécanisme n'est utile que sur les corpus opt-in.
 
 **Choix S4 LLM : Qwen2.5-14B AWQ sur EC2 Burst** (motifs §6.1.1) :
 - Déjà utilisé par ClaimFirst Phase 2 (extraction claims) sur ce corpus → battle-tested
@@ -253,23 +258,25 @@ def extract_document_valid_from(pdf_path) -> tuple[date | None, marker_type]:
 À la création d'un `:Claim` en Neo4j, peupler les 4 timestamps :
 
 ```python
-# Pseudo-code pipeline ClaimFirst Phase 9 (persistance)
+# Pseudo-code pipeline ClaimFirst Phase 9 (persistance) — révisé 2026-05-19 soir (§9.1)
 
-# Précondition forte : document.valid_from est garanti par l'étape 1 (Document Profile)
-# Si absent → bug pipeline, on lève une exception (assertion stricte)
-assert document.valid_from is not None, f"Document {doc_id} has no valid_from after Phase 1 (Document Profile bug)"
+# Précondition (assouplie) : `document.valid_from` PEUT être None si aucune source fiable n'a
+# été détectée par la cascade S2→S3→S4 (S1 désactivé par défaut, cf §9.2). C'est intentionnel
+# et préférable à une date fausse (§9.3). L'assert strict pré-2026-05-19 a été retiré.
 
 claim_valid_from = (
     extracted_valid_from               # Si extrait du claim lui-même (rare, ex: "applicable from 2023-01-01")
-    or document.valid_from              # Héritage du document source (cf étape 1) — chemin nominal
+    or document.valid_from              # Héritage du document source (peut être None — c'est OK)
 )
+# claim_valid_from peut donc être None : c'est le signal "date inconnue, à traiter comme
+# toujours valide jusqu'à preuve du contraire" (§9.1). La supersession A2 gère ce cas
+# explicitement (cf §9.4 CAS 2, 3, 4).
 
-# Règle drift soft : un claim peut être valid_from > document.valid_from (cas légitime SAP :
-# "ce paramètre s'appliquera à partir du 01/01/2024" dans un doc publié en 2023).
-# En revanche, claim.valid_from < document.valid_from est suspect (claim "vrai avant la
-# publication du document source"). On log un warning sans bloquer (la donnée peut
-# être légitime ; un bench en Phase A2 décidera si on durcit en assert).
-if claim_valid_from < document.valid_from:
+# Règle drift soft (inchangée pour les claims AVEC date explicite) :
+# - claim.valid_from > document.valid_from : autorisé (entrée en vigueur future)
+# - claim.valid_from < document.valid_from : warning log (suspect mais pas bloquant)
+# - claim.valid_from is None OU document.valid_from is None : aucun drift à comparer
+if claim_valid_from is not None and document.valid_from is not None and claim_valid_from < document.valid_from:
     logger.warning(
         f"Drift temporel claim<document : claim_valid_from={claim_valid_from} "
         f"< document.valid_from={document.valid_from} (doc_id={doc_id}, claim_id={claim_id})"
@@ -277,10 +284,10 @@ if claim_valid_from < document.valid_from:
 
 claim_data = {
     # ... champs existants ...
-    "valid_from": claim_valid_from,
-    "valid_until": extracted_valid_until,  # Si explicite (ex: "expires 2025-12-31"), sinon NULL
-    "ingested_at": datetime.utcnow(),
-    "invalidated_at": None,                # Toujours NULL à la création (sera mis en Phase A2 lors de classification claim-vs-claim)
+    "valid_from": claim_valid_from,             # Peut être None (§9.1)
+    "valid_until": extracted_valid_until,       # Si explicite (ex: "expires 2025-12-31"), sinon NULL
+    "ingested_at": datetime.utcnow(),           # Toujours obligatoire — borne inférieure connue
+    "invalidated_at": None,                     # NULL à la création (rempli par Phase A2)
     # ... autres champs (subject_canonical, predicate, value, evidence_id, etc.) ...
 }
 ```
@@ -294,22 +301,21 @@ claim_data = {
 
 Tests d'intégration **obligatoires** avant de marquer Phase A1 comme complétée :
 
-1. **Test post-migration** : audit Cypher sur le KG SAP existant
+1. **Test post-migration** : audit Cypher sur le KG SAP existant — **révisé §9.8**, seul `ingested_at` est obligatoire (`valid_from = NULL` est légitime depuis §9.1).
    ```cypher
    MATCH (c:Claim)
    WHERE c.tenant_id = 'default'
-     AND (c.valid_from IS NULL OR c.ingested_at IS NULL)
-   RETURN count(c) AS missing_timestamps;
+     AND c.ingested_at IS NULL
+   RETURN count(c) AS missing_ingested_at;
    // Attendu : 0
    ```
 
-2. **Test post-ré-ingestion d'un doc de référence** : ingestion d'un PDF SAP (ex: Operations Guide), vérifier que tous les claims nouveaux ont les 4 timestamps :
+2. **Test post-ré-ingestion d'un doc de référence** : ingestion d'un PDF SAP (ex: Operations Guide), vérifier que tous les claims nouveaux ont au moins `ingested_at` (révisé §9.8 — `valid_from` peut être NULL légitimement quand S2/S3/S4 retournent NULL) :
    ```cypher
    MATCH (c:Claim {doc_id: <new_doc_id>})
-   WITH c, [c.valid_from, c.ingested_at] AS required, [c.valid_until, c.invalidated_at] AS optional
-   WHERE any(t IN required WHERE t IS NULL)
+   WHERE c.ingested_at IS NULL
    RETURN count(c) AS bad_claims;
-   // Attendu : 0
+   // Attendu : 0 (ingested_at est le seul timestamp obligatoire au peuplement)
    ```
 
 3. **Test queries point-in-time** : sur un **échantillon stratifié de 10 claims du corpus SAP** (2 par doc_type : Operations Guide / Security Guide / Admin Guide / Release Notes / Integration Guide), vérifier que les 3 queries types (cf §2.4) retournent des résultats cohérents. La stratification garantit qu'on ne benchmarke pas sur un seul type de doc.
@@ -347,7 +353,7 @@ Tests d'intégration **obligatoires** avant de marquer Phase A1 comme complété
 
 | Risque | Mitigation |
 |---|---|
-| `valid_from` mal extrait par LLM | Fallback à `ingested_at` ; `marker_type` à venir en Phase A2 trace si extraction explicite ou inférée (cf §2.2) |
+| `valid_from` mal extrait par LLM | **Révisé §9.8** : fallback est `NULL` (pas `ingested_at`), marker_type = `ingestion_fallback` trace l'origine. Une valeur fausse est strictement pire que NULL (cf §9.3). Le marker_type sera dénormalisé sur Claim avant impl A2 (cf §9.6). |
 | Queries point-in-time lentes sur gros corpus | Indexes composites sur `tenant_id` (cf §2.5) ; bench performance Gate-B test 5 avec seuil p95 < 500ms |
 | Migration bug perdant des claims existants | Migration idempotente + dump Neo4j avant migration + node `:MigrationLog` audit + plan rollback §6.4 |
 | Confusion sémantique `valid_from` vs `ingested_at` | ADR explicite (ce doc) + commentaires Cypher + tests qui exercent les 3 queries types §2.4 |
@@ -361,17 +367,23 @@ Toute query Cypher du runtime qui interroge les `:Claim` **doit** inclure le fil
 **Pattern à appliquer** :
 
 ```cypher
-// ✅ CORRECT — claims actifs uniquement (cas nominal)
+// ✅ CORRECT — claims actifs uniquement (cas nominal, révisé §9.8 pour NULL valid_from)
 MATCH (c:Claim)
 WHERE c.tenant_id = $tenant
-  AND c.invalidated_at IS NULL          // OBLIGATOIRE filtre actif
-  AND c.valid_from <= datetime()         // OBLIGATOIRE si on veut seulement le vrai aujourd'hui
+  AND c.invalidated_at IS NULL                                         // OBLIGATOIRE filtre actif
+  AND (c.valid_from IS NULL OR c.valid_from <= datetime())              // NULL accepté = "valide jusqu'à preuve du contraire" (§9.1)
   AND (c.valid_until IS NULL OR c.valid_until > datetime())
 RETURN c
 
 // ❌ INCORRECT — oubli filtre invalidated_at, retourne claims obsolètes
 MATCH (c:Claim)
 WHERE c.tenant_id = $tenant
+RETURN c
+
+// ❌ INCORRECT (post-§9.8) — exclut les claims avec valid_from=NULL alors qu'ils sont légitimes
+MATCH (c:Claim)
+WHERE c.tenant_id = $tenant
+  AND c.valid_from <= datetime()  // ⚠️ NULL ne match jamais → claims légitimes perdus
 RETURN c
 
 // ✅ AUDIT HISTORIQUE — opt-in explicite, claims invalidés inclus
@@ -695,19 +707,20 @@ Le DocumentContext porte actuellement `valid_from_marker` (`explicit | document_
 
 C'est exactement la bitemporalité utile en presales : *"qu'est-ce que je savais à telle date ?"* ≠ *"qu'est-ce qui est vrai aujourd'hui ?"*
 
-### 9.8 Impacts sur les sections existantes
+### 9.8 Impacts sur les sections existantes — ✅ TOUS APPLIQUÉS (commit suivant ad8ce3a)
 
-| Section | Impact | Action requise |
+| Section | Impact | Statut |
 |---|---|---|
-| §2.2 | Tableau OK mais ajouter : "`valid_from` peut être `NULL` si aucune source fiable détectée — c'est intentionnel, voir §9.1 pour la sémantique runtime." | Mineur, en suivi |
-| §3.2 | Cascade documentée (S2→S3→S1→S4) obsolète sur S1 | Cascade en vigueur depuis 2026-05-19 soir : **S2→S3→S4→fallback NULL** (voir §9.2) |
-| §3.3 Gate-B test 1 | "0 claim sans `valid_from`" → invalide | Réviser en "0 claim sans `ingested_at`". `valid_from` peut être NULL |
-| §4.4 | Pattern runtime peut maintenant rencontrer `valid_from = NULL` | Remplacer `AND c.valid_from <= datetime()` par `AND (c.valid_from IS NULL OR c.valid_from <= datetime())` |
-| Code `document_valid_from_extractor.py` | Docstring `class DocumentValidFromExtractor` ligne 516 mentionne encore "Cascade S2 > S3 > S1 (avec batch-check) > S4 LLM" | À corriger : "Cascade S2 → S3 → S4 → S1 (opt-in last resort) → Fallback NULL" |
-| §3.2 pseudo-code Phase 9 | `assert document.valid_from is not None` | À assouplir : `document.valid_from` peut être NULL, ne pas asserter. La cascade peut légitimement retourner NULL ; les claims hériteront NULL aussi. |
-| §4.3 ligne "valid_from mal extrait par LLM" | Mitigation "fallback à ingested_at" | À corriger : fallback est **NULL**, pas `ingested_at`. Le `marker_type` (`ingestion_fallback`) trace l'origine |
+| §2.2 | Tableau `valid_from` : marquer Nullable=Oui + référencer §9.1 | ✅ Appliqué |
+| §3.2 cascade | (S2→S3→S1→S4) obsolète sur S1, S1 désactivé par défaut | ✅ Appliqué — cascade documentée en vigueur : **S2→S3→S4→fallback NULL** (voir §9.2) |
+| §3.3 Gate-B test 1 | "0 claim sans `valid_from`" invalide | ✅ Appliqué — révisé en "0 claim sans `ingested_at`" |
+| §3.3 Gate-B test 2 | Cohérent avec NULL légitime | ✅ Appliqué — n'audite plus que `ingested_at` |
+| §4.4 pattern runtime | Doit accepter NULL `valid_from` | ✅ Appliqué — `AND (c.valid_from IS NULL OR c.valid_from <= datetime())` + contre-exemple ajouté |
+| Code `document_valid_from_extractor.py` | Docstring `class DocumentValidFromExtractor` obsolète | ✅ Appliqué — cascade par défaut documentée correctement |
+| §3.2 pseudo-code Phase 9 | `assert document.valid_from is not None` à assouplir | ✅ Appliqué — assert retiré, le pseudo-code accepte NULL et gère drift comparison NULL-safe |
+| §4.3 mitigation "valid_from mal extrait" | "fallback à ingested_at" est faux | ✅ Appliqué — fallback est NULL, marker_type=ingestion_fallback trace l'origine |
 
-Ces corrections seront appliquées en PR séparée pour ne pas mélanger avec ce nouvel addendum (qui est le **référentiel canonique** depuis 2026-05-20).
+**§9 est le référentiel canonique** depuis 2026-05-20. Les sections §1-§8 ont été mises à jour ponctuellement pour ne plus contredire §9, avec pointeurs explicites (`révisé §9.x`) en attendant un éventuel re-numérotage si l'ADR devient v2.
 
 ### 9.9 Validation
 
