@@ -522,3 +522,203 @@ Le dump pré-migration est conservé **minimum 30 jours** après validation Gate
 7. §6.4 — Plan de rollback explicite (procédure 7 étapes)
 
 *ADR rédigé le 2026-05-19 dans le cadre de la Phase A1 (refondation runtime KG-first). Amendé et validé le même jour post-review.*
+
+---
+
+## 9. Addendum (2026-05-20) — Supersession sous incertitude + S1 metadata désactivé
+
+> **Status** : ✅ Accepted (Fred 2026-05-19 soir — décisions tranchées post-validation A1.3)
+> **Scope** : amende §2.2, §3.2, §3.3, §4.4. Préfigure le squelette de la règle de supersession pour Phase A2.
+> **Déclencheur** : test live RISE Bootcamp Cloud ALM (2026-05-19 23:23 UTC) — DocumentValidFromExtractor a tranché S1 sur une `/CreationDate` = `2026-05-19` (= jour du download), produisant une fausse date de publication. Deux corrections en ont découlé : (1) S1 désactivé par défaut, (2) formalisation explicite du traitement de `valid_from = NULL` dans la chaîne d'invalidation A2.
+
+### 9.1 Sémantique de `valid_from = NULL` (clarification §2.2)
+
+`valid_from = NULL` n'est PAS une valeur sentinelle "ancien", "inexistant" ni "à filtrer". C'est un signal honnête :
+
+> **`valid_from = NULL` signifie : « date d'effet inconnue, à traiter comme toujours valide jusqu'à preuve du contraire »**
+
+Trois conséquences runtime :
+
+1. **Sur les queries point-in-time**, un claim `valid_from = NULL` non-invalidé doit remonter. Le filtre §2.4 devient :
+   ```cypher
+   AND (c.valid_from IS NULL OR c.valid_from <= datetime())
+   ```
+   (au lieu de `AND c.valid_from <= datetime()` qui exclurait les NULLs)
+
+2. **À l'ingestion**, NULL est **préférable** à une date inférée avec faible confiance. Une valeur fausse propage le biais dans toutes les opérations downstream (supersession, classification, filtres de fraîcheur). NULL ne propage rien.
+
+3. **À la supersession A2** (cf §9.4), l'algorithme distingue les 4 combinaisons NULL/non-NULL explicitement.
+
+### 9.2 S1 metadata désactivé par défaut (amende §3.2)
+
+La cascade par défaut devient **S2 → S3 → S4 → fallback NULL**. S1 reste dans le code mais **opt-in uniquement** via `enable_s1_metadata=True`.
+
+| Source | Fiabilité | Décision |
+|---|---|---|
+| **S2** — Page 1 keyword sémantique | ✅ Fiable (contenu officiel du document) | Conservée — priorité 1 |
+| **S3** — Filename enrichi | ✅ Fiable si présent | Conservée — priorité 2 |
+| **S4** — LLM evidence-locked page 1 | ✅ Fiable si signal explicite, retourne NULL sinon | Conservée — priorité 3 |
+| **S1** — Metadata `/CreationDate` PDF | ❌ **Volatile** (copie, re-save batch, re-pack portail) | **Désactivée par défaut** (opt-in last-resort si activée) |
+
+**Justification S1 désactivée** : un PDF téléchargé d'un portail (SAP, ECHA, Eur-Lex, etc.) voit sa `/CreationDate` réécrite au moment du téléchargement. Spike A1.0 : 9/15 PDFs SAP avec `/CreationDate` identique au jour (batch local). Mettre `valid_from = today` sur un doc publié en 2019 :
+- Fausse le filtre temporel (runtime exclut le doc pour les queries "avant aujourd'hui")
+- Fausse la supersession A2 (doc traité comme "tout récent" → invalide à tort les vrais récents)
+- Fausse la fraîcheur perçue (doc apparaît neuf à l'utilisateur)
+
+**Prompt S4 LLM renforcé** (cf code `document_valid_from_extractor.py:_S4_PROMPT_SYSTEM`) :
+- Distinction explicite "date du document" vs "dates mentionnées DANS le document" (EOL/EOM produits, échéances contractuelles, validity windows d'items décrits, événements narratifs, etc.)
+- Confirmation explicite : "Returning null is correct and expected — a false document date is far worse than no date at all."
+- Domain-agnostic (médical/légal/technique/SAP — même règle).
+
+**Opt-in S1** : pour un corpus maîtrisé où la `/CreationDate` est fiable (génération interne de PDFs sans portail intermédiaire), activer via `DocumentValidFromExtractor(enable_s1_metadata=True)`. Dans ce cas, S1 ne tranche qu'**après échec de S2/S3/S4**, et toujours avec un `warning = "s1_low_reliability_metadata"`.
+
+### 9.3 Principe transverse : NULL > valeur probablement fausse
+
+**Règle d'or pour tout extracteur cascade** : sur un champ qui influencera des décisions runtime (date, identifiant, statut, classification), préférer **systématiquement** `NULL` à une valeur extraite via un signal volatile ou avec confiance basse.
+
+Justification : une valeur fausse propage le biais (filtres, classification, supersession, fraîcheur). Un NULL signale honnêtement "à traiter comme indéterminé" et permet aux mécanismes downstream (supersession A2, abstention runtime) de gérer l'incertitude proprement.
+
+**Test mental** : *"si le pipeline downstream supposait que cette valeur est sûre, est-ce que ça ferait du dégât quand elle est fausse ?"* — si oui, NULL est plus sûr.
+
+Ce principe s'applique aussi aux futurs extracteurs (identifiants produits, statuts lifecycle, classifications domain).
+
+### 9.4 Règle de supersession Phase A2 sous incertitude
+
+Phase A2 implémentera la chaîne d'invalidation `Doc_B supersede Doc_A` quand une contradiction sémantique est mesurée entre des claims des deux docs. La règle bitemporelle qui décide quel claim remplace l'autre est :
+
+```
+Précondition : contradiction sémantique mesurée entre claim_A et claim_B
+             (NLI ou structured eval, méthode à définir dans ADR_RELATIONS_CLAIM_CLAIM)
+
+Décision basée sur les 4 timestamps :
+
+  CAS 1 — Les deux dates explicites
+    A.valid_from IS NOT NULL ET B.valid_from IS NOT NULL
+
+    → SI B.valid_from > A.valid_from  : B supersede A
+    → SI A.valid_from > B.valid_from  : A supersede B
+    → SI égales                       : pas de supersession (claims concurrents, marquer
+                                        `conflict_concurrent`)
+
+  CAS 2 — A inconnue, B explicite (cas test RISE Bootcamp, cf §9.7)
+    A.valid_from IS NULL ET B.valid_from IS NOT NULL
+
+    → SI B.valid_from > A.ingested_at : B supersede A
+       Justification : B affirme une date d'effet POSTÉRIEURE au dernier instant où on
+       a vu A dans le KG. Donc B est forcément postérieur à A dans le temps réel, même
+       si on ne connait pas la date réelle de A.
+    → SI B.valid_from ≤ A.ingested_at : ambigu, NE PAS superseder, marquer
+                                         `conflict_pending` (B pourrait dater d'avant
+                                         la connaissance de A — sans plus d'info,
+                                         on garde A)
+
+  CAS 3 — A explicite, B inconnue
+    A.valid_from IS NOT NULL ET B.valid_from IS NULL
+
+    → Ambigu : B peut être antérieur ou postérieur à A. NE PAS superseder.
+       Marquer `conflict_pending`. Un futur doc avec date explicite tranchera.
+
+  CAS 4 — Les deux inconnues
+    A.valid_from IS NULL ET B.valid_from IS NULL
+
+    → Ambigu : aucune date pour décider. NE PAS superseder. Marquer `conflict_pending`.
+       Tie-breaker `ingested_at` possible (B.ingested_at > A.ingested_at → B vu plus
+       récemment) mais NE PAS l'utiliser comme arbitrage par défaut : `ingested_at`
+       reflète l'ordre d'ingestion opérateur, pas l'ordre intellectuel.
+```
+
+### 9.5 Écriture de l'invalidation (CAS 1 ou 2)
+
+Quand A est superseded par B :
+
+```cypher
+MATCH (a:Claim {claim_id: $a_id}), (b:Claim {claim_id: $b_id})
+SET a.valid_until    = b.valid_from,       // borne de validité de A = date d'effet de B
+    a.invalidated_at = datetime()           // timestamp pipeline A2 qui détecte
+CREATE (b)-[:SUPERSEDES {detected_at: datetime(), reason: $contradiction_metric}]->(a)
+RETURN a, b
+```
+
+B reste actif (`valid_until = NULL`, `invalidated_at = NULL`).
+
+Pour CAS 3, CAS 4 et CAS 1 égalité : créer un node `:ConflictPending` reliant les deux claims, à formaliser dans `ADR_RELATIONS_CLAIM_CLAIM.md` :
+
+```cypher
+CREATE (cp:ConflictPending {
+   created_at: datetime(),
+   resolution_status: 'unresolved',
+   contradiction_metric: $score
+})
+CREATE (cp)-[:INVOLVES]->(a)
+CREATE (cp)-[:INVOLVES]->(b)
+```
+
+### 9.6 Impact schéma : propager `valid_from_marker` aux Claims
+
+Le DocumentContext porte actuellement `valid_from_marker` (`explicit | document_inherited | ingestion_fallback`) après PR `5c83879`. Les claims héritent du `valid_from` du DocumentContext mais **pas** du marker. Pour la classification A2 :
+
+| Option | Coût stockage | Coût query | Décision |
+|---|---|---|---|
+| **A** — Jointure runtime (`MATCH (c:Claim)-[:HAS_CONTEXT]->(dc:DocumentContext) RETURN dc.valid_from_marker`) | 0 | +1 traversée par comparaison claim-vs-claim | À écarter |
+| **B** — Dénormalisation sur Claim (`c.valid_from_marker`) | ~5 bytes × 15 861 = 80 KB | 0 (lecture directe) | **Sélectionné** |
+
+**Décision** : Option B (dénormalisation). Justification : la query A2 est très fréquente (chaque comparaison claim-vs-claim potentielle), la jointure ralentirait inutilement. Le coût stockage est négligeable.
+
+**Modification nécessaire** (à appliquer avant impl A2) :
+- `claim_persister._persist_document_context` : étendre le cache `_doc_valid_from_by_id` de `dict[doc_id, Optional[str]]` à `dict[doc_id, tuple[Optional[str], str]]` (valid_from + marker).
+- `claim_persister._persist_claims_batch` : ajouter `props["valid_from_marker"] = marker` à partir du cache.
+- Migration backfill : pour les claims existants déjà persistés, peupler `valid_from_marker` par jointure puis dénormalisation (script idempotent type §3.1).
+
+### 9.7 Cas pratique de référence (test live 2026-05-19)
+
+**Doc A — "RISE Bootcamp Cloud ALM"** (test du 2026-05-19, voie ClaimFirst) :
+- `valid_from = NULL`, `valid_from_marker = ingestion_fallback`, `ingested_at = 2026-05-19T21:23:27Z`
+- 11 claims hérités : tous `valid_from = NULL`, tous `ingested_at = 2026-05-19T21:23:27Z`
+- Claim hypothétique : "Module XYZ utilise architecture monolithique"
+
+**Doc B — "SAP S/4HANA Architecture Update"** (futur, ingéré en octobre 2026) :
+- Page 1 contient "Published: 12 October 2026"
+- `valid_from = 2026-10-12`, `valid_from_marker = explicit`, `ingested_at = 2026-10-15T...`
+- Claim : "Module XYZ utilise architecture microservices depuis octobre 2026"
+
+**Pipeline A2** détecte contradiction entre claim_A et claim_B → applique règle §9.4 :
+- A.valid_from = NULL, B.valid_from = 2026-10-12 → **CAS 2**
+- B.valid_from (2026-10-12) > A.ingested_at (2026-05-19) → CAS 2 satisfait
+- **B supersede A**
+- `A.valid_until = 2026-10-12`, `A.invalidated_at = 2026-10-15T...`
+- Création `(B)-[:SUPERSEDES]->(A)`
+
+**Au runtime** :
+- Query "Architecture du module XYZ le 2026-08-01" → A retourne (`valid_from IS NULL OR valid_from ≤ 2026-08-01` ✓, `valid_until = 2026-10-12 > 2026-08-01` ✓, `invalidated_at` ignoré en mode point-in-time as-of)
+- Query "Architecture du module XYZ aujourd'hui (2026-11-01)" → B retourne (filtre `invalidated_at IS NULL` exclut A)
+- Query as-of 2026-08-01 rétroactive après ingestion B → A retourne quand même (point-in-time historique fonctionne, cf §2.4)
+
+C'est exactement la bitemporalité utile en presales : *"qu'est-ce que je savais à telle date ?"* ≠ *"qu'est-ce qui est vrai aujourd'hui ?"*
+
+### 9.8 Impacts sur les sections existantes
+
+| Section | Impact | Action requise |
+|---|---|---|
+| §2.2 | Tableau OK mais ajouter : "`valid_from` peut être `NULL` si aucune source fiable détectée — c'est intentionnel, voir §9.1 pour la sémantique runtime." | Mineur, en suivi |
+| §3.2 | Cascade documentée (S2→S3→S1→S4) obsolète sur S1 | Cascade en vigueur depuis 2026-05-19 soir : **S2→S3→S4→fallback NULL** (voir §9.2) |
+| §3.3 Gate-B test 1 | "0 claim sans `valid_from`" → invalide | Réviser en "0 claim sans `ingested_at`". `valid_from` peut être NULL |
+| §4.4 | Pattern runtime peut maintenant rencontrer `valid_from = NULL` | Remplacer `AND c.valid_from <= datetime()` par `AND (c.valid_from IS NULL OR c.valid_from <= datetime())` |
+| Code `document_valid_from_extractor.py` | Docstring `class DocumentValidFromExtractor` ligne 516 mentionne encore "Cascade S2 > S3 > S1 (avec batch-check) > S4 LLM" | À corriger : "Cascade S2 → S3 → S4 → S1 (opt-in last resort) → Fallback NULL" |
+| §3.2 pseudo-code Phase 9 | `assert document.valid_from is not None` | À assouplir : `document.valid_from` peut être NULL, ne pas asserter. La cascade peut légitimement retourner NULL ; les claims hériteront NULL aussi. |
+| §4.3 ligne "valid_from mal extrait par LLM" | Mitigation "fallback à ingested_at" | À corriger : fallback est **NULL**, pas `ingested_at`. Le `marker_type` (`ingestion_fallback`) trace l'origine |
+
+Ces corrections seront appliquées en PR séparée pour ne pas mélanger avec ce nouvel addendum (qui est le **référentiel canonique** depuis 2026-05-20).
+
+### 9.9 Validation
+
+| Acteur | Date | Décisions |
+|---|---|---|
+| Fred (utilisateur produit) | 2026-05-19 soir | (1) S1 désactivé par défaut, (2) NULL > valeur probablement fausse, (3) règle supersession sous incertitude (CAS 1-4) |
+| Fred (utilisateur produit) | 2026-05-20 | ✅ Validation finale formalisation §9 |
+| Claude (assistant) | 2026-05-20 | Rédaction §9 sur la base des décisions tranchées |
+
+**Commits associés** :
+- `5c83879` — fix(phase-a1.3): désactiver S1 metadata par défaut + renforcer S4 prompt
+- `1c97041` — feat(phase-a1.3): brancher DocumentValidFromExtractor sur la voie ClaimFirst (test live qui a révélé le besoin du §9)
+
+*Addendum §9 rédigé le 2026-05-20 par Claude sur la base des décisions Fred du 2026-05-19 soir, validées en session après test live RISE Bootcamp Cloud ALM. Statut produit-ready, à exécuter en Phase A2 selon §9.4 (algorithme supersession) et §9.6 (modif schéma `valid_from_marker` sur Claim).*
