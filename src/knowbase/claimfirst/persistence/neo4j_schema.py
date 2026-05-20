@@ -271,6 +271,37 @@ class ClaimFirstSchema:
             index_type="FULLTEXT"
         ),
 
+        # ==== ADR_BITEMPOREL_CLAIMS §2.5 + §9.6 — Indexes bitemporels ====
+        # Critiques pour queries point-in-time runtime + classification A2 (supersession)
+
+        # Filtre "claims actifs" (cas nominal runtime) — index sparse efficient sur NULL
+        SchemaIndex(
+            name="claim_active",
+            label="Claim",
+            property_keys=["tenant_id", "invalidated_at"]
+        ),
+
+        # Queries point-in-time as-of (event time range)
+        SchemaIndex(
+            name="claim_event_time",
+            label="Claim",
+            property_keys=["tenant_id", "valid_from", "valid_until"]
+        ),
+
+        # Audit trail (transaction time)
+        SchemaIndex(
+            name="claim_ingested",
+            label="Claim",
+            property_keys=["tenant_id", "ingested_at"]
+        ),
+
+        # §9.6 — Filtre claims fiables vs ingestion_fallback en classification A2 (supersession)
+        SchemaIndex(
+            name="claim_valid_from_marker",
+            label="Claim",
+            property_keys=["tenant_id", "valid_from_marker"]
+        ),
+
         # Index fulltext sur entity.name pour recherche
         SchemaIndex(
             name="entity_name_search",
