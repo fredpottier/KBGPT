@@ -86,9 +86,12 @@ class ClaimPersister:
         self.tenant_id = tenant_id
         self.document_valid_from_extractor = document_valid_from_extractor
 
-        # Phase A1.3 — cache doc_id → valid_from_iso (utilisé par _persist_claims_batch
-        # pour hériter le valid_from du document sur chaque claim).
-        self._doc_valid_from_by_id: Dict[str, Optional[str]] = {}
+        # Phase A1.3 + §9.6 — cache doc_id → {"value", "marker", "source"} (utilisé par
+        # `_persist_claims_batch` pour propager `valid_from` + `valid_from_marker` + `valid_from_source`
+        # à chaque Claim. La dénormalisation marker/source sur Claim évite la jointure
+        # DocumentContext lors de la classification A2 (supersession claim-vs-claim).
+        # `value` peut être None (signal "date inconnue", cf §9.1).
+        self._doc_valid_from_by_id: Dict[str, Dict[str, Optional[str]]] = {}
 
         self.stats = {
             "passages_created": 0,
@@ -357,10 +360,15 @@ class ClaimPersister:
             "created_at": context.created_at.isoformat(),
         }
 
-        # Phase A1.3 — Extraction document_valid_from via cascade S2/S3/S1/S4 si extractor disponible.
-        # Le résultat (date + marker + source) enrichit DocumentContext et est caché pour propagation
-        # aux Claims dans _persist_claims_batch (héritage doc→claim).
-        valid_from_iso: Optional[str] = None
+        # Phase A1.3 + §9.6 — Extraction document_valid_from via cascade S2/S3/S4 si extractor disponible.
+        # Le résultat (value + marker + source) enrichit DocumentContext ET est caché pour propagation
+        # aux Claims dans `_persist_claims_batch` (dénormalisation §9.6 : marker/source sur Claim
+        # pour éviter la jointure DocumentContext en classification A2).
+        valid_from_payload: Dict[str, Optional[str]] = {
+            "value": None,
+            "marker": "ingestion_fallback",
+            "source": None,
+        }
         if self.document_valid_from_extractor is not None:
             pdf_path = _resolve_pdf_path_from_doc_id(doc_id)
             if pdf_path is None:
@@ -373,7 +381,9 @@ class ClaimPersister:
             else:
                 try:
                     vf_result = self.document_valid_from_extractor.extract(pdf_path)
-                    valid_from_iso = vf_result.value
+                    valid_from_payload["value"] = vf_result.value
+                    valid_from_payload["marker"] = vf_result.marker_type.value
+                    valid_from_payload["source"] = vf_result.source
                     props["valid_from"] = vf_result.value  # None acceptable
                     props["valid_from_marker"] = vf_result.marker_type.value
                     props["valid_from_source"] = vf_result.source
@@ -392,8 +402,8 @@ class ClaimPersister:
                     props["valid_from_marker"] = "ingestion_fallback"
                     props["valid_from_warning"] = f"extractor_error: {type(e).__name__}"
 
-        # Cache le valid_from (ou None) pour le batch claims du même doc
-        self._doc_valid_from_by_id[context.doc_id] = valid_from_iso
+        # Cache complet (value+marker+source) pour propagation aux claims (§9.6)
+        self._doc_valid_from_by_id[context.doc_id] = valid_from_payload
 
         # Créer/mettre à jour le DocumentContext
         query = """
@@ -1021,22 +1031,27 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
         if not claims:
             return
 
-        # Phase A1.3 — 4 timestamps bitemporels par claim (ADR_BITEMPOREL_CLAIMS.md §2) :
-        #   - valid_from        : hérité du DocumentContext (résolu juste avant via extractor)
-        #   - valid_until        : null à la création (sera mis à jour par invalidation chaîne A2)
-        #   - ingested_at        : moment d'écriture en KG (timestamp système)
-        #   - invalidated_at     : null à la création (sera mis à jour par invalidation A2)
-        # `valid_from` peut être None si l'extractor n'a rien trouvé — ce n'est pas une erreur,
-        # ça signale au runtime que la date doit être traitée comme inconnue (fallback ingested_at).
+        # Phase A1.3 — 4 timestamps bitemporels par claim (ADR §2 + addendum §9) :
+        #   - valid_from        : hérité du DocumentContext (résolu via extractor). Peut être None
+        #                          (signal "date inconnue, valide jusqu'à preuve du contraire", §9.1).
+        #   - valid_until        : null à la création (rempli par invalidation chaîne A2)
+        #   - ingested_at        : moment d'écriture en KG (timestamp système, obligatoire)
+        #   - invalidated_at     : null à la création (rempli par invalidation A2)
+        #
+        # §9.6 — Dénormalisation marker/source sur Claim pour éviter la jointure DocumentContext
+        # en classification claim-vs-claim Phase A2 (chaîne d'invalidation).
         ingested_at_iso = datetime.now(timezone.utc).isoformat()
+        fallback_payload = {"value": None, "marker": "ingestion_fallback", "source": None}
 
         batch = []
         for claim in claims:
             props = claim.to_neo4j_properties()
 
-            # Héritage valid_from depuis le DocumentContext (cache rempli juste avant)
-            inherited_valid_from = self._doc_valid_from_by_id.get(claim.doc_id)
-            props["valid_from"] = inherited_valid_from
+            # Héritage valid_from + marker + source depuis le DocumentContext (cache §9.6)
+            inherited = self._doc_valid_from_by_id.get(claim.doc_id, fallback_payload)
+            props["valid_from"] = inherited.get("value")
+            props["valid_from_marker"] = inherited.get("marker") or "ingestion_fallback"
+            props["valid_from_source"] = inherited.get("source")
             props["valid_until"] = None
             props["ingested_at"] = ingested_at_iso
             props["invalidated_at"] = None
