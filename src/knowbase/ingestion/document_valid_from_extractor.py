@@ -448,11 +448,37 @@ If `value` is non-null, `evidence_quote` MUST also be non-null and appear verbat
 in the input text."""
 
 
+def _resolve_burst_vllm_url() -> str:
+    """Résout l'URL vLLM via le burst state Redis (single source of truth).
+
+    Le pipeline ClaimFirst route tous ses calls LLM via `LLM_Router.GATE` qui lit
+    `osmose:burst:state.vllm_url`. S4 contourne le router (httpx direct → besoin
+    de l'URL résolue à l'init). On lit la même source pour rester cohérent : si
+    l'EC2 est respawn (nouvelle IP), il suffit de re-instancier S4LLMConfig.
+
+    Fallback `http://localhost:8000` (qui pointera vers le container app — KO en
+    pratique mais permet une init non-bloquante en mode dégradé).
+    """
+    try:
+        from knowbase.ingestion.burst.provider_switch import get_burst_state_from_redis
+        state = get_burst_state_from_redis()
+        if state and state.get("vllm_url"):
+            return state["vllm_url"]
+    except Exception as e:
+        logger.debug(f"[S4LLMConfig] Burst state unavailable, falling back to localhost: {e}")
+    return "http://localhost:8000"
+
+
 @dataclass
 class S4LLMConfig:
-    """Configuration appel LLM Qwen2.5-14B AWQ EC2 Burst."""
+    """Configuration appel LLM Qwen2.5-14B AWQ EC2 Burst.
 
-    vllm_url: str = "http://localhost:8000"
+    `vllm_url` est résolu par défaut depuis le burst state Redis pour pointer
+    automatiquement vers l'EC2 quand le burst mode est actif. À override manuellement
+    pour tester sur localhost ou un autre vLLM.
+    """
+
+    vllm_url: str = field(default_factory=_resolve_burst_vllm_url)
     model: str = "Qwen/Qwen2.5-14B-Instruct-AWQ"
     timeout_s: float = 30.0
     max_chars_input: int = 6000  # ~1500 tokens page 1
