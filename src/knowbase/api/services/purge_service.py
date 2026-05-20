@@ -586,53 +586,27 @@ class PurgeService:
             constraints_created = 0
             indexes_created = 0
 
-            # Schémas à créer
+            # Schémas à créer (révisé 2026-05-20 — cleanup labels morts)
+            # Audit du 2026-05-20 a identifié 9 labels morts en production (Stratified V2 SKIPPÉ
+            # + UI living_ontology/markers retirées du menu admin). Les definitions correspondantes
+            # ont été retirées de cette section. Code mort résiduel (modules `stratified/`,
+            # `consolidation/`, `osmose_persistence.py`, services pass2/proto_kg) à supprimer
+            # dans un chantier de cleanup ultérieur.
+            #
+            # Labels morts retirés (constraints + indexes) :
+            #   InformationMVP, ClaimKey, Contradiction  (MVP V1)
+            #   Subject, Theme, Concept, Information      (Pipeline V2 / Stratified V2)
+            #   CanonicalConcept, ProtoConcept            (Proto-KG OSMOSE V2)
+            # Plus la constraint `doc_context_id` (DocumentContext.document_id) — redondante
+            # avec `doc_context_unique` (DocumentContext.doc_id) créée par setup_claimfirst_schema.
             CONSTRAINTS = [
-                # MVP V1: InformationMVP
-                ("information_mvp_id", "CREATE CONSTRAINT information_mvp_id IF NOT EXISTS FOR (i:InformationMVP) REQUIRE i.information_id IS UNIQUE"),
-                # MVP V1: ClaimKey
-                ("claimkey_id", "CREATE CONSTRAINT claimkey_id IF NOT EXISTS FOR (ck:ClaimKey) REQUIRE ck.claimkey_id IS UNIQUE"),
-                # MVP V1: Contradiction
-                ("contradiction_id", "CREATE CONSTRAINT contradiction_id IF NOT EXISTS FOR (c:Contradiction) REQUIRE c.contradiction_id IS UNIQUE"),
-                # Pipeline V2: Document
+                # Document — shared entre voies (ClaimFirst utilise ce label)
                 ("document_id", "CREATE CONSTRAINT document_id IF NOT EXISTS FOR (d:Document) REQUIRE d.doc_id IS UNIQUE"),
-                # Pipeline V2: Subject
-                ("subject_id", "CREATE CONSTRAINT subject_id IF NOT EXISTS FOR (s:Subject) REQUIRE s.subject_id IS UNIQUE"),
-                # Pipeline V2: Theme
-                ("theme_id", "CREATE CONSTRAINT theme_id IF NOT EXISTS FOR (t:Theme) REQUIRE t.theme_id IS UNIQUE"),
-                # Pipeline V2: Concept
-                ("concept_id", "CREATE CONSTRAINT concept_id IF NOT EXISTS FOR (c:Concept) REQUIRE c.concept_id IS UNIQUE"),
-                # Pipeline V2: Information
-                ("info_id", "CREATE CONSTRAINT info_id IF NOT EXISTS FOR (i:Information) REQUIRE i.info_id IS UNIQUE"),
-                # Structural: DocumentContext
-                ("doc_context_id", "CREATE CONSTRAINT doc_context_id IF NOT EXISTS FOR (dc:DocumentContext) REQUIRE dc.document_id IS UNIQUE"),
-                # Structural: CanonicalConcept
-                ("canonical_concept_id", "CREATE CONSTRAINT canonical_concept_id IF NOT EXISTS FOR (cc:CanonicalConcept) REQUIRE cc.concept_id IS UNIQUE"),
-                # Structural: ProtoConcept
-                ("proto_concept_id", "CREATE CONSTRAINT proto_concept_id IF NOT EXISTS FOR (pc:ProtoConcept) REQUIRE pc.proto_id IS UNIQUE"),
             ]
 
             INDEXES = [
-                # MVP V1: InformationMVP indexes
-                ("information_mvp_tenant", "CREATE INDEX information_mvp_tenant IF NOT EXISTS FOR (i:InformationMVP) ON (i.tenant_id)"),
-                ("information_mvp_status", "CREATE INDEX information_mvp_status IF NOT EXISTS FOR (i:InformationMVP) ON (i.promotion_status)"),
-                ("information_mvp_fingerprint", "CREATE INDEX information_mvp_fingerprint IF NOT EXISTS FOR (i:InformationMVP) ON (i.fingerprint)"),
-                ("information_mvp_document", "CREATE INDEX information_mvp_document IF NOT EXISTS FOR (i:InformationMVP) ON (i.document_id)"),
-                # MVP V1: ClaimKey indexes
-                ("claimkey_tenant", "CREATE INDEX claimkey_tenant IF NOT EXISTS FOR (ck:ClaimKey) ON (ck.tenant_id)"),
-                ("claimkey_status", "CREATE INDEX claimkey_status IF NOT EXISTS FOR (ck:ClaimKey) ON (ck.status)"),
-                ("claimkey_key", "CREATE INDEX claimkey_key IF NOT EXISTS FOR (ck:ClaimKey) ON (ck.key)"),
-                ("claimkey_domain", "CREATE INDEX claimkey_domain IF NOT EXISTS FOR (ck:ClaimKey) ON (ck.domain)"),
-                # MVP V1: Contradiction indexes
-                ("contradiction_claimkey", "CREATE INDEX contradiction_claimkey IF NOT EXISTS FOR (c:Contradiction) ON (c.claimkey_id)"),
-                # Pipeline V2 indexes
+                # Document — index multi-tenant générique (utilisé par ClaimFirst)
                 ("document_tenant", "CREATE INDEX document_tenant IF NOT EXISTS FOR (d:Document) ON (d.tenant_id)"),
-                ("concept_tenant", "CREATE INDEX concept_tenant IF NOT EXISTS FOR (c:Concept) ON (c.tenant_id)"),
-                ("information_tenant", "CREATE INDEX information_tenant IF NOT EXISTS FOR (i:Information) ON (i.tenant_id)"),
-                # Structural indexes
-                ("canonical_concept_tenant", "CREATE INDEX canonical_concept_tenant IF NOT EXISTS FOR (cc:CanonicalConcept) ON (cc.tenant_id)"),
-                ("canonical_concept_type", "CREATE INDEX canonical_concept_type IF NOT EXISTS FOR (cc:CanonicalConcept) ON (cc.type)"),
-                ("proto_concept_tenant", "CREATE INDEX proto_concept_tenant IF NOT EXISTS FOR (pc:ProtoConcept) ON (pc.tenant_id)"),
             ]
 
             try:

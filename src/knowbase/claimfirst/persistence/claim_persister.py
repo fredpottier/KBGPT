@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 # Phase A1.3 — répertoires où chercher le PDF original pour DocumentValidFromExtractor.
 # Ordre : docs_done (cas standard post-extraction V2) puis docs_in (cas re-process).
 _PDF_SEARCH_DIRS = ("/data/docs_done", "/data/docs_in")
+_CACHE_DIR = Path("/data/extraction_cache")
 
 
 def _resolve_pdf_path_from_doc_id(doc_id: str) -> Optional[Path]:
@@ -56,6 +57,49 @@ def _resolve_pdf_path_from_doc_id(doc_id: str) -> Optional[Path]:
         if candidate.exists():
             return candidate
     return None
+
+
+# Index doc_id → cache_path construit lazy une fois (scan O(N))
+_CACHE_INDEX: Optional[Dict[str, Path]] = None
+
+
+def _build_cache_index() -> Dict[str, Path]:
+    """Scanne `/data/extraction_cache/` et construit `{doc_id: cache_path}`."""
+    idx: Dict[str, Path] = {}
+    if _CACHE_DIR.exists():
+        for cf in _CACHE_DIR.glob("*.v5cache.json"):
+            try:
+                data = json.loads(cf.read_text(encoding="utf-8"))
+                did = data.get("document_id")
+                if did:
+                    idx[did] = cf
+            except Exception:
+                continue
+    return idx
+
+
+def _resolve_cache_path_from_doc_id(doc_id: str) -> Optional[Path]:
+    """Cherche le `.v5cache.json` correspondant au `doc_id`.
+
+    Architecture cible (décision Fred 2026-05-20) : le cache est la source de vérité
+    pour l'extraction de `valid_from` — pas besoin du PDF binaire. Permet la (ré)ingestion
+    sans accès au fichier original.
+
+    Index lazy en mémoire ; rebuild sur cache miss pour gérer les nouveaux caches créés
+    après l'init du worker (ex: nouveau doc ingéré via V2 puis ClaimFirst dans la foulée).
+    """
+    global _CACHE_INDEX
+    if _CACHE_INDEX is None:
+        _CACHE_INDEX = _build_cache_index()
+        logger.info(f"[ClaimPersister] Cache index built : {len(_CACHE_INDEX)} entries")
+
+    hit = _CACHE_INDEX.get(doc_id)
+    if hit is not None:
+        return hit
+
+    # Cache miss → rebuild une fois (peut-être un nouveau cache créé entre temps)
+    _CACHE_INDEX = _build_cache_index()
+    return _CACHE_INDEX.get(doc_id)
 
 
 class ClaimPersister:
@@ -360,47 +404,75 @@ class ClaimPersister:
             "created_at": context.created_at.isoformat(),
         }
 
-        # Phase A1.3 + §9.6 — Extraction document_valid_from via cascade S2/S3/S4 si extractor disponible.
-        # Le résultat (value + marker + source) enrichit DocumentContext ET est caché pour propagation
-        # aux Claims dans `_persist_claims_batch` (dénormalisation §9.6 : marker/source sur Claim
-        # pour éviter la jointure DocumentContext en classification A2).
+        # Phase A1.3 + §9.6 — Extraction document_valid_from via cascade S2/S3/S4.
+        # Architecture cible (décision Fred 2026-05-20) : prioriser le **cache** comme source.
+        # Le cache `.v5cache.json` contient déjà tout (texte page 1 + filename original) →
+        # plus de dépendance au PDF binaire qui peut être perdu/inaccessible.
+        # Fallback PDF si présent (legacy compat), sinon fallback NULL avec warning.
         valid_from_payload: Dict[str, Optional[str]] = {
             "value": None,
             "marker": "ingestion_fallback",
             "source": None,
         }
         if self.document_valid_from_extractor is not None:
+            cache_path = _resolve_cache_path_from_doc_id(doc_id)
             pdf_path = _resolve_pdf_path_from_doc_id(doc_id)
-            if pdf_path is None:
-                logger.info(
-                    f"[ClaimPersister:A1.3] PDF introuvable pour doc_id={doc_id} "
-                    f"(cherché dans {', '.join(_PDF_SEARCH_DIRS)}) — valid_from=null sur DocumentContext"
-                )
-                props["valid_from_marker"] = "ingestion_fallback"
-                props["valid_from_warning"] = "pdf_not_found_at_persist_time"
-            else:
+
+            vf_result = None
+            extraction_via = None
+            extraction_error: Optional[Exception] = None
+
+            # Priorité 1 : cache (self-sufficient, fonctionne même sans PDF)
+            if cache_path is not None:
+                try:
+                    cache_data = json.loads(cache_path.read_text(encoding="utf-8"))
+                    vf_result = self.document_valid_from_extractor.extract_from_cache(cache_data)
+                    extraction_via = f"cache({cache_path.name})"
+                except Exception as e:
+                    extraction_error = e
+                    logger.warning(
+                        f"[ClaimPersister:A1.3] Cache extraction failed for {doc_id}: {e}"
+                    )
+
+            # Priorité 2 : PDF si cache absent ou en erreur (legacy / compat)
+            if vf_result is None and pdf_path is not None:
                 try:
                     vf_result = self.document_valid_from_extractor.extract(pdf_path)
-                    valid_from_payload["value"] = vf_result.value
-                    valid_from_payload["marker"] = vf_result.marker_type.value
-                    valid_from_payload["source"] = vf_result.source
-                    props["valid_from"] = vf_result.value  # None acceptable
-                    props["valid_from_marker"] = vf_result.marker_type.value
-                    props["valid_from_source"] = vf_result.source
-                    if vf_result.warning:
-                        props["valid_from_warning"] = vf_result.warning
-                    logger.info(
-                        f"[ClaimPersister:A1.3] doc={pdf_path.name}: "
-                        f"valid_from={vf_result.value or 'None'} "
-                        f"marker={vf_result.marker_type.value} "
-                        f"source={vf_result.source or 'fallback'}"
-                    )
+                    extraction_via = f"pdf({pdf_path.name})"
                 except Exception as e:
+                    extraction_error = e
                     logger.warning(
-                        f"[ClaimPersister:A1.3] Extraction failed for {pdf_path.name}: {e}"
+                        f"[ClaimPersister:A1.3] PDF extraction failed for {pdf_path.name}: {e}"
                     )
-                    props["valid_from_marker"] = "ingestion_fallback"
-                    props["valid_from_warning"] = f"extractor_error: {type(e).__name__}"
+
+            # Aucune source disponible OU les 2 ont échoué → fallback NULL avec warning trace
+            if vf_result is None:
+                reason = (
+                    f"extractor_error:{type(extraction_error).__name__}"
+                    if extraction_error
+                    else ("no_cache_no_pdf" if pdf_path is None and cache_path is None else "unknown")
+                )
+                logger.info(
+                    f"[ClaimPersister:A1.3] No source for doc_id={doc_id} ({reason}) — "
+                    f"valid_from=null marker=ingestion_fallback"
+                )
+                props["valid_from_marker"] = "ingestion_fallback"
+                props["valid_from_warning"] = reason
+            else:
+                valid_from_payload["value"] = vf_result.value
+                valid_from_payload["marker"] = vf_result.marker_type.value
+                valid_from_payload["source"] = vf_result.source
+                props["valid_from"] = vf_result.value  # None acceptable
+                props["valid_from_marker"] = vf_result.marker_type.value
+                props["valid_from_source"] = vf_result.source
+                if vf_result.warning:
+                    props["valid_from_warning"] = vf_result.warning
+                logger.info(
+                    f"[ClaimPersister:A1.3] doc={doc_id} via={extraction_via}: "
+                    f"valid_from={vf_result.value or 'None'} "
+                    f"marker={vf_result.marker_type.value} "
+                    f"source={vf_result.source or 'fallback'}"
+                )
 
         # Cache complet (value+marker+source) pour propagation aux claims (§9.6)
         self._doc_valid_from_by_id[context.doc_id] = valid_from_payload

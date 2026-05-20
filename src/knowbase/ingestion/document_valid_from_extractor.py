@@ -157,7 +157,7 @@ def _normalize_match(pattern_type: str, groups: tuple[str, ...]) -> Optional[str
 
 
 def _extract_page1_text(pdf_path: Path) -> Optional[str]:
-    """Renvoie le texte de la page 1 lowercased, ou None si erreur."""
+    """Lit la page 1 d'un PDF (lowercased), ou None si erreur. Wrapper PDF."""
     try:
         with fitz.open(str(pdf_path)) as doc:
             if len(doc) == 0:
@@ -168,18 +168,34 @@ def _extract_page1_text(pdf_path: Path) -> Optional[str]:
         return None
 
 
-def extract_s2_page1_keyword(pdf_path: Path) -> dict[str, Any]:
-    """S2 — Cherche une date dans une fenêtre proche d'un keyword sémantique page 1."""
+# Markers techniques injectés par l'extracteur Docling/V2 dans le full_text du cache.
+# On les retire avant de chercher des dates car ils polluent les fenêtres autour des keywords.
+_STRUCTURE_MARKERS_RE = re.compile(
+    r"\[(?:PAGE|PARAGRAPH|SECTION|HEADER|TABLE|LIST|TITLE|FOOTER)[^]]*\]",
+    re.IGNORECASE,
+)
+
+
+def _clean_structure_markers(text: str) -> str:
+    """Retire les markers `[PAGE 0]`, `[PARAGRAPH]` etc. introduits par l'extracteur V2.
+    Domain-agnostic : suppression de tokens techniques de structure, pas de domaine."""
+    return _STRUCTURE_MARKERS_RE.sub(" ", text)
+
+
+def _extract_s2_core(page1_text_lower: str) -> dict[str, Any]:
+    """S2 — Logique pure sur texte page 1 lowercased (sans markers structure).
+
+    Indépendant de la source (PDF binaire OU cache JSON).
+    """
     result: dict[str, Any] = {"found": False, "value": None, "source": None}
-    page_text = _extract_page1_text(pdf_path)
-    if not page_text:
+    if not page1_text_lower:
         return result
 
     for kw in DATE_KEYWORDS:
-        kw_pos = page_text.find(kw)
+        kw_pos = page1_text_lower.find(kw)
         if kw_pos == -1:
             continue
-        window = page_text[max(0, kw_pos - 50) : kw_pos + 200]
+        window = page1_text_lower[max(0, kw_pos - 50) : kw_pos + 200]
         for pattern, ptype in DATE_PATTERNS_PAGE1:
             m = pattern.search(window)
             if not m:
@@ -196,6 +212,14 @@ def extract_s2_page1_keyword(pdf_path: Path) -> dict[str, Any]:
                 )
                 return result
     return result
+
+
+def extract_s2_page1_keyword(pdf_path: Path) -> dict[str, Any]:
+    """S2 — Wrapper PDF : lit page 1 puis délègue à `_extract_s2_core`."""
+    page_text = _extract_page1_text(pdf_path)
+    if not page_text:
+        return {"found": False, "value": None, "source": None}
+    return _extract_s2_core(_clean_structure_markers(page_text))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -218,10 +242,14 @@ _FILENAME_YYYYMMDD = re.compile(r"(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)")
 _FILENAME_VERSION_DATE = re.compile(r"v\.?(\d{1,2})[-_](20\d{2})", re.IGNORECASE)
 
 
-def extract_s3_filename_enriched(pdf_path: Path) -> dict[str, Any]:
-    """S3 — Patterns enrichis sur nom de fichier."""
-    name = pdf_path.stem
+def _extract_s3_core(name: str) -> dict[str, Any]:
+    """S3 — Logique pure sur stem de filename (sans extension).
+
+    Indépendant de la source (PDF binaire OU cache JSON).
+    """
     result: dict[str, Any] = {"found": False, "value": None, "source": None}
+    if not name:
+        return result
 
     # 1. Pattern YYYYMMDD compact (le plus précis)
     m = _FILENAME_YYYYMMDD.search(name)
@@ -275,6 +303,11 @@ def extract_s3_filename_enriched(pdf_path: Path) -> dict[str, Any]:
         y = years[-1]
         result.update({"found": True, "value": f"{y}-01-01", "source": "s3_year_only"})
     return result
+
+
+def extract_s3_filename_enriched(pdf_path: Path) -> dict[str, Any]:
+    """S3 — Wrapper PDF : extrait le stem et délègue à `_extract_s3_core`."""
+    return _extract_s3_core(pdf_path.stem)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -425,15 +458,18 @@ class S4LLMConfig:
     max_chars_input: int = 6000  # ~1500 tokens page 1
 
 
-def extract_s4_llm(pdf_path: Path, config: S4LLMConfig) -> dict[str, Any]:
-    """S4 — Appel LLM evidence-locked, fallback gracieux si vLLM indisponible."""
+def _extract_s4_core(page1_text: str, config: S4LLMConfig, doc_name: str = "") -> dict[str, Any]:
+    """S4 — Logique pure : LLM evidence-locked sur texte page 1 (non lowercased).
+
+    Indépendant de la source (PDF binaire OU cache JSON). `doc_name` est utilisé
+    seulement pour les logs (jamais transmis au LLM).
+    """
     result: dict[str, Any] = {"found": False, "value": None, "source": None}
-    page_text = _extract_page1_text(pdf_path)
-    if not page_text:
+    if not page1_text:
         result["error"] = "page1_text_empty"
         return result
 
-    truncated = page_text[: config.max_chars_input]
+    truncated = page1_text[: config.max_chars_input]
     user_msg = f"FIRST PAGE TEXT (truncated to {config.max_chars_input} chars):\n\n{truncated}"
 
     payload = {
@@ -457,7 +493,7 @@ def extract_s4_llm(pdf_path: Path, config: S4LLMConfig) -> dict[str, Any]:
             data = r.json()
     except (httpx.HTTPError, httpx.TimeoutException) as e:
         logger.warning(
-            f"[OSMOSE:DocValidFrom] S4 LLM unavailable for {pdf_path.name}: {e}"
+            f"[OSMOSE:DocValidFrom] S4 LLM unavailable for {doc_name or '<unknown>'}: {e}"
         )
         result["error"] = f"vllm_unavailable: {e!r}"
         result["fallback"] = True
@@ -473,12 +509,13 @@ def extract_s4_llm(pdf_path: Path, config: S4LLMConfig) -> dict[str, Any]:
     value = parsed.get("value")
     evidence_quote = parsed.get("evidence_quote")
 
-    # Validator evidence-locked : quote doit apparaître dans le texte source
+    # Validator evidence-locked : quote doit apparaître dans le texte source.
+    # Comparaison case-insensitive sur texte page 1 lowercased.
     if value and evidence_quote:
         normalized_quote = evidence_quote.lower().strip()
-        if normalized_quote not in page_text:
+        if normalized_quote not in truncated.lower():
             logger.warning(
-                f"[OSMOSE:DocValidFrom] S4 quote not found verbatim for {pdf_path.name}"
+                f"[OSMOSE:DocValidFrom] S4 quote not found verbatim for {doc_name or '<unknown>'}"
             )
             result["error"] = "quote_not_verbatim"
             return result
@@ -505,6 +542,58 @@ def extract_s4_llm(pdf_path: Path, config: S4LLMConfig) -> dict[str, Any]:
             }
         )
     return result
+
+
+def extract_s4_llm(pdf_path: Path, config: S4LLMConfig) -> dict[str, Any]:
+    """S4 — Wrapper PDF : lit page 1 puis délègue à `_extract_s4_core`."""
+    page_text = _extract_page1_text(pdf_path)
+    if not page_text:
+        return {"found": False, "value": None, "source": None, "error": "page1_text_empty"}
+    # _extract_page1_text retourne lowercased — on perd la casse pour S4 (qui veut le raw
+    # pour evidence-locked). Conséquence : evidence_quote du LLM sera matchée lowercased
+    # (cohérent avec normalized_quote dans le validator).
+    return _extract_s4_core(page_text, config, doc_name=pdf_path.name)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers cache JSON — extraction page 1 + filename depuis le cache `.v5cache.json`
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _page1_text_from_cache(cache_data: dict[str, Any]) -> Optional[str]:
+    """Extrait le texte de la page 1 depuis le cache `.v5cache.json`.
+
+    Le cache stocke `extraction.full_text` avec markers `[PAGE 0]`, `[PAGE 1]`, etc.
+    et `extraction.page_index` avec les offsets. On isole la page 0 (= 1ère page humaine)
+    via le 1er entry de `page_index`, puis on retire les markers structure.
+    """
+    extr = cache_data.get("extraction", {})
+    full_text = extr.get("full_text", "")
+    page_index = extr.get("page_index", [])
+
+    if not full_text or not page_index:
+        return None
+
+    first_page = page_index[0] if isinstance(page_index, list) else None
+    if not isinstance(first_page, dict):
+        return None
+
+    start = first_page.get("start_offset", 0)
+    end = first_page.get("end_offset")
+    if end is None or end <= start:
+        return None
+
+    page1_raw = full_text[start:end]
+    return _clean_structure_markers(page1_raw)
+
+
+def _filename_stem_from_cache(cache_data: dict[str, Any]) -> Optional[str]:
+    """Extrait le stem du filename original depuis `extraction.source_path`."""
+    extr = cache_data.get("extraction", {})
+    source_path = extr.get("source_path", "")
+    if not source_path:
+        return None
+    return Path(source_path).stem
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -627,5 +716,68 @@ class DocumentValidFromExtractor:
 
         # Fallback ultime — aucun signal fiable trouvé. valid_from=null est intentionnel :
         # mieux que mettre une fausse date qui fausserait le runtime temporel.
+        result.marker_type = MarkerType.INGESTION_FALLBACK
+        return result
+
+    def extract_from_cache(self, cache_data: dict[str, Any]) -> DocumentValidFromResult:
+        """Cascade S2 → S3 → S4 → fallback NULL en partant d'un cache `.v5cache.json`.
+
+        Le cache contient déjà tout ce dont la cascade a besoin :
+          - `extraction.full_text` + `extraction.page_index` → texte page 1
+          - `extraction.source_path` → filename original (basename)
+
+        S1 (PDF metadata) est par construction impossible depuis le cache car nécessite
+        le binaire PDF. Ce n'est pas une régression : S1 est désactivé par défaut (§9.2).
+
+        Permet la (ré)ingestion ClaimFirst depuis le seul cache, sans accès au PDF original.
+        Cohérent avec l'architecture cible « cache self-sufficient » (décision Fred 2026-05-20).
+        """
+        pdf_name = Path(cache_data.get("extraction", {}).get("source_path", "<from-cache>")).name
+        result = DocumentValidFromResult(pdf_name=pdf_name)
+
+        page1_text = _page1_text_from_cache(cache_data)
+        filename_stem = _filename_stem_from_cache(cache_data)
+
+        # S2 — Page 1 keyword
+        if page1_text:
+            s2 = _extract_s2_core(page1_text.lower())
+            result.strategies_tried["s2_page1_keyword"] = s2
+            if s2["found"]:
+                result.value = s2["value"]
+                result.marker_type = MarkerType.EXPLICIT
+                result.source = s2["source"]
+                return result
+
+        # S3 — Filename enriched
+        if filename_stem:
+            s3 = _extract_s3_core(filename_stem)
+            result.strategies_tried["s3_filename"] = s3
+            if s3["found"]:
+                result.value = s3["value"]
+                result.marker_type = MarkerType.EXPLICIT
+                result.source = s3["source"]
+                return result
+
+        # S4 — LLM evidence-locked
+        if self.enable_s4_llm and page1_text:
+            s4 = _extract_s4_core(page1_text, self.s4_config, doc_name=pdf_name)
+            result.strategies_tried["s4_llm"] = s4
+            if s4.get("fallback"):
+                result.warning = (
+                    result.warning + ";" if result.warning else ""
+                ) + "s4_llm_unavailable"
+            elif s4["found"]:
+                result.value = s4["value"]
+                result.marker_type = MarkerType.EXPLICIT
+                result.source = s4["source"]
+                return result
+
+        # S1 impossible depuis le cache : on saute (warning informatif si opt-in tenté)
+        if self.enable_s1_metadata:
+            result.warning = (
+                result.warning + ";" if result.warning else ""
+            ) + "s1_skipped_no_pdf_in_cache"
+
+        # Fallback NULL — signal honnête, conforme §9.1/§9.3
         result.marker_type = MarkerType.INGESTION_FALLBACK
         return result
