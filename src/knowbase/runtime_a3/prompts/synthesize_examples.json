@@ -1,0 +1,62 @@
+[
+  {
+    "case": "Standard answer with inline citations (mode REASONED)",
+    "input_summary": "Question on product X v2024 max users. 2 cited_claims consistent. No ConflictPending.",
+    "expected": {
+      "answer_text": "Product X v2024 supports a maximum of 500 users [claim_id=c_001]. This limit applies to all user types including administrators [claim_id=c_002].",
+      "cited_claims": [
+        {"claim_id": "c_001", "claim_verbatim": "Product X v2024 maximum users: 500", "doc_title": "Product X Reference", "section_id": "sec_3"},
+        {"claim_id": "c_002", "claim_verbatim": "User limit applies to administrators", "doc_title": "Product X Reference", "section_id": "sec_3"}
+      ],
+      "uncovered_sub_goals_warning": null,
+      "conflict_pending_warning": null,
+      "mode": "REASONED",
+      "synthesize_warnings": [],
+      "schema_version": "a3.0"
+    }
+  },
+  {
+    "case": "Answer with ConflictPending warning (transparency)",
+    "input_summary": "1 sub_goal CORRECT but 1 :ConflictPending unresolved on the same predicate.",
+    "expected": {
+      "answer_text": "Product X v2024 supports a maximum of 500 users [claim_id=c_010].\n\n⚠ Conflicting sources: another document mentions a limit of 1000 users [claim_id=c_011]. The two claims are not temporally ordered — consult both sources for context.",
+      "cited_claims": [
+        {"claim_id": "c_010", "claim_verbatim": "Product X v2024 max users: 500", "doc_title": "Doc A", "section_id": "sec_1"},
+        {"claim_id": "c_011", "claim_verbatim": "Product X v2024 max users: 1000", "doc_title": "Doc B", "section_id": "sec_2"}
+      ],
+      "uncovered_sub_goals_warning": null,
+      "conflict_pending_warning": "Unresolved divergence on 'maximum users' — claim_ids c_010 and c_011 (no temporal ordering).",
+      "mode": "REASONED",
+      "synthesize_warnings": [],
+      "schema_version": "a3.0"
+    }
+  },
+  {
+    "case": "Partial answer with uncovered sub_goal warning (mode ANCHORED)",
+    "input_summary": "2 sub_goals: sub_goal[0] CORRECT with 3 claims, sub_goal[1] empty. iteration=1 (hard cap reached).",
+    "expected": {
+      "answer_text": "Product X v2024 supports a maximum of 500 users [claim_id=c_020].\n\n⚠ Sub-goals not covered: maximum number of concurrent sessions (no claim found in the corpus).",
+      "cited_claims": [
+        {"claim_id": "c_020", "claim_verbatim": "Product X v2024 max users: 500", "doc_title": "Product X Reference", "section_id": "sec_3"}
+      ],
+      "uncovered_sub_goals_warning": "Sub-goal 'maximum concurrent sessions' not covered — no claim found in the indexed corpus.",
+      "conflict_pending_warning": null,
+      "mode": "ANCHORED",
+      "synthesize_warnings": [],
+      "schema_version": "a3.0"
+    }
+  },
+  {
+    "case": "Abstention motivated (mode ABSTENTION, INSUFFICIENT_EVIDENCE verdict)",
+    "input_summary": "verdict=INSUFFICIENT_EVIDENCE, 0 cited_claims, question out of corpus scope.",
+    "expected": {
+      "answer_text": "No relevant claim found in the indexed corpus to answer this question.\n\nUncovered sub-goals:\n  - <description of sub_goal 1>\n\nPossible next steps:\n  - Reformulate with more specific terms\n  - Verify that the indexed corpus covers this topic",
+      "cited_claims": [],
+      "uncovered_sub_goals_warning": "All sub_goals uncovered (out of corpus scope).",
+      "conflict_pending_warning": null,
+      "mode": "ABSTENTION",
+      "synthesize_warnings": [],
+      "schema_version": "a3.0"
+    }
+  }
+]

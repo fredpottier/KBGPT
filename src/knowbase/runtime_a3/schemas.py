@@ -392,6 +392,108 @@ class EvaluateOutput(BaseModel):
 
 
 # ============================================================================
+# Synthesize (LLM #3) — Rédaction finale avec citations
+# ============================================================================
+
+
+ResponseMode = Literal["concise", "structured", "abstention"]
+
+# Mode terminal écrit dans SynthesizeOutput (cf VISION §4.5)
+SynthesizeMode = Literal[
+    "REASONED",     # synthèse via KG + claims (cas standard CORRECT)
+    "ANCHORED",     # synthèse partielle ancrée sur claims partiels (AMBIGUOUS iter≥1)
+    "TEXT_ONLY",    # fallback Qdrant (INCORRECT post-rétrograde OU AMBIGUOUS iter≥2)
+    "ABSTENTION",   # INSUFFICIENT_EVIDENCE → réponse motivée d'abstention
+]
+
+
+class CitedClaim(BaseModel):
+    """Référence à un claim cité dans la réponse (cf ADR §2.5).
+
+    `claim_verbatim` est le texte exact du claim (jamais reformulé par le LLM).
+    `section_id` permet le click-to-source dans l'UI.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim_id: str = Field(..., description="ID du Claim Neo4j d'origine.")
+    claim_verbatim: str = Field(
+        ...,
+        description="Texte exact du claim (paraphrase interdite côté LLM).",
+        min_length=1,
+    )
+    doc_title: Optional[str] = Field(
+        default=None,
+        description="Titre du document source (pour affichage UI).",
+    )
+    section_id: Optional[str] = Field(
+        default=None,
+        description="Section ID pour click-to-source.",
+    )
+    page: Optional[int] = Field(
+        default=None,
+        description="Numéro de page du document source.",
+    )
+    charspan_start: Optional[int] = Field(default=None)
+    charspan_end: Optional[int] = Field(default=None)
+
+
+class SynthesizeInput(BaseModel):
+    """Input du module Synthesize (cf ADR §2.5)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parse_output: "ParseOutput"
+    execute_output: "ExecuteOutput"
+    evaluate_output: "EvaluateOutput"
+    response_mode: ResponseMode = Field(default="structured")
+
+
+class SynthesizeOutput(BaseModel):
+    """Output structuré du Synthesize (cf ADR §2.5)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    answer_text: str = Field(
+        ...,
+        description="Réponse en langage naturel avec citations inline [claim_id].",
+    )
+    cited_claims: List[CitedClaim] = Field(
+        default_factory=list,
+        description="Toutes les sources mobilisées dans answer_text.",
+    )
+    uncovered_sub_goals_warning: Optional[str] = Field(
+        default=None,
+        description="Transparence : sub_goal X non couvert par le corpus.",
+    )
+    conflict_pending_warning: Optional[str] = Field(
+        default=None,
+        description="Transparence : claims contradictoires non résolus exposés.",
+    )
+    mode: SynthesizeMode = Field(
+        ...,
+        description="Mode terminal de la réponse (cf VISION §4.5).",
+    )
+    synthesize_warnings: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Warnings techniques (ex: 'verdict_demoted_to_INCORRECT_via_grounding', "
+            "'citation_coverage_below_threshold', 'llm_failed_fallback_template')."
+        ),
+    )
+    citation_coverage_rate: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "% de phrases factuelles avec ≥1 citation. None si pas mesuré. "
+            "Cible ≥95% (cf ADR §2.5 garde-fou AX-1)."
+        ),
+    )
+    schema_version: str = Field(default="a3.0")
+
+
+# ============================================================================
 # Exceptions
 # ============================================================================
 
@@ -432,5 +534,12 @@ class EvaluateError(Exception):
     pass
 
 
-# Forward refs (EvaluateInput nest ParseOutput/PlanOutput/ExecuteOutput)
+class SynthesizeError(Exception):
+    """Erreur générique du module Synthesize."""
+
+    pass
+
+
+# Forward refs
 EvaluateInput.model_rebuild()
+SynthesizeInput.model_rebuild()

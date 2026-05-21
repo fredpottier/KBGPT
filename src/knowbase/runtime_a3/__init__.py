@@ -17,6 +17,7 @@ Cohérent avec :
 """
 
 from knowbase.runtime_a3.schemas import (
+    CitedClaim,
     ClaimSummary,
     ConflictPendingSummary,
     EvaluateInput,
@@ -27,8 +28,12 @@ from knowbase.runtime_a3.schemas import (
     PlanOutput,
     RelationSummary,
     RePlanHint,
+    ResponseMode,
     SectionSummary,
     SubGoal,
+    SynthesizeInput,
+    SynthesizeMode,
+    SynthesizeOutput,
     ToolCall,
     ToolName,
     ToolResult,
@@ -36,6 +41,7 @@ from knowbase.runtime_a3.schemas import (
 )
 
 __all__ = [
+    "CitedClaim",
     "ClaimSummary",
     "ConflictPendingSummary",
     "EvaluateInput",
@@ -46,8 +52,12 @@ __all__ = [
     "PlanOutput",
     "RelationSummary",
     "RePlanHint",
+    "ResponseMode",
     "SectionSummary",
     "SubGoal",
+    "SynthesizeInput",
+    "SynthesizeMode",
+    "SynthesizeOutput",
     "ToolCall",
     "ToolName",
     "ToolResult",
