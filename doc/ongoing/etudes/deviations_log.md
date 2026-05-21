@@ -45,6 +45,38 @@
 
 <!-- L'agent ajoute ici les nouvelles entrées au-dessus -->
 
+### 2026-05-21 — Duplication des prompts LLM de classification de relations claim-claim (detect_contradictions vs c4_relations)
+
+- **Type** : dette technique (qualité + maintenabilité) → `deferred`
+- **Signal** : audit qualité post-A2.13 (refonte prompt `_LLM_COMPARE_SYSTEM` étape #7 `_run_detect_contradictions`). En lisant `nli_adjudicator.py:NLI_PROMPT` (utilisé par étape #13 `c4_relations`), on constate qu'il fait **la même tâche** que `_LLM_COMPARE_SYSTEM` (classifier une paire claim-claim en CONTRADICTS / REFINES / QUALIFIES / NONE) mais avec un prompt **différent et de qualité supérieure** (4 règles critiques déjà présentes : version/edition co-existantes, features parallèles, product rebranding, "same subject same context").
+- **Description** : deux modules indépendants font la même classification avec deux prompts maintenus séparément :
+  - `src/knowbase/api/routers/post_import.py:_LLM_COMPARE_SYSTEM` — étape #7 `_run_detect_contradictions` Phase B (claims cluster cross-doc sans S/P/O)
+  - `src/knowbase/relations/nli_adjudicator.py:NLI_PROMPT` — étape #13 `c4_relations` (paires embedding cosine ≥ 0.85)
+
+  Les deux ont :
+  - Mêmes 4 labels cibles (CONTRADICTS / REFINES / QUALIFIES / NONE ou COMPATIBLE/UNRELATED)
+  - Même output JSON
+  - Mêmes pièges (version parallel, products parallel, list cumulative, pricing tiered)
+  - Mais des wording, exemples et garde-fous **différents** → drift de qualité dans le temps si un seul est amélioré
+
+  L'audit A2.12 a révélé ~80% FP sur les 113 CONTRADICTS de `_LLM_COMPARE_SYSTEM` alors que `nli_adjudicator.NLI_PROMPT` avait déjà mitigé ces cas. Cette divergence prouve que la duplication est nuisible.
+
+- **Pourquoi c'est une déviation** : pas d'élément de VISION/ROADMAP qui parle d'unification des prompts. Mais correspond à un principe de maintenabilité implicite (Probability Isolation §3.5 : "1 LLM = 1 rôle" mais ici on a 2 rôles identiques avec 2 prompts différents — c'est de la duplication de surface API LLM).
+- **Bénéfice potentiel** :
+  - **Une seule source de vérité** pour la sémantique des relations claim-claim — amélioration une fois propagée partout
+  - Réduction risque de drift qualité entre étapes #7 et #13
+  - Documentation centralisée des règles "CONTRADICTS vs NONE" dans un module partagé (ex: `src/knowbase/relations/claim_relation_classifier.py`)
+  - Plus facile à brancher sur le futur runtime A3 (Parse/Evaluate) qui devra potentiellement utiliser le même classifier
+- **Coût d'opportunité** : ~0.5j de refacto pour extraire un `ClaimRelationClassifier` partagé + ré-tester les 2 chemins (sans bénéfice immédiat car les 2 prompts marchent maintenant). À faire **plus tard** quand on aura besoin de modifier la sémantique des relations (Phase A3 runtime, ou nouvelle relation type).
+- **Recommandation agent** :
+  - [ ] **`deferred`** : créer task `A2-DEBT-PROMPTS-UNIFY` dans le backlog (statut `pending`, sans phase rattachée), à promouvoir si :
+    - Phase A3 nécessite cette classification (probable — Evaluate module CRAG-style va sans doute réutiliser le même test "co-exist simultaneously")
+    - Ou une troisième impl émerge (risque de divergence à 3 voies)
+  - [ ] Tant que `deferred` : ajouter un commentaire `# DEVIATION 2026-05-21 — prompt duplication, voir deviations_log.md` dans les 2 fichiers concernés pour éviter qu'un futur dev modifie un seul prompt sans synchronisation manuelle
+- **Statut** : `deferred` (arbitré 2026-05-21 par utilisateur produit : "inscris l'utilité de cette unification dans deviations_log.md")
+
+---
+
 ### 2026-05-19 — Architecture Parse+Evaluate pour query understanding (vs single-shot classifier)
 
 - **Type** : exploration → integrated immédiatement (correction architecturale critique)

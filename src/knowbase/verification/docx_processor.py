@@ -31,7 +31,7 @@ class CorpusPosition:
     doc_id: str = ""
     doc_title: str = ""
     claim_text: str = ""
-    relation: str = ""  # CONFIRMS | CONTRADICTS | QUALIFIES | REFINES | EVOLVES_TO
+    relation: str = ""  # CONFIRMS | CONTRADICTS | QUALIFIES | REFINES | EVOLUTION_OF (A2.10)
     confidence: float = 0.0
     is_most_recent: bool = False
 

@@ -75,6 +75,10 @@ class PipelineStatusResponse(BaseModel):
     progress: float = 0.0
     results: List[StepResult] = Field(default_factory=list)
     job_id: Optional[str] = None
+    # Cancel state (A2.6 — cancel-flag dans run_pipeline_job)
+    cancelled: bool = False
+    cancelled_before_step: Optional[str] = None
+    cancelled_at: Optional[float] = None
 
 
 class PipelineStartResponse(BaseModel):
@@ -182,7 +186,7 @@ STEPS = [
     StepInfo(
         id="c4_relations",
         name="C4 Relations Evidence-First",
-        description="Détecte CONTRADICTS/QUALIFIES/REFINES entre claims cross-doc via embedding similarity + adjudication LLM (Claude Haiku). Chaque relation a des preuves verbatim.",
+        description="Détecte CONTRADICTS/QUALIFIES/REFINES entre claims cross-doc via embedding similarity + adjudication NLI LLM (Qwen3-235B via DeepInfra, task FAST_CLASSIFICATION). Chaque relation a des preuves verbatim.",
         order=11,
         estimated_duration="5 - 30min",
         requires_llm=True,
@@ -300,14 +304,55 @@ async def run_pipeline(
 async def cancel_pipeline(
     tenant_id: str = Depends(get_tenant_id),
 ):
-    """Annule le pipeline en cours (marque comme terminé dans Redis)."""
+    """Annule le pipeline en cours.
+
+    Pose un flag Redis (`osmose:post_import:cancel:{tenant_id}`, TTL 10min) que
+    `run_pipeline_job` checke avant chaque étape (cf §A2.6 ADR_RELATIONS_CLAIM_CLAIM).
+    Le job s'interrompt proprement à la fin de l'étape en cours sans nécessiter
+    un restart du worker container.
+
+    La clé d'état Redis (`osmose:post_import:state:{tenant_id}`) sera finalisée
+    par le job lui-même avec `cancelled=True` + `cancelled_at`.
+    """
     try:
         from knowbase.common.clients.redis_client import get_redis_client
         rc = get_redis_client()
-        rc.client.delete(f"osmose:post_import:state:{tenant_id}")
-        return {"success": True, "message": "Pipeline annulé"}
+        # Pose le flag (TTL 10min, suffisant pour qu'une étape courte voie le flag)
+        rc.client.set(
+            f"osmose:post_import:cancel:{tenant_id}",
+            "1",
+            ex=600,
+        )
+        return {
+            "success": True,
+            "message": "Cancel flag posé — pipeline s'arrêtera à la fin de l'étape en cours",
+        }
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+def _is_cancel_requested(tenant_id: str) -> bool:
+    """Vérifie si un cancel a été demandé pour ce tenant.
+
+    Lu par `run_pipeline_job` au début de chaque itération de la boucle steps.
+    """
+    try:
+        from knowbase.common.clients.redis_client import get_redis_client
+        rc = get_redis_client()
+        return rc.client.exists(f"osmose:post_import:cancel:{tenant_id}") > 0
+    except Exception as e:
+        logger.debug(f"[PostImport] cancel-check failed: {e}")
+        return False
+
+
+def _clear_cancel_flag(tenant_id: str) -> None:
+    """Supprime le flag de cancel (en fin de job, ou au lancement d'un nouveau run)."""
+    try:
+        from knowbase.common.clients.redis_client import get_redis_client
+        rc = get_redis_client()
+        rc.client.delete(f"osmose:post_import:cancel:{tenant_id}")
+    except Exception as e:
+        logger.debug(f"[PostImport] cancel-clear failed: {e}")
 
 
 # ============================================================================
@@ -373,9 +418,18 @@ def run_pipeline_job(steps: List[str], tenant_id: str) -> dict:
     """Job RQ — exécute les étapes séquentiellement.
 
     En mode full_local, lance automatiquement vLLM local pour le parallelisme.
+
+    Cancel : checke le flag Redis `osmose:post_import:cancel:{tenant_id}` au
+    début de chaque itération (cf §A2.6 ADR_RELATIONS_CLAIM_CLAIM). Si présent,
+    le job s'arrête proprement et finalise l'état avec `cancelled=True`.
     """
     results: List[dict] = []
     pipeline_start = time.time()
+    cancelled = False
+    cancelled_before_step: Optional[str] = None
+
+    # Clear tout cancel-flag résiduel d'un run précédent (évite cancel "fantôme")
+    _clear_cancel_flag(tenant_id)
 
     # Auto-start vLLM en mode full_local (parallelisme pour C4/C6/perspectives)
     vllm_active = _ensure_vllm_for_full_local()
@@ -387,6 +441,13 @@ def run_pipeline_job(steps: List[str], tenant_id: str) -> dict:
     _update_state(tenant_id, running=True, all_steps=steps, completed=[])
 
     for step_id in steps:
+        # Check cancel-flag avant chaque étape (cf A2.6)
+        if _is_cancel_requested(tenant_id):
+            logger.info(f"[PostImport] Cancel demandé avant '{step_id}' — arrêt propre")
+            cancelled = True
+            cancelled_before_step = step_id
+            break
+
         step_info = STEPS_BY_ID.get(step_id)
         step_name = step_info.name if step_info else step_id
         logger.info(f"[PostImport] Exécution : {step_name}")
@@ -457,17 +518,30 @@ def run_pipeline_job(steps: List[str], tenant_id: str) -> dict:
     except Exception:
         pass
 
-    _update_state(
-        tenant_id, running=False, all_steps=steps,
+    # Finalisation état (incluant flag cancelled si applicable)
+    final_state_kwargs = dict(
+        tenant_id=tenant_id,
+        running=False,
+        all_steps=steps,
         completed=[r["step_id"] for r in results if r["status"] == "success"],
         results=results,
     )
+    if cancelled:
+        final_state_kwargs["cancelled"] = True
+        final_state_kwargs["cancelled_before_step"] = cancelled_before_step
+        final_state_kwargs["cancelled_at"] = time.time()
+    _update_state(**final_state_kwargs)
+
+    # Nettoyer le flag cancel (idempotent : pas d'effet si pas posé)
+    _clear_cancel_flag(tenant_id)
 
     return {
         "steps": results,
         "total_duration_s": total_duration,
         "success_count": sum(1 for r in results if r["status"] == "success"),
         "error_count": sum(1 for r in results if r["status"] == "error"),
+        "cancelled": cancelled,
+        "cancelled_before_step": cancelled_before_step,
     }
 
 
@@ -749,6 +823,8 @@ def _run_chains_cross_doc(tenant_id: str, progress=None) -> dict:
     )
 
     # Persist
+    # A2.9 — CHAINS_TO est directionnelle (c1 → c2 : c1 chaîne vers c2) :
+    # valid_from_relation = c1.valid_from (la chaîne prend effet à la date de validité du claim source)
     persisted = 0
     with driver.session() as session:
         for link in links:
@@ -757,12 +833,19 @@ def _run_chains_cross_doc(tenant_id: str, progress=None) -> dict:
                 MATCH (c1:Claim {claim_id: $c1id, tenant_id: $tid})
                 MATCH (c2:Claim {claim_id: $c2id, tenant_id: $tid})
                 MERGE (c1)-[r:CHAINS_TO]->(c2)
-                SET r.confidence = 1.0,
+                ON CREATE SET
+                    r.confidence = 1.0,
                     r.method = 'spo_join_cross_doc',
                     r.cross_doc = true,
                     r.source_doc_id = $sdid,
                     r.target_doc_id = $tdid,
-                    r.join_key_name = $jkn
+                    r.join_key_name = $jkn,
+                    r.marker_type = 'inferred',
+                    r.detected_at = datetime(),
+                    r.valid_from_relation = c1.valid_from,
+                    r.invalidated_relation_at = coalesce(c1.invalidated_at, c2.invalidated_at)
+                ON MATCH SET
+                    r.invalidated_relation_at = coalesce(r.invalidated_relation_at, c1.invalidated_at, c2.invalidated_at)
                 RETURN r IS NOT NULL AS ok
                 """,
                 c1id=link.source_claim_id,
@@ -946,25 +1029,75 @@ def _run_detect_contradictions(tenant_id: str, progress=None) -> dict:
     _p(90, f"Persistance de {len(formal_relations) + len(llm_relations)} relations...")
     all_relations = formal_relations + llm_relations
 
+    # A2.9 — Timestamps systématiques sur les relations cross-claim (cf ADR_RELATIONS_CLAIM_CLAIM §2.3)
+    #   detected_at         : datetime() au create (équivalent ingested_at côté Claim)
+    #   valid_from_relation : règle distincte symétrique (max) vs directionnelle (B.valid_from)
+    #   invalidated_relation_at : NULL au create, cascade par SupersessionApplier si claim invalidé
+    # CONTRADICTS = symétrique → max(c1.valid_from, c2.valid_from), NULL si l'un NULL
+    # REFINES / QUALIFIES = directionnelles (c1 → c2 : c1 précise/conditionne c2) → c1.valid_from
     CYPHER_BY_TYPE = {
         "CONTRADICTS": """
             MATCH (c1:Claim {claim_id: $c1id, tenant_id: $tid})
             MATCH (c2:Claim {claim_id: $c2id, tenant_id: $tid})
             MERGE (c1)-[r:CONTRADICTS]->(c2)
-            SET r.confidence = $conf, r.method = 'post_import_cross_doc', r.basis = $basis
+            ON CREATE SET
+                r.confidence = $conf,
+                r.method = 'post_import_cross_doc',
+                r.basis = $basis,
+                r.marker_type = $marker_type,
+                r.detected_at = datetime(),
+                r.valid_from_relation = CASE
+                    WHEN c1.valid_from IS NOT NULL AND c2.valid_from IS NOT NULL THEN
+                        CASE WHEN c1.valid_from > c2.valid_from THEN c1.valid_from ELSE c2.valid_from END
+                    ELSE NULL
+                END,
+                r.invalidated_relation_at = coalesce(c1.invalidated_at, c2.invalidated_at)
+            ON MATCH SET
+                r.confidence = CASE WHEN $conf > coalesce(r.confidence, 0.0) THEN $conf ELSE r.confidence END,
+                r.invalidated_relation_at = coalesce(r.invalidated_relation_at, c1.invalidated_at, c2.invalidated_at)
         """,
         "REFINES": """
             MATCH (c1:Claim {claim_id: $c1id, tenant_id: $tid})
             MATCH (c2:Claim {claim_id: $c2id, tenant_id: $tid})
             MERGE (c1)-[r:REFINES]->(c2)
-            SET r.confidence = $conf, r.method = 'post_import_cross_doc', r.basis = $basis
+            ON CREATE SET
+                r.confidence = $conf,
+                r.method = 'post_import_cross_doc',
+                r.basis = $basis,
+                r.marker_type = $marker_type,
+                r.detected_at = datetime(),
+                r.valid_from_relation = c1.valid_from,
+                r.invalidated_relation_at = coalesce(c1.invalidated_at, c2.invalidated_at)
+            ON MATCH SET
+                r.confidence = CASE WHEN $conf > coalesce(r.confidence, 0.0) THEN $conf ELSE r.confidence END,
+                r.invalidated_relation_at = coalesce(r.invalidated_relation_at, c1.invalidated_at, c2.invalidated_at)
         """,
         "QUALIFIES": """
             MATCH (c1:Claim {claim_id: $c1id, tenant_id: $tid})
             MATCH (c2:Claim {claim_id: $c2id, tenant_id: $tid})
             MERGE (c1)-[r:QUALIFIES]->(c2)
-            SET r.confidence = $conf, r.method = 'post_import_cross_doc', r.basis = $basis
+            ON CREATE SET
+                r.confidence = $conf,
+                r.method = 'post_import_cross_doc',
+                r.basis = $basis,
+                r.marker_type = $marker_type,
+                r.detected_at = datetime(),
+                r.valid_from_relation = c1.valid_from,
+                r.invalidated_relation_at = coalesce(c1.invalidated_at, c2.invalidated_at)
+            ON MATCH SET
+                r.confidence = CASE WHEN $conf > coalesce(r.confidence, 0.0) THEN $conf ELSE r.confidence END,
+                r.invalidated_relation_at = coalesce(r.invalidated_relation_at, c1.invalidated_at, c2.invalidated_at)
         """,
+    }
+
+    # A2.8 — SupersessionApplier : pour chaque CONTRADICTS persistée, appliquer
+    # la règle §9.4 (CAS 1-4) → :SUPERSEDES + invalidated_at OU :ConflictPending
+    from knowbase.relations.supersession_applier import SupersessionApplier
+    supersession_applier = SupersessionApplier(driver, tenant_id=tenant_id)
+    supersession_counts = {
+        "supersedes_created": 0,
+        "conflict_pending_created": 0,
+        "supersession_skipped": 0,
     }
 
     persisted = 0
@@ -977,25 +1110,65 @@ def _run_detect_contradictions(tenant_id: str, progress=None) -> dict:
                 c2id = rel["target_claim_id"]
                 conf = rel.get("confidence", 0.7)
                 basis = rel.get("basis", "")
+                evidence_a = rel.get("evidence_a", "") or rel.get("evidence", "")
+                evidence_b = rel.get("evidence_b", "")
+                reasoning = rel.get("reasoning", "") or basis
             else:
                 rel_type = rel.relation_type.value
                 c1id = rel.source_claim_id
                 c2id = rel.target_claim_id
                 conf = rel.confidence
                 basis = rel.basis or ""
+                evidence_a = getattr(rel, "evidence_a", "") or ""
+                evidence_b = getattr(rel, "evidence_b", "") or ""
+                reasoning = getattr(rel, "reasoning", "") or basis
 
             cypher = CYPHER_BY_TYPE.get(rel_type)
             if not cypher:
                 continue
+            # A2.9 — marker_type cohérent entre persistance Cypher + SupersessionApplier
+            marker_type = "inferred" if conf >= 0.85 else "prudence"
             try:
                 session.run(
                     cypher,
                     c1id=c1id, c2id=c2id, tid=tenant_id,
                     conf=conf, basis=basis,
+                    marker_type=marker_type,
                 )
                 persisted += 1
             except Exception as e:
                 logger.warning(f"[PostImport:Contradictions] Persist error: {e}")
+                continue
+
+            # A2.8 — Application règle §9.4 pour CONTRADICTS uniquement
+            # (REFINES/QUALIFIES n'invalident pas par construction — cf ADR §2.1)
+            if rel_type != "CONTRADICTS":
+                continue
+
+            try:
+                decision = supersession_applier.apply(
+                    claim_a_id=c1id,
+                    claim_b_id=c2id,
+                    relation_type="CONTRADICTS",
+                    evidence_a=evidence_a,
+                    evidence_b=evidence_b,
+                    confidence=conf,
+                    marker_type=marker_type,
+                    detection_method="post_import_cross_doc",
+                    detection_source="detect_contradictions",
+                    reasoning=reasoning,
+                )
+                if decision.action == "supersedes":
+                    supersession_counts["supersedes_created"] += 1
+                elif decision.action == "conflict_pending":
+                    supersession_counts["conflict_pending_created"] += 1
+                else:
+                    supersession_counts["supersession_skipped"] += 1
+            except Exception as e:
+                logger.warning(
+                    f"[PostImport:Contradictions] Supersession apply failed for {c1id} vs {c2id}: {e}"
+                )
+                supersession_counts["supersession_skipped"] += 1
 
     # Compter les nouvelles relations
     with driver.session() as session:
@@ -1004,6 +1177,13 @@ def _run_detect_contradictions(tenant_id: str, progress=None) -> dict:
             "RETURN type(r) as t, count(r) as c"
         )
         after_counts = {r["t"]: r["c"] for r in after}
+
+    logger.info(
+        f"[PostImport:Contradictions] Supersession A2.8 — "
+        f"{supersession_counts['supersedes_created']} :SUPERSEDES créées, "
+        f"{supersession_counts['conflict_pending_created']} :ConflictPending créés, "
+        f"{supersession_counts['supersession_skipped']} skipped"
+    )
 
     return {
         "formal_pairs": len(formal_relations),
@@ -1016,6 +1196,10 @@ def _run_detect_contradictions(tenant_id: str, progress=None) -> dict:
         "total_contradicts": after_counts.get("CONTRADICTS", 0),
         "total_refines": after_counts.get("REFINES", 0),
         "total_qualifies": after_counts.get("QUALIFIES", 0),
+        # A2.8 — métriques de supersession
+        "supersedes_created": supersession_counts["supersedes_created"],
+        "conflict_pending_created": supersession_counts["conflict_pending_created"],
+        "supersession_skipped": supersession_counts["supersession_skipped"],
     }
 
 
@@ -1023,23 +1207,95 @@ def _run_detect_contradictions(tenant_id: str, progress=None) -> dict:
 # LLM direct comparison (Phase B)
 # ============================================================================
 
-_LLM_COMPARE_SYSTEM = """You compare pairs of scientific claims from different documents.
-For each pair, determine the relationship between Claim A and Claim B.
+# DEVIATION 2026-05-21 — prompt duplication, voir doc/ongoing/etudes/deviations_log.md
+# Ce prompt fait la même tâche que `nli_adjudicator.py:NLI_PROMPT` mais en parallèle. À unifier
+# en `claim_relation_classifier.py` partagé quand Phase A3 ou refacto suivante.
+# Si tu modifies ce prompt, vérifie/synchronise `nli_adjudicator.NLI_PROMPT`.
+_LLM_COMPARE_SYSTEM = """You compare pairs of factual claims from different documents.
+For each pair, determine if they CONTRADICT or can CO-EXIST.
 
-Answer with EXACTLY one label per pair:
-- CONTRADICTS: The claims are mutually exclusive — both cannot be true in the same context.
-- REFINES: Claim B adds precision or detail to Claim A (or vice versa).
-- QUALIFIES: One claim adds a condition, exception, or nuance to the other.
-- COMPATIBLE: The claims are consistent, complementary, or say the same thing differently.
-- UNRELATED: The claims discuss different topics despite being in the same cluster.
+═══════════════════════════════════════════════════════════════
+CRITICAL TEST: "Can both claims be TRUE SIMULTANEOUSLY in the real world?"
+═══════════════════════════════════════════════════════════════
+  • If YES → NOT a contradiction (label: REFINES, QUALIFIES, COMPATIBLE, or UNRELATED)
+  • If NO  → CONTRADICTS (only when both cannot be true for the SAME scope/version/condition)
 
-IMPORTANT:
-- Different numerical values for the same measurement IS a contradiction.
-- Different study populations or conditions is NOT a contradiction (it's QUALIFIES or UNRELATED).
-- One claim being more specific than the other is REFINES, not CONTRADICTS.
-- When in doubt, choose COMPATIBLE. False contradictions are worse than missed ones.
+Apply this test rigorously. Surface text similarity is NOT a signal of contradiction.
 
-Respond as JSON: {"results": [{"pair": 1, "label": "...", "reason": "brief explanation"}, ...]}"""
+═══════════════════════════════════════════════════════════════
+EXAMPLES of NON-contradiction (CAN co-exist) — these are NEVER CONTRADICTS:
+═══════════════════════════════════════════════════════════════
+
+(1) Different versions/products in parallel — each version is a distinct system:
+    A: "Product X v2021 supports feature A"
+    B: "Product X v2023 supports feature B"
+    → COMPATIBLE  (v2021 and v2023 are separate systems running in parallel)
+
+(2) Different tools, same restriction — same rule applies to multiple objects:
+    A: "Tool Alpha is limited to monitoring tasks"
+    B: "Tool Beta is limited to monitoring tasks"
+    → COMPATIBLE  (two tools with the same restriction, not a contradiction)
+
+(3) List of options — multiple methods supported for the same goal:
+    A: "Process P can use method M1 as input"
+    B: "Process P can use method M2 as input"
+    → COMPATIBLE  (P supports M1 OR M2, both are valid)
+
+(4) Pricing/scaling by tier — different rates for different usage levels:
+    A: "1 unit = 1 advanced use"
+    B: "1 unit = 0.5 developer access"
+    → COMPATIBLE  (tiered pricing, not contradictory rates)
+
+(5) One claim is more specific (sub-case):
+    A: "All systems support feature X"
+    B: "System Y supports feature X with parameters A and B"
+    → REFINES  (B is a specific instance of A)
+
+(6) One adds a condition or exception:
+    A: "Feature X is enabled"
+    B: "Feature X is enabled only when condition Y is set"
+    → QUALIFIES  (B conditions A)
+
+(7) Same fact rephrased:
+    A: "The maximum is 100"
+    B: "Up to 100 is allowed"
+    → COMPATIBLE  (restatement of the same fact)
+
+═══════════════════════════════════════════════════════════════
+EXAMPLES of REAL CONTRADICTION — both cannot be true:
+═══════════════════════════════════════════════════════════════
+
+(1) Same subject, opposite assertion (NO version/scope qualifier):
+    A: "Module M uses architecture monolithic"
+    B: "Module M uses architecture microservices"
+    → CONTRADICTS  (same subject M, mutually exclusive architectures)
+
+(2) Same measurement, different values (SAME conditions):
+    A: "Process completes in 30 seconds (default config)"
+    B: "Process completes in 60 seconds (default config)"
+    → CONTRADICTS  (same conditions, incompatible values)
+
+(3) Same entity, mutually exclusive lifecycle states:
+    A: "Feature X is deprecated as of v2022"
+    B: "Feature X is fully supported in v2023"
+    → CONTRADICTS  (deprecated vs fully supported are exclusive states)
+
+═══════════════════════════════════════════════════════════════
+LABELS:
+═══════════════════════════════════════════════════════════════
+- CONTRADICTS  : Both cannot be true SIMULTANEOUSLY for the same scope/version/condition.
+- REFINES      : One claim adds precision (sub-case, more specific instance).
+- QUALIFIES    : One claim adds a condition, exception, or temporal/contextual nuance.
+- COMPATIBLE   : Both can be true (parallel scopes, complementary facts, restatement).
+- UNRELATED    : Different topics despite being clustered together.
+
+═══════════════════════════════════════════════════════════════
+GOLDEN RULE: When in doubt, choose COMPATIBLE.
+False contradictions destroy knowledge integrity by removing valid claims from the KG.
+A missed contradiction is recoverable; an erroneous one corrupts downstream reasoning.
+═══════════════════════════════════════════════════════════════
+
+Respond as JSON: {"results": [{"pair": 1, "label": "...", "reason": "brief explanation focused on the SIMULTANEOUS-TRUTH test"}, ...]}"""
 
 
 def _llm_batch_compare(
@@ -1694,6 +1950,9 @@ def _update_state(
     results: List[dict] = None,
     step_progress: float = 0.0,
     step_detail: str = "",
+    cancelled: bool = False,
+    cancelled_before_step: Optional[str] = None,
+    cancelled_at: Optional[float] = None,
 ) -> None:
     try:
         from knowbase.common.clients.redis_client import get_redis_client
@@ -1729,6 +1988,9 @@ def _update_state(
             "progress": len(completed) / len(all_steps) if all_steps else 0,
             "results": results or [],
             "updated_at": time.time(),
+            "cancelled": cancelled,
+            "cancelled_before_step": cancelled_before_step,
+            "cancelled_at": cancelled_at,
         }
         rc.client.set(state_key, json.dumps(data), ex=3600)
     except Exception:

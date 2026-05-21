@@ -97,11 +97,53 @@ Donc on travaille **d'abord** sur la qualité (KG-first runtime, bitemporel, agn
 - Mise à jour pipeline ingestion (étape 1 Document Profile : extraire `version` + `valid_from` du doc ; étape 9 persistance : peupler timestamps claim)
 - Tests : 100% des claims persistés ont les 4 timestamps après cette phase (Gate-B de VISION)
 
-#### A2. Relations claim-vs-claim explicites (1 sem)
+#### A2. Relations claim-vs-claim explicites (1 sem + sous-chantier refonte post-import)
 - Étape 8 du pipeline ingestion (cf VISION §4.3) : classifier `SAME_AS` / `EVOLUTION_OF` / `CONTRADICTS` / `REFINES` / `QUALIFIES`
 - Logique : matching par `(subject_canonical, predicate)`, puis classification selon marker_type (explicit / inferred / prudence)
 - Migration : exécuter cette classification sur le corpus SAP existant
 - Test : sur le bench T2 contradictions, atteindre ≥90% de surface correcte (vs 100% mars 2026 à recalibrer)
+
+**Sous-chantier A2-PostImport — Refonte pipeline post-import** *(ajouté 2026-05-21 suite audit `doc/ongoing/POST_IMPORT_AUDIT_2026-05-21.md`)*
+
+L'audit des 15 étapes du pipeline `/admin/post-import` a révélé 4 problèmes structurels qui doivent être résolus dans Phase A2 (incompatibilité avec le modèle bitemporel A1 + dépendance directe avec le schéma claim-vs-claim A2). 10 étapes sont KEEP, 5 MODIFY, 0 REMOVE.
+
+- **A2.6** — Cancel-flag dans `run_pipeline_job` (0.5j) — *quick win*
+  - Ajouter check Redis `osmose:post_import:cancel:{tenant_id}` au début de chaque itération `for step_id in steps`
+  - Endpoint `/cancel` actuel ne stoppe pas le job RQ → seule option = restart container
+  - Évite les restarts forcés pour interrompre un pipeline en cours
+
+- **A2.7** — Description frontend `c4_relations` (0.1j) — *quick win 5min*
+  - Le STEPS[] dit "Adjudication LLM (Claude Haiku)" alors que le code appelle Qwen3 via `llm_router`
+  - Pas de violation charte, juste un libellé désaligné
+
+- **A2.8** — Setter `invalidated_at` post-detection (1.5j, BLOQUANT)
+  - Étapes `detect_contradictions` (#7) + `c4_relations` (#13) + `c6_pivots` (#14) créent les relations mais **n'invalident jamais le claim cible**
+  - Ajouter logique post-adjudication : selon règle supersession (CAS 1-4 NULL handling de ADR_BITEMPOREL §9), marquer `claim.invalidated_at = datetime()` + `invalidated_by` + `invalidation_reason`
+  - Blocker direct des requêtes point-in-time (AX-1 + AX-6)
+
+- **A2.9** — Timestamps sur relations cross-claim (1j)
+  - `:CHAINS_TO` (étape #6), `:CONTRADICTS / :REFINES / :QUALIFIES` (étapes #7 + #13), `:EVOLVES_TO` (étape #14) n'ont pas de marquage temporel
+  - Ajouter `valid_from` (inherit_from_claims) + `invalidated_at` (si l'un des claims est invalidé après création)
+  - Sémantique précise à trancher dans ADR A2 (extension §9 ADR_BITEMPOREL)
+
+- **A2.10** — Harmoniser `:EVOLUTION_OF` / `:EVOLVES_TO` (1j)
+  - C6 pivots (étape #14) crée `:EVOLVES_TO` par heuristique pivot
+  - ADR_BITEMPOREL §3.3 prévoit `:EVOLUTION_OF` avec `marker_type ∈ {explicit, inferred, prudence}`
+  - Recommandation : harmoniser sur `:EVOLUTION_OF` avec `marker_type='inferred', detected_via='pivot'` pour C6, et `marker_type='explicit'|'prudence'` pour A2 algo
+  - Décision finale dans ADR A2 (Scénario A vs Scénario B documentés dans audit §3.3)
+
+- **A2.11** — Adapter critère `archive_isolated` (0.5j)
+  - Critère actuel : `archived=true SI structured_form_json IS NULL AND 0 relations`
+  - Post-Phase A1.x ClaimFirst, `structured_form_json` est probablement ~0% (la structure est inline dans le claim)
+  - Étape 1 : mesurer distribution `structured_form_json` sur les 11622 claims actuels
+  - Étape 2 : adapter critère selon résultat (probablement supprimer la condition `structured_form_json IS NULL`)
+
+- **A2.12** — Réingestion full + post-import propre (1j)
+  - Une fois A2.6 à A2.11 livrés + algo supersession A2 mainline implémenté
+  - Re-purger + ré-ingérer + relancer pipeline post-import complet 15 étapes
+  - Vérifier audit post-réingestion (script `audit_phase_a2_reingestion.py` étendu pour relations bitemporelles)
+
+**Total sous-chantier A2-PostImport** : ~5j effectifs (intégré dans la semaine A2). Pré-requis : ADR A2 finalisé qui tranche le schéma cible.
 
 #### A3. Runtime KG-first — architecture Parse → Plan → Execute → Evaluate → Synthesize (3 sem)
 

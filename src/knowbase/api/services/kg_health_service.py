@@ -206,7 +206,7 @@ class KGHealthService:
         # Relations claim <-> claim (toutes natures) + claims isoles
         relations_result = session.run(
             """
-            MATCH (c1:Claim {tenant_id: $tid})-[r:CONTRADICTS|REFINES|QUALIFIES|COMPLEMENTS|SPECIALIZES|CHAINS_TO|EVOLVES_TO]-(c2:Claim)
+            MATCH (c1:Claim {tenant_id: $tid})-[r:CONTRADICTS|REFINES|QUALIFIES|COMPLEMENTS|SPECIALIZES|CHAINS_TO|EVOLUTION_OF|EVOLVES_TO]-(c2:Claim)
             WHERE c1.claim_id < c2.claim_id
             RETURN count(DISTINCT r) AS total_relations
             """,
@@ -218,7 +218,7 @@ class KGHealthService:
             MATCH (c:Claim {tenant_id: $tid})
             WITH count(c) AS total,
                  sum(CASE WHEN NOT EXISTS {
-                     MATCH (c)-[:CONTRADICTS|REFINES|QUALIFIES|COMPLEMENTS|SPECIALIZES|CHAINS_TO|EVOLVES_TO]-(:Claim)
+                     MATCH (c)-[:CONTRADICTS|REFINES|QUALIFIES|COMPLEMENTS|SPECIALIZES|CHAINS_TO|EVOLUTION_OF|EVOLVES_TO]-(:Claim)
                  } THEN 1 ELSE 0 END) AS isolated
             RETURN total, isolated
             """,

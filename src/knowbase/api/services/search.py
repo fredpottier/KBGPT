@@ -244,7 +244,7 @@ def _search_claims_vector(
                 WHERE score > 0.65 AND c.tenant_id = $tenant_id
                 OPTIONAL MATCH (c)-[tension:CONTRADICTS|REFINES|QUALIFIES]-(other:Claim)
                 OPTIONAL MATCH (c)-[:ABOUT]->(e:Entity)
-                OPTIONAL MATCH (c)-[comp:COMPLEMENTS|EVOLVES_TO|SPECIALIZES]-(complement:Claim)
+                OPTIONAL MATCH (c)-[comp:COMPLEMENTS|EVOLUTION_OF|EVOLVES_TO|SPECIALIZES]-(complement:Claim)
                 WHERE complement.doc_id <> c.doc_id
                 WITH c, score,
                      collect(DISTINCT CASE WHEN type(tension) = 'CONTRADICTS' THEN '⚠ CONTRADICTION: ' + coalesce(other.text, '')
@@ -368,7 +368,7 @@ def _search_via_question_dimensions(
             MATCH (c:Claim {claim_id: qs.claim_id, tenant_id: $tenant_id})
             OPTIONAL MATCH (c)-[:ABOUT]->(e:Entity)
             OPTIONAL MATCH (c)-[tension:CONTRADICTS|REFINES|QUALIFIES]-(other:Claim)
-            OPTIONAL MATCH (c)-[comp:COMPLEMENTS|EVOLVES_TO|SPECIALIZES]-(complement:Claim)
+            OPTIONAL MATCH (c)-[comp:COMPLEMENTS|EVOLUTION_OF|EVOLVES_TO|SPECIALIZES]-(complement:Claim)
             WHERE complement.doc_id <> c.doc_id
 
             RETURN

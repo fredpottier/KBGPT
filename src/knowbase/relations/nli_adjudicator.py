@@ -52,6 +52,10 @@ THRESHOLDS = {
     "REFINES": 0.75,
 }
 
+# DEVIATION 2026-05-21 — prompt duplication, voir doc/ongoing/etudes/deviations_log.md
+# Ce prompt fait la même tâche que `post_import.py:_LLM_COMPARE_SYSTEM` mais en parallèle. À
+# unifier en `claim_relation_classifier.py` partagé quand Phase A3 ou refacto suivante.
+# Si tu modifies ce prompt, vérifie/synchronise `_LLM_COMPARE_SYSTEM`.
 NLI_PROMPT = """You are a factual relation detector for technical documentation.
 
 Given two claims from DIFFERENT documents, determine their logical relationship.

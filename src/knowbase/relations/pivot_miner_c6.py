@@ -235,7 +235,9 @@ class PivotMinerC6:
           pour permettre les runs incrementaux
         """
         query = """
-        MATCH (a:Claim {tenant_id: $tid})-[r:CONTRADICTS|QUALIFIES|REFINES|COMPLEMENTS|EVOLVES_TO|SPECIALIZES|C4_SCANNED|C6_SCANNED]-(b:Claim)
+        // A2.10 : EVOLVES_TO renommé EVOLUTION_OF — on garde EVOLVES_TO dans le MATCH
+        // pour exclure les paires déjà scannées avant migration (rétro-compat lecture)
+        MATCH (a:Claim {tenant_id: $tid})-[r:CONTRADICTS|QUALIFIES|REFINES|COMPLEMENTS|EVOLUTION_OF|EVOLVES_TO|SPECIALIZES|C4_SCANNED|C6_SCANNED]-(b:Claim)
         WHERE a.claim_id < b.claim_id
         RETURN a.claim_id AS a_id, b.claim_id AS b_id
         """

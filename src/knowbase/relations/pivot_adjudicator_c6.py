@@ -5,7 +5,7 @@ Stage 2 du pipeline C6 Cross-doc Pivots.
 
 Pour chaque paire de claims partageant une entite pivot, determine :
 - COMPLEMENTS : les claims apportent des perspectives complementaires sur le meme sujet
-- EVOLVES_TO  : un claim est une version plus recente/mise a jour de l'autre
+- EVOLUTION_OF  : un claim est une version plus recente/mise a jour de l'autre
 - SPECIALIZES : un claim est un cas particulier de l'autre (general → specifique)
 - NONE        : pas de relation significative
 
@@ -33,7 +33,7 @@ class PivotAdjudicationResult:
     """Resultat de l'adjudication C6 d'une paire de claims."""
     claim_a_id: str
     claim_b_id: str
-    relation: str           # COMPLEMENTS | EVOLVES_TO | SPECIALIZES | NONE
+    relation: str           # COMPLEMENTS | EVOLUTION_OF | SPECIALIZES | NONE
     confidence: float
     evidence_a: str
     evidence_b: str
@@ -48,7 +48,7 @@ class PivotAdjudicationResult:
 
 THRESHOLDS = {
     "COMPLEMENTS": 0.75,
-    "EVOLVES_TO": 0.80,
+    "EVOLUTION_OF": 0.80,
     "SPECIALIZES": 0.75,
 }
 
@@ -61,7 +61,7 @@ Claim B (from "{doc_b}"): "{text_b}"
 
 Classify the relationship as EXACTLY one of:
 - COMPLEMENTS: The claims provide DIFFERENT but COMPATIBLE information about the same subject. One covers aspects the other doesn't. Together they give a fuller picture.
-- EVOLVES_TO: Claim B is a NEWER version or UPDATE of Claim A (or vice versa). The factual content has changed between document versions.
+- EVOLUTION_OF: Claim B is a NEWER version or UPDATE of Claim A (or vice versa). The factual content has changed between document versions.
 - SPECIALIZES: One claim is a SPECIFIC case or detailed instance of the other's general statement.
 - NONE: The claims are unrelated, nearly identical, or already covered by CONTRADICTS/QUALIFIES/REFINES.
 
@@ -69,12 +69,12 @@ CRITICAL RULES:
 - Nearly IDENTICAL claims (just minor wording changes) = NONE. Don't flag trivial rephrasing.
 - Product rebranding ("SAP Cloud ERP Private Edition" = "SAP S/4HANA Cloud Private Edition") is NOT a relationship — it's the same thing renamed.
 - COMPLEMENTS requires genuinely DIFFERENT information (different aspects, features, or perspectives). Not just the same fact from two docs.
-- EVOLVES_TO requires a clear factual CHANGE between versions (value changed, feature added/removed, process modified).
+- EVOLUTION_OF requires a clear factual CHANGE between versions (value changed, feature added/removed, process modified).
 - SPECIALIZES requires a clear general-to-specific relationship (e.g., "all systems support X" → "System Y supports X with parameters A, B, C").
 - You MUST quote the EXACT phrases from each claim that create the relationship.
 
 Respond ONLY with valid JSON (no markdown):
-{{"relation": "COMPLEMENTS|EVOLVES_TO|SPECIALIZES|NONE", "confidence": 0.0, "evidence_a": "exact quote from Claim A", "evidence_b": "exact quote from Claim B", "reasoning": "one sentence why"}}"""
+{{"relation": "COMPLEMENTS|EVOLUTION_OF|SPECIALIZES|NONE", "confidence": 0.0, "evidence_a": "exact quote from Claim A", "evidence_b": "exact quote from Claim B", "reasoning": "one sentence why"}}"""
 
 
 class PivotAdjudicatorC6:
