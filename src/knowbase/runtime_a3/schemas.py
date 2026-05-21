@@ -246,6 +246,94 @@ class PlanOutput(BaseModel):
 
 
 # ============================================================================
+# Execute — Résultats agrégés par tool call
+# ============================================================================
+
+
+CoverageSignal = Literal["full", "partial", "empty"]
+
+
+class ClaimSummary(BaseModel):
+    """Vue compacte d'un :Claim Neo4j (cf ADR_BITEMPOREL §4)."""
+
+    model_config = ConfigDict(extra="allow")  # tolère champs additionnels du KG
+
+    claim_id: str
+    subject_canonical: Optional[str] = None
+    predicate: Optional[str] = None
+    value: Optional[str] = None
+    value_normalized: Optional[str] = None
+    confidence: Optional[float] = None
+    valid_from: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
+    ingested_at: Optional[datetime] = None
+    invalidated_at: Optional[datetime] = None
+    marker_type: Optional[str] = None  # explicit / inferred / prudence
+    source_doc_id: Optional[str] = None
+
+
+class SectionSummary(BaseModel):
+    """Vue compacte d'une :Section ou chunk Qdrant pour citation cliquable."""
+
+    model_config = ConfigDict(extra="allow")
+
+    section_id: str
+    document_id: Optional[str] = None
+    heading: Optional[str] = None
+    text_excerpt: Optional[str] = None  # tronqué pour ne pas inflate l'output
+    score: Optional[float] = None        # score retrieval (Qdrant uniquement)
+
+
+class ConflictPendingSummary(BaseModel):
+    """Vue compacte d'un :ConflictPending node (cf ADR_RELATIONS_CLAIM_CLAIM §2.6)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    conflict_id: str
+    resolution_status: str = "unresolved"
+    involved_claim_ids: List[str] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
+class RelationSummary(BaseModel):
+    """Vue compacte d'une relation claim-vs-claim (cf ADR_RELATIONS_CLAIM_CLAIM)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    relation_type: str  # EVOLUTION_OF | SUPERSEDES | CONTRADICTS | REFINES | QUALIFIES
+    from_claim_id: str
+    to_claim_id: str
+    confidence: Optional[float] = None
+    detected_at: Optional[datetime] = None
+
+
+class ToolResult(BaseModel):
+    """Résultat d'un ToolCall (cf ADR §2.3)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sub_goal_idx: int = Field(..., ge=0)
+    tool: ToolName
+    claims: List[ClaimSummary] = Field(default_factory=list)
+    sections: List[SectionSummary] = Field(default_factory=list)
+    conflict_pendings: List[ConflictPendingSummary] = Field(default_factory=list)
+    relations_traced: List[RelationSummary] = Field(default_factory=list)
+    coverage_signal: CoverageSignal = "empty"
+    duration_s: float = Field(default=0.0, ge=0.0)
+    error: Optional[str] = None
+
+
+class ExecuteOutput(BaseModel):
+    """Output structuré de l'Execute (cf ADR §2.3)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    results: List[ToolResult] = Field(default_factory=list)
+    total_duration_s: float = Field(default=0.0, ge=0.0)
+    schema_version: str = "a3.0"
+
+
+# ============================================================================
 # Exceptions
 # ============================================================================
 
@@ -270,5 +358,11 @@ class ParseTimeoutError(ParseError):
 
 class PlanError(Exception):
     """Erreur générique du module Plan."""
+
+    pass
+
+
+class ExecuteError(Exception):
+    """Erreur générique du module Execute."""
 
     pass

@@ -17,19 +17,31 @@ Cohérent avec :
 """
 
 from knowbase.runtime_a3.schemas import (
+    ClaimSummary,
+    ConflictPendingSummary,
+    ExecuteOutput,
     ParseInput,
     ParseOutput,
     PlanOutput,
+    RelationSummary,
+    SectionSummary,
     SubGoal,
     ToolCall,
     ToolName,
+    ToolResult,
 )
 
 __all__ = [
+    "ClaimSummary",
+    "ConflictPendingSummary",
+    "ExecuteOutput",
     "ParseInput",
     "ParseOutput",
     "PlanOutput",
+    "RelationSummary",
+    "SectionSummary",
     "SubGoal",
     "ToolCall",
     "ToolName",
+    "ToolResult",
 ]
