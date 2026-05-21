@@ -19,11 +19,17 @@ Cohérent avec :
 from knowbase.runtime_a3.schemas import (
     ParseInput,
     ParseOutput,
+    PlanOutput,
     SubGoal,
+    ToolCall,
+    ToolName,
 )
 
 __all__ = [
     "ParseInput",
     "ParseOutput",
+    "PlanOutput",
     "SubGoal",
+    "ToolCall",
+    "ToolName",
 ]

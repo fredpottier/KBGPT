@@ -12,7 +12,7 @@ Plan / Execute / Evaluate / Synthesize seront ajoutés dans les tasks suivantes 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -170,6 +170,82 @@ class ParseOutput(BaseModel):
 
 
 # ============================================================================
+# Plan (déterministe) — Mapping sub_goal → tool
+# ============================================================================
+
+
+# Tools disponibles (cf ADR §2.2 + §4)
+ToolName = Literal[
+    "kg_claims",                # fact_lookup, definition_lookup
+    "kg_claims_list",           # list_enumeration
+    "lifecycle_query",          # lifecycle_trace
+    "contradiction_surface",    # contradiction_check
+    "comparison_query",         # comparison (composé)
+    "qdrant_sections",          # fallback / enrichissement vectoriel
+]
+
+
+class ToolCall(BaseModel):
+    """Une invocation de tool prévue par Plan (cf ADR §2.2).
+
+    100% déterministe — pas de LLM dans Plan. Le mapping sub_goal.kind → tool
+    est une table de correspondance (cf plan.py).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sub_goal_idx: int = Field(
+        ...,
+        ge=0,
+        description="Index du sub_goal dans ParseOutput.sub_goals.",
+    )
+    tool: ToolName = Field(
+        ...,
+        description="Tool à invoquer (cf ADR §4).",
+    )
+    params: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Paramètres Cypher / Qdrant (subject, predicate, as_of, tenant_id, ...).",
+    )
+    depends_on: List[int] = Field(
+        default_factory=list,
+        description="Indices d'autres ToolCall qui doivent finir avant celui-ci.",
+    )
+    timeout_s: float = Field(
+        default=15.0,
+        gt=0.0,
+        le=60.0,
+        description="Timeout en secondes (cf §2.9 hard caps).",
+    )
+
+
+class PlanOutput(BaseModel):
+    """Output structuré du Plan (cf ADR §2.2)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool_calls: List[ToolCall] = Field(
+        default_factory=list,
+        description="Liste des invocations de tools planifiées.",
+    )
+    unmappable_sub_goals: List[int] = Field(
+        default_factory=list,
+        description=(
+            "Indices des sub_goals qui n'ont pas pu être mappés à un tool "
+            "(Evaluate décidera fallback Qdrant ou abstention)."
+        ),
+    )
+    plan_warnings: List[str] = Field(
+        default_factory=list,
+        description="Warnings émis par Plan (ex: missing_subject_for_kg_claims).",
+    )
+    schema_version: str = Field(
+        default="a3.0",
+        description="Version du schéma pour discriminated unions futures.",
+    )
+
+
+# ============================================================================
 # Exceptions
 # ============================================================================
 
@@ -188,5 +264,11 @@ class ParseValidationError(ParseError):
 
 class ParseTimeoutError(ParseError):
     """LLM Parse a timeout."""
+
+    pass
+
+
+class PlanError(Exception):
+    """Erreur générique du module Plan."""
 
     pass
