@@ -334,6 +334,64 @@ class ExecuteOutput(BaseModel):
 
 
 # ============================================================================
+# Evaluate (LLM #2) — Verdict 4-classes + re_plan_hint contrôlé
+# ============================================================================
+
+
+Verdict = Literal[
+    "CORRECT",                # tous sub_goals couverts par evidence
+    "AMBIGUOUS",              # couverture partielle ou conflits — re-plan possible
+    "INCORRECT",              # evidence contradictoire / non-pertinente
+    "INSUFFICIENT_EVIDENCE",  # tools retournent rien → abstention motivée
+]
+
+
+RePlanHint = Literal[
+    "broaden_subject",
+    "add_qdrant_fallback",
+    "decompose_comparison",
+    "check_lifecycle",
+    "narrow_time_filter",
+    "drop_overspecific_filters",
+    "none",
+]
+
+
+class EvaluateInput(BaseModel):
+    """Input du module Evaluate (cf ADR §2.4)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parse_output: "ParseOutput"
+    plan_output: "PlanOutput"
+    execute_output: "ExecuteOutput"
+    iteration: int = Field(
+        default=0,
+        ge=0,
+        le=2,
+        description="0 = 1er pass, 1 = re-plan (limite hard cap §2.9)",
+    )
+
+
+class EvaluateOutput(BaseModel):
+    """Output structuré de l'Evaluate (cf ADR §2.4)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: Verdict = Field(..., description="Verdict 4-classes.")
+    covered_sub_goals: List[int] = Field(default_factory=list)
+    uncovered_sub_goals: List[int] = Field(default_factory=list)
+    re_plan_hint: RePlanHint = Field(default="none")
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    reasoning: str = Field(
+        default="",
+        max_length=600,
+        description="Courte explication (40-80 mots cible, 600 chars max).",
+    )
+    schema_version: str = Field(default="a3.0")
+
+
+# ============================================================================
 # Exceptions
 # ============================================================================
 
@@ -366,3 +424,13 @@ class ExecuteError(Exception):
     """Erreur générique du module Execute."""
 
     pass
+
+
+class EvaluateError(Exception):
+    """Erreur générique du module Evaluate."""
+
+    pass
+
+
+# Forward refs (EvaluateInput nest ParseOutput/PlanOutput/ExecuteOutput)
+EvaluateInput.model_rebuild()
