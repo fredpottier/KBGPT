@@ -305,6 +305,22 @@ class Claim(BaseModel):
         # V1.1: Add structured_form as JSON string
         if self.structured_form:
             props["structured_form_json"] = json.dumps(self.structured_form)
+            # Phase A3.8-prep (2026-05-21) : dénormaliser le triplet subject /
+            # predicate / object pour permettre les Cypher A3 par indexes
+            # (cf doc/ongoing/POST_A38_ROOT_CAUSE_AUDIT_2026-05-21.md §6).
+            # structured_form_json reste l'autoritatif (rétro-compat 100%).
+            sf_subject = self.structured_form.get("subject")
+            sf_predicate = self.structured_form.get("predicate")
+            sf_object = self.structured_form.get("object")
+            if sf_subject:
+                props["subject_canonical"] = sf_subject
+            if sf_predicate:
+                props["predicate"] = sf_predicate
+            if sf_object:
+                # `object_canonical` (pas `value` ni `object`) — clarifie que
+                # c'est le `object` du structured_form (ADR_PARSE_EVALUATE_RUNTIME §4
+                # mapping documenté).
+                props["object_canonical"] = sf_object
         # V1.3: Quality gate fields
         if self.quality_status:
             props["quality_status"] = self.quality_status

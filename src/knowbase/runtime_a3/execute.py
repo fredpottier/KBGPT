@@ -316,7 +316,9 @@ class Executor:
         for row in rows:
             for side_key, sections_key in (("a", "sections_a"), ("b", "sections_b")):
                 node = row.get(side_key)
-                if node and isinstance(node, dict):
+                # Neo4j Node a .get() mais n'est pas un dict (vs Python dict
+                # accepté aussi pour tests mock).
+                if node is not None and hasattr(node, "get"):
                     cid = node.get("claim_id")
                     if cid and cid not in seen_claim_ids:
                         seen_claim_ids.add(cid)
@@ -327,14 +329,17 @@ class Executor:
                             if sec is not None:
                                 sections.append(sec)
             rel = row.get("r")
-            a = row.get("a") or {}
-            b = row.get("b") or {}
-            if rel is not None and a.get("claim_id") and b.get("claim_id"):
+            a = row.get("a")
+            b = row.get("b")
+            a_cid = a.get("claim_id") if a is not None and hasattr(a, "get") else None
+            b_cid = b.get("claim_id") if b is not None and hasattr(b, "get") else None
+            if rel is not None and a_cid and b_cid:
+                rel_props = rel if hasattr(rel, "get") else {}
                 relations.append(self._relation_from_data(
                     rel_type="CONTRADICTS",
-                    from_id=a["claim_id"],
-                    to_id=b["claim_id"],
-                    rel_props=rel if isinstance(rel, dict) else {},
+                    from_id=a_cid,
+                    to_id=b_cid,
+                    rel_props=rel_props,
                 ))
         return claims, sections, relations
 
@@ -436,8 +441,11 @@ class Executor:
         all_sections: List[SectionSummary] = []
         seen_section_ids: set = set()
         for row in rows:
-            node = row.get("c")
-            if isinstance(node, dict):
+            # Le Cypher peut retourner soit "c" (kg_claims/kg_claims_list) soit
+            # "cl" — supporter les deux + Neo4j Node (qui n'est PAS un dict mais
+            # supporte .get() comme un dict).
+            node = row.get("c") if "c" in row else row.get("cl")
+            if node is not None and hasattr(node, "get"):
                 claims.append(self._claim_from_node(node))
             for s in row.get("sections", []) or []:
                 if not s:
@@ -473,11 +481,15 @@ class Executor:
 
     @staticmethod
     def _claim_from_node(node: Dict[str, Any]) -> ClaimSummary:
+        # Mapping props Neo4j → ClaimSummary (cf POST_A38_ROOT_CAUSE_AUDIT §6).
+        # Le KG stocke en `object_canonical` (dénormalisé de structured_form.object)
+        # — on le mappe sur le champ Pydantic `value` (output ADR §2.3).
+        # `value_normalized` reste optionnel pour cas futurs.
         return ClaimSummary(
             claim_id=str(node.get("claim_id") or node.get("id") or ""),
             subject_canonical=node.get("subject_canonical"),
             predicate=node.get("predicate"),
-            value=node.get("value") or node.get("object_value"),
+            value=node.get("object_canonical") or node.get("value") or node.get("object_value"),
             value_normalized=node.get("value_normalized"),
             confidence=node.get("confidence"),
             valid_from=node.get("valid_from"),
@@ -485,12 +497,13 @@ class Executor:
             ingested_at=node.get("ingested_at"),
             invalidated_at=node.get("invalidated_at"),
             marker_type=node.get("marker_type"),
-            source_doc_id=node.get("source_doc_id") or node.get("document_id"),
+            source_doc_id=node.get("source_doc_id") or node.get("doc_id") or node.get("document_id"),
         )
 
     @staticmethod
     def _section_from_node(node: Any) -> Optional[SectionSummary]:
-        if not isinstance(node, dict):
+        # Supporte Neo4j Node (qui a .get() mais n'est PAS un dict)
+        if node is None or not hasattr(node, "get"):
             return None
         sec_id = node.get("section_id") or node.get("id")
         if not sec_id:
