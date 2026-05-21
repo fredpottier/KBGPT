@@ -204,8 +204,10 @@ class Evaluator:
                 def complete(self, system: str, user: str) -> str:
                     return self._router.complete(
                         task_type=TaskType.FAST_CLASSIFICATION,
-                        system_prompt=system,
-                        user_prompt=user,
+                        messages=[
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": user},
+                        ],
                         temperature=0.0,
                         max_tokens=600,
                     )
