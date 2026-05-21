@@ -1,0 +1,67 @@
+[
+  {
+    "case": "CORRECT — clear evidence",
+    "input_summary": "sub_goal[0] fact_lookup 'product X.max_users' returned 3 claims with consistent value '500'; coverage=full; iteration=0; no ConflictPending",
+    "expected": {
+      "verdict": "CORRECT",
+      "covered_sub_goals": [0],
+      "uncovered_sub_goals": [],
+      "re_plan_hint": "none",
+      "confidence": 0.92,
+      "reasoning": "Three concordant claims directly answer the question. ConflictPending absent. No re-plan needed.",
+      "schema_version": "a3.0"
+    }
+  },
+  {
+    "case": "AMBIGUOUS — partial coverage, re-plan recommended",
+    "input_summary": "sub_goal[0] fact_lookup returned 0 claims; coverage_signal='empty'; iteration=0",
+    "expected": {
+      "verdict": "AMBIGUOUS",
+      "covered_sub_goals": [],
+      "uncovered_sub_goals": [0],
+      "re_plan_hint": "add_qdrant_fallback",
+      "confidence": 0.65,
+      "reasoning": "No KG claims but the question may have Qdrant-only evidence. Suggest qdrant_sections fallback.",
+      "schema_version": "a3.0"
+    }
+  },
+  {
+    "case": "AMBIGUOUS post re-plan (iteration=1) → escalate to CORRECT with warning",
+    "input_summary": "iteration=1, sub_goal[0] now has 1 claim partial; sub_goal[1] still empty",
+    "expected": {
+      "verdict": "CORRECT",
+      "covered_sub_goals": [0],
+      "uncovered_sub_goals": [1],
+      "re_plan_hint": "none",
+      "confidence": 0.55,
+      "reasoning": "Re-plan didn't fully resolve. Proceed with partial answer + uncovered sub_goal warning.",
+      "schema_version": "a3.0"
+    }
+  },
+  {
+    "case": "INCORRECT — results contradict question",
+    "input_summary": "Question asks about feature Z in product X; tool returned only claims about product Y (wrong subject)",
+    "expected": {
+      "verdict": "INCORRECT",
+      "covered_sub_goals": [],
+      "uncovered_sub_goals": [0],
+      "re_plan_hint": "broaden_subject",
+      "confidence": 0.7,
+      "reasoning": "Results pertain to product Y, not product X. Re-plan with broader subject canonicalization.",
+      "schema_version": "a3.0"
+    }
+  },
+  {
+    "case": "INSUFFICIENT_EVIDENCE — out of corpus scope",
+    "input_summary": "parse_confidence=0.2 (LLM warning out_of_scope); all tools returned empty",
+    "expected": {
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "covered_sub_goals": [],
+      "uncovered_sub_goals": [0],
+      "re_plan_hint": "none",
+      "confidence": 0.95,
+      "reasoning": "Question is out of corpus scope (Parse confidence 0.2). Abstain rather than fabricate.",
+      "schema_version": "a3.0"
+    }
+  }
+]

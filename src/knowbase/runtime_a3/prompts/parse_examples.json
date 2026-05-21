@@ -1,0 +1,111 @@
+[
+  {
+    "question": "What is the maximum number of users allowed for product X v2024?",
+    "expected": {
+      "sub_goals": [
+        {
+          "kind": "fact_lookup",
+          "subject_canonical": "product X v2024",
+          "predicate_hint": "maximum users",
+          "object_hint": null,
+          "expected_value_kind": "number",
+          "time_filter": "current",
+          "priority": 1
+        }
+      ],
+      "entities": ["product X v2024"],
+      "language": "en",
+      "raw_question": "What is the maximum number of users allowed for product X v2024?",
+      "parse_confidence": 0.9,
+      "parse_warnings": [],
+      "schema_version": "a3.0"
+    }
+  },
+  {
+    "question": "Quelle est l'évolution de la stratégie de licence pour le module Y entre 2020 et 2024 ?",
+    "expected": {
+      "sub_goals": [
+        {
+          "kind": "lifecycle_trace",
+          "subject_canonical": "module Y",
+          "predicate_hint": "licensing strategy",
+          "object_hint": null,
+          "expected_value_kind": "string",
+          "time_filter": "evolution",
+          "priority": 1
+        }
+      ],
+      "entities": ["module Y"],
+      "language": "fr",
+      "raw_question": "Quelle est l'évolution de la stratégie de licence pour le module Y entre 2020 et 2024 ?",
+      "parse_confidence": 0.85,
+      "parse_warnings": [],
+      "schema_version": "a3.0"
+    }
+  },
+  {
+    "question": "Compare features of system A vs system B for use case Z",
+    "expected": {
+      "sub_goals": [
+        {
+          "kind": "comparison",
+          "subject_canonical": "system A",
+          "predicate_hint": "features for use case Z",
+          "object_hint": null,
+          "expected_value_kind": "string",
+          "time_filter": "current",
+          "priority": 1
+        },
+        {
+          "kind": "comparison",
+          "subject_canonical": "system B",
+          "predicate_hint": "features for use case Z",
+          "object_hint": null,
+          "expected_value_kind": "string",
+          "time_filter": "current",
+          "priority": 1
+        }
+      ],
+      "entities": ["system A", "system B", "use case Z"],
+      "language": "en",
+      "raw_question": "Compare features of system A vs system B for use case Z",
+      "parse_confidence": 0.85,
+      "parse_warnings": [],
+      "schema_version": "a3.0"
+    }
+  },
+  {
+    "question": "Are there any conflicting requirements between regulations X and Y?",
+    "expected": {
+      "sub_goals": [
+        {
+          "kind": "contradiction_check",
+          "subject_canonical": "regulations X Y",
+          "predicate_hint": "requirements",
+          "object_hint": null,
+          "expected_value_kind": "string",
+          "time_filter": "current",
+          "priority": 1
+        }
+      ],
+      "entities": ["regulation X", "regulation Y"],
+      "language": "en",
+      "raw_question": "Are there any conflicting requirements between regulations X and Y?",
+      "parse_confidence": 0.8,
+      "parse_warnings": [],
+      "schema_version": "a3.0"
+    }
+  },
+  {
+    "question": "What's the weather like today?",
+    "expected": {
+      "sub_goals": [],
+      "entities": [],
+      "language": "en",
+      "raw_question": "What's the weather like today?",
+      "parse_confidence": 0.1,
+      "parse_warnings": ["out_of_scope_for_corpus"],
+      "schema_version": "a3.0"
+    }
+  }
+]
