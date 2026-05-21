@@ -246,10 +246,11 @@ class EvaluateInput(BaseModel):
 ```python
 class EvaluateOutput(BaseModel):
     verdict: Literal[
-        "CORRECT",           # tous sub_goals couverts par evidence
+        "CORRECT",           # tous sub_goals couverts par evidence structurelle
         "AMBIGUOUS",         # couverture partielle ou conflits non-résolus — re-plan possible
-        "INCORRECT",         # evidence contradictoire ou non-pertinente — fallback Qdrant TEXT_ONLY
         "INSUFFICIENT_EVIDENCE",  # tools ont retourné peu/rien → abstention motivée
+        # NB: "INCORRECT" est un état terminal produit POST-Synthesize, pas par Evaluate.
+        # Voir §2.4.bis (amendement post-bench A3.4-bis 2026-05-21).
     ]
     covered_sub_goals: List[int]     # idx couverts
     uncovered_sub_goals: List[int]   # idx restants
@@ -284,13 +285,29 @@ Le LLM Evaluate est contraint d'utiliser ce vocabulaire (Literal type côté Pyd
 **Prompt Evaluate** (courts ~200-500 tokens) — voir §3.2 pour template complet.
 
 **Logique routing post-Evaluate** :
-- `CORRECT` → goto Synthesize
+- `CORRECT` → goto Synthesize (qui peut rétrograder en `INCORRECT` post-vérification, cf §2.4.bis)
 - `AMBIGUOUS` ET `iteration < 2` → BOUCLE retour Plan (avec `re_plan_hint`)
 - `AMBIGUOUS` ET `iteration ≥ 2` → fallback Qdrant TEXT_ONLY (cf §2.7 dégradation gracieuse)
-- `INCORRECT` → fallback Qdrant TEXT_ONLY immédiat
 - `INSUFFICIENT_EVIDENCE` → abstention motivée (§2.8)
 
-**Critère de calibration** (cf §6 ROADMAP) : evaluator doit atteindre **≥85% accuracy** sur 50 cas synthétiques labellisés (CORRECT/AMBIGUOUS/INCORRECT/INSUFFICIENT) avant intégration. Bench dans sous-tâche A3.4-bis (BLOQUANT).
+**Critère de calibration** (cf §6 ROADMAP) : evaluator doit atteindre **≥85% accuracy** sur 38 cas synthétiques labellisés (3 classes : CORRECT/AMBIGUOUS/INSUFFICIENT_EVIDENCE) avant intégration. Bench dans sous-tâche A3.4-bis (livré 2026-05-21 ; cf doc/ongoing/POST_BENCH_A34BIS_2026-05-21.md).
+
+### 2.4.bis — Amendement post-bench A3.4-bis (2026-05-21)
+
+**Découverte** : la classe `INCORRECT` n'est pas détectable au niveau Evaluate sans le texte verbatim des claims. `EvaluateInput` ne contient que des signaux structurels (counts, coverage, errors) — pas le contenu sémantique. Le bench A3.4-bis a mesuré INCORRECT à 0% dans les DEUX modes (fallback déterministe ET LIVE LLM DeepSeek-V3.1), confirmant que ce verdict ne peut être émis par Evaluate.
+
+**Décision** : `INCORRECT` devient un **état terminal post-Synthesize**, pas un verdict Evaluate.
+
+**Mécanique** :
+- Evaluate émet 3 verdicts structurellement détectables : `CORRECT / AMBIGUOUS / INSUFFICIENT_EVIDENCE`.
+- Synthesize (LLM #3) ou GroundingVerifier (CH-52.8, livré) peuvent rétrograder un `CORRECT` vers `INCORRECT` final s'ils détectent sémantiquement que l'evidence ne supporte pas la question.
+- Quand INCORRECT est produit en aval → fallback Qdrant TEXT_ONLY immédiat (logique inchangée).
+- Le type `Verdict` Python garde les 4 valeurs Literal (rétro-compat + le pipeline aval peut émettre INCORRECT) mais l'Evaluate seul ne devrait jamais l'émettre. Le few-shot example INCORRECT est retiré de `evaluate_examples.json`.
+
+**Justification** :
+- Le bench A3.4-bis LIVE a montré que le LLM Evaluate fait **pire** que le fallback déterministe sur les 3 classes structurelles (68% vs 76%). Sur les 38 cas hors-INCORRECT : LIVE 89.5% / fallback 100%. Gate ≥85% atteint dans les 2 modes.
+- Réutilise CH-52.8 GroundingVerifier (NLI claim-vs-claim) déjà livré, qui voit le texte verbatim et peut détecter contradictions sémantiques.
+- Évite Goodhart's Law sur le gold-set (cf [[feedback_no_benchmark_overfit_focus_production]]).
 
 ### 2.5 Module SYNTHESIZE — Rédaction réponse humaine (LLM #3, optionnel)
 

@@ -143,7 +143,12 @@ def _valid_llm_response(
 class TestFewShotExamples:
     def test_examples_load(self):
         examples = _load_examples()
-        assert len(examples) >= 5
+        # Post A3.4-bis : 4 examples (INCORRECT retiré, cf ADR §2.4.bis)
+        assert len(examples) >= 4
+        # Aucun example ne doit émettre INCORRECT — réservé au downstream
+        for ex in examples:
+            assert ex["expected"]["verdict"] != "INCORRECT", \
+                f"INCORRECT must not appear in Evaluate few-shots: {ex['case']}"
 
     def test_examples_validate_against_schema(self):
         examples = _load_examples()

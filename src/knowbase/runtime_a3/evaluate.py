@@ -53,11 +53,16 @@ logger = logging.getLogger("knowbase.runtime_a3.evaluate")
 _SYSTEM_PROMPT_BASE = """You are a result evaluator for a knowledge graph runtime.
 
 Given a user's sub-goals and the aggregated tool results, decide if the system has
-enough evidence to answer.
+enough STRUCTURAL evidence to answer.
+
+You see only structural signals (counts, coverage_signal, errors, conflict_pendings) —
+NOT the verbatim text of claims. Semantic relevance (e.g., wrong subject, irrelevant
+content) is checked downstream by the synthesizer + grounding verifier. Do NOT try
+to detect semantic mismatches; just judge whether the structure supports answering.
 
 OUTPUT JSON ONLY (no markdown, no commentary). Schema:
 {
-  "verdict": "CORRECT" | "AMBIGUOUS" | "INCORRECT" | "INSUFFICIENT_EVIDENCE",
+  "verdict": "CORRECT" | "AMBIGUOUS" | "INSUFFICIENT_EVIDENCE",
   "covered_sub_goals": [<int idx>],
   "uncovered_sub_goals": [<int idx>],
   "re_plan_hint": "broaden_subject" | "add_qdrant_fallback" | "decompose_comparison" | "check_lifecycle" | "narrow_time_filter" | "drop_overspecific_filters" | "none",
@@ -67,20 +72,23 @@ OUTPUT JSON ONLY (no markdown, no commentary). Schema:
 }
 
 VERDICTS:
-- CORRECT: every sub_goal has >=1 relevant claim. ConflictPending presence is OK
-  (the synthesizer will expose them transparently).
-- AMBIGUOUS: partial coverage OR multiple plausible answers — re-plan can help.
-- INCORRECT: results contradict the sub_goals OR no evidence is relevant.
-- INSUFFICIENT_EVIDENCE: tools returned almost nothing AND re-plan unlikely to help.
+- CORRECT: every sub_goal has >=1 relevant claim (coverage 'full' or 'partial' at iter>=1).
+  ConflictPending presence is OK — the synthesizer will expose them transparently.
+- AMBIGUOUS: partial coverage at iteration 0, OR mix of full and empty — re-plan can help.
+- INSUFFICIENT_EVIDENCE: tools returned almost nothing AND re-plan unlikely to help,
+  OR parse_confidence < 0.3 (out of corpus scope).
 
-RULES:
-- A ConflictPending on a sub_goal subject is NOT automatically AMBIGUOUS. Mark CORRECT
-  and let synthesizer expose the conflict transparently.
-- If iteration >= 1 and you already re-planned once, DO NOT mark AMBIGUOUS again — force
-  a verdict between CORRECT, INCORRECT, INSUFFICIENT_EVIDENCE.
-- Coverage signal "empty" on a priority-1 sub_goal + no fallback hint -> INSUFFICIENT_EVIDENCE.
+RULES (strict, structural only):
+- A ConflictPending on a sub_goal is NOT automatically AMBIGUOUS. Mark CORRECT.
+- If iteration >= 1 and you already re-planned, DO NOT mark AMBIGUOUS again — force
+  CORRECT (with warning) or INSUFFICIENT_EVIDENCE.
+- Coverage signal "empty" on ALL sub_goals + iteration >= 1 -> INSUFFICIENT_EVIDENCE.
+- Coverage signal "empty" on ALL sub_goals + iteration == 0 -> AMBIGUOUS (add_qdrant_fallback).
 - Coverage signal "partial" + iteration == 0 -> AMBIGUOUS (re-plan).
 - Coverage signal "partial" + iteration >= 1 -> CORRECT (with warning).
+- All tools errored -> INSUFFICIENT_EVIDENCE.
+
+NEVER emit "INCORRECT" — it is reserved for downstream Synthesize/GroundingVerifier.
 
 Be precise and brief. The synthesizer takes care of style.
 

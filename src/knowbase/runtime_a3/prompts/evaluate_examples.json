@@ -39,19 +39,6 @@
     }
   },
   {
-    "case": "INCORRECT — results contradict question",
-    "input_summary": "Question asks about feature Z in product X; tool returned only claims about product Y (wrong subject)",
-    "expected": {
-      "verdict": "INCORRECT",
-      "covered_sub_goals": [],
-      "uncovered_sub_goals": [0],
-      "re_plan_hint": "broaden_subject",
-      "confidence": 0.7,
-      "reasoning": "Results pertain to product Y, not product X. Re-plan with broader subject canonicalization.",
-      "schema_version": "a3.0"
-    }
-  },
-  {
     "case": "INSUFFICIENT_EVIDENCE — out of corpus scope",
     "input_summary": "parse_confidence=0.2 (LLM warning out_of_scope); all tools returned empty",
     "expected": {

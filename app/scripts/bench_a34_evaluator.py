@@ -84,10 +84,22 @@ def run_case(
 
 
 def compute_metrics(results: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Calcule accuracy globale + per-class + per-difficulty + confusion matrix."""
+    """Calcule accuracy globale + per-class + per-difficulty + confusion matrix.
+
+    Le gate effectif post A3.4-bis (cf ADR §2.4.bis) est mesuré sur 38 cas
+    (exclusion INCORRECT — réservée downstream Synthesize). On rapporte les
+    deux scores : `accuracy_all_50` (legacy/diagnostic) et `accuracy_3_class`
+    (gate effectif).
+    """
     total = len(results)
     n_match = sum(1 for r in results if r["match"])
     accuracy = n_match / total if total else 0.0
+
+    # Gate effectif post A3.4-bis : 3 classes (exclusion INCORRECT)
+    results_3c = [r for r in results if r["expected_verdict"] != "INCORRECT"]
+    n_3c = len(results_3c)
+    n_match_3c = sum(1 for r in results_3c if r["match"])
+    accuracy_3c = (n_match_3c / n_3c) if n_3c else 0.0
 
     # Per-class
     by_class: Dict[str, Dict[str, int]] = {}
@@ -133,7 +145,10 @@ def compute_metrics(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         "n_cases": total,
         "n_match": n_match,
         "n_miss": total - n_match,
-        "gate_GA3_2_passed": accuracy >= 0.85,
+        "accuracy_3_class": accuracy_3c,
+        "n_cases_3_class": n_3c,
+        "n_match_3_class": n_match_3c,
+        "gate_GA3_2_passed": accuracy_3c >= 0.85,
         "by_class": by_class,
         "by_difficulty": by_diff,
         "confusion_matrix": confusion,
@@ -145,10 +160,13 @@ def print_report(metrics: Dict[str, Any], results: List[Dict[str, Any]], mode: s
     print(f"\n{'=' * 70}")
     print(f"BENCH A3.4-bis — Evaluator gold-set [{mode}]")
     print(f"{'=' * 70}\n")
-    acc = metrics["accuracy"]
+    acc_all = metrics["accuracy"]
+    acc_3c = metrics["accuracy_3_class"]
     gate = "✓ PASS" if metrics["gate_GA3_2_passed"] else "✗ FAIL"
-    print(f"Global accuracy : {acc:.1%} ({metrics['n_match']}/{metrics['n_cases']})")
-    print(f"Gate GA3-2 ≥85% : {gate}\n")
+    print(f"Accuracy 50 cases (legacy diag) : {acc_all:.1%} ({metrics['n_match']}/{metrics['n_cases']})")
+    print(f"Accuracy 38 cases (3-class gate, post §2.4.bis) : {acc_3c:.1%} "
+          f"({metrics['n_match_3_class']}/{metrics['n_cases_3_class']})")
+    print(f"Gate GA3-2 ≥85% (3-class) : {gate}\n")
 
     print("PER CLASS:")
     for v, m in metrics["by_class"].items():

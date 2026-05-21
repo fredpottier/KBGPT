@@ -1,10 +1,18 @@
 # Post-bench A3.4-bis — Evaluator gate GA3-2 (2026-05-21)
 
-**Status** : ⚠ Gate ≥85% **NON ATTEINT** dans les deux modes (fallback 76%, LIVE LLM 68%).
+**Status FINAL** : ✓ Gate ≥85% **ATTEINT** après amendement ADR §2.4.bis (Option A).
+- Fallback déterministe : **100% (38/38)** sur 3 classes
+- LIVE LLM (DeepSeek-V3.1) : **89.5% (34/38)** sur 3 classes
 
-**Découverte structurelle** : la classe `INCORRECT` n'est pas détectable au niveau
-Evaluate sans contenu textuel des claims. Le gold-set 50 cas révèle une limitation
-architecturale de l'ADR §2.4 que nous proposons de clarifier avant A3.5.
+**Décision actée** : `INCORRECT` est un état terminal post-Synthesize, pas un verdict
+Evaluate. L'ADR §2.4 a été amendé (§2.4.bis), les few-shot examples mis à jour
+(4 examples au lieu de 5), et le system prompt révisé pour interdire explicitement
+au LLM d'émettre INCORRECT.
+
+**Découverte secondaire** : le fallback déterministe reste STRICTEMENT meilleur
+que le LIVE LLM sur les 38 cas (100% vs 89.5%). Le LLM hésite sur 4 cas
+INSUFFICIENT_EVIDENCE (préfère AMBIGUOUS). Implication A3.7 : runtime peut
+court-circuiter le LLM pour les cas dont le fallback est confiant.
 
 ---
 
@@ -182,8 +190,39 @@ Raisons :
   - `data/benchmark/a34_evaluator/run_fallback_only_20260521_154542.json`
   - `data/benchmark/a34_evaluator/run_live_llm_20260521_154953.json`
 
-## 6. Décision attendue
+## 6. Décision finale (2026-05-21)
 
-User → Claude : choisir A / B / C, ou hybride. Sans décision, A3.5 démarre en
-considérant Verdict à 3 classes (équivalent option A) et l'ADR sera amendé en
-parallèle de A3.5.
+**Option A appliquée** (user confirmation).
+
+Changements :
+- `doc/ongoing/adr/ADR_PARSE_EVALUATE_RUNTIME.md` §2.4 + nouveau §2.4.bis : Verdict
+  réduit à 3 classes au niveau Evaluate. INCORRECT = état terminal post-Synthesize.
+- `src/knowbase/runtime_a3/prompts/evaluate_examples.json` : 5 → 4 few-shots
+  (suppression INCORRECT).
+- `src/knowbase/runtime_a3/evaluate.py` : system prompt revu, mention explicite
+  "NEVER emit INCORRECT — reserved for downstream Synthesize/GroundingVerifier".
+- `app/scripts/bench_a34_evaluator.py` : compute_metrics retourne désormais
+  `accuracy_3_class` (gate effectif) en plus de `accuracy` legacy.
+- `tests/runtime_a3/test_evaluate.py` : test `test_examples_load` adapté à 4
+  examples + assertion qu'INCORRECT n'apparaît pas dans les few-shots.
+
+Tests post-amendement : **154 passing**, aucune régression.
+
+## 7. Résultats finaux gate GA3-2
+
+### Mode fallback déterministe
+- Accuracy 50 cas (legacy diagnostic) : 76% (38/50)
+- **Accuracy 38 cas (gate 3-class) : 100% (38/38)**
+- Gate GA3-2 ≥85% : **✓ PASS**
+
+### Mode LIVE LLM (DeepSeek-V3.1 via DeepInfra)
+- Accuracy 50 cas (legacy diagnostic) : 68% (34/50)
+- **Accuracy 38 cas (gate 3-class) : 89.5% (34/38)**
+- Gate GA3-2 ≥85% : **✓ PASS**
+- Per class : CORRECT 100%, AMBIGUOUS 100%, INSUFFICIENT 69.2% (4 fails → AMBIGUOUS)
+
+### Note pour A3.7 intégration runtime
+Le fallback déterministe (100%) surclasse le LIVE LLM (89.5%) sur ce gold-set.
+À considérer en A3.7 : court-circuit LLM si fallback confiant (e.g., tous full
+ou tous empty), invocation LLM uniquement sur cas mixed/ambigus où sa nuance
+sémantique peut apporter.
