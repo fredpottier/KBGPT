@@ -175,7 +175,7 @@ class Planner:
         params: Dict = {
             "subject": sub_goal.subject_canonical,
             "predicate": sub_goal.predicate_hint,  # peut être None — query gère
-            "as_of": as_of.isoformat(),
+            "as_of": as_of.date().isoformat(),
             "tenant_id": tenant_id,
         }
         return [
@@ -207,7 +207,7 @@ class Planner:
         params: Dict = {
             "subject_filter": sub_goal.subject_canonical,
             "predicate": sub_goal.predicate_hint,
-            "as_of": as_of.isoformat(),
+            "as_of": as_of.date().isoformat(),
             "tenant_id": tenant_id,
         }
         return [
@@ -261,7 +261,7 @@ class Planner:
         params: Dict = {
             "subject": sub_goal.subject_canonical,
             "tenant_id": tenant_id,
-            "as_of": as_of.isoformat(),
+            "as_of": as_of.date().isoformat(),
         }
         return [
             ToolCall(
@@ -300,7 +300,7 @@ class Planner:
         params: Dict = {
             "subject": sub_goal.subject_canonical,
             "predicate": sub_goal.predicate_hint,
-            "as_of": as_of.isoformat(),
+            "as_of": as_of.date().isoformat(),
             "tenant_id": tenant_id,
         }
         return [

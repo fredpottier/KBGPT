@@ -528,6 +528,69 @@ class ExecuteError(Exception):
     pass
 
 
+# ============================================================================
+# Subject Resolver runtime (A3.9, post-A3.8 grounding fix)
+# ============================================================================
+
+
+ResolverSource = Literal[
+    "exact_normalized",   # match sur Entity.normalized_name (canonical_key)
+    "fts",                # match full-text Neo4j sur Entity.name
+    "embedding",          # match embedding Qdrant
+    "exact_subject",      # match direct sur Claim.subject_canonical existant
+]
+
+
+class ResolverCandidate(BaseModel):
+    """Un candidat retourné par le SubjectResolver."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entity_id: Optional[str] = None
+    entity_name: str = Field(..., description="Le name du :Entity dans le KG.")
+    subject_canonical: Optional[str] = Field(
+        default=None,
+        description="Le subject_canonical à utiliser dans Cypher kg_claims. None = pas de claim associé.",
+    )
+    score: float = Field(..., ge=0.0, le=1.0, description="Score normalisé [0,1].")
+    source: ResolverSource
+    n_supporting_claims: int = Field(default=0, ge=0)
+    predicate_match: Optional[bool] = Field(
+        default=None,
+        description="True si re-ranking a confirmé predicate cohérent ; False si pas de claim avec ce predicate ; None si non testé.",
+    )
+
+
+class ResolverResult(BaseModel):
+    """Output du SubjectResolver.
+
+    Si `resolved` est None, l'orchestrator peut soit retomber sur le subject_canonical
+    brut du Parse (best effort), soit abstenir.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    resolved: Optional[str] = Field(
+        default=None,
+        description="subject_canonical à utiliser dans Cypher kg_claims. None = abstention.",
+    )
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    method: str = Field(default="no_match", description="Méthode finale utilisée.")
+    candidates: List[ResolverCandidate] = Field(
+        default_factory=list,
+        description="Top-K candidats (au moins 5 max) pour transparence/debug.",
+    )
+    abstain_reason: Optional[str] = Field(default=None)
+    duration_s: float = Field(default=0.0, ge=0.0)
+    schema_version: str = Field(default="a3.0")
+
+
+class SubjectResolverError(Exception):
+    """Erreur générique du SubjectResolver."""
+
+    pass
+
+
 class EvaluateError(Exception):
     """Erreur générique du module Evaluate."""
 

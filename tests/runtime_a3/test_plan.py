@@ -108,7 +108,7 @@ class TestKgClaims:
         assert tc.params["subject"] == "product alpha"
         assert tc.params["predicate"] == "max_users"
         assert tc.params["tenant_id"] == "default"
-        assert tc.params["as_of"] == as_of.isoformat()
+        assert tc.params["as_of"] == as_of.date().isoformat()
 
     def test_definition_lookup_same_tool(self):
         po = _make_parse_output(sub_goals=[
@@ -270,22 +270,25 @@ class TestComparison:
 
 class TestAsOfResolution:
     def test_explicit_as_of_used(self):
+        # Note: as_of est sérialisé en date pure (YYYY-MM-DD) pour Cypher date(),
+        # cf execute.py CYPHER_KG_CLAIMS qui fait date(c.valid_from) <= date($as_of)
         custom = datetime(2025, 1, 1, tzinfo=timezone.utc)
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="fact_lookup", subject_canonical="x")
         ])
         result = plan(_make_parse_input(as_of_date=custom), po)
-        assert result.tool_calls[0].params["as_of"] == custom.isoformat()
+        assert result.tool_calls[0].params["as_of"] == custom.date().isoformat()
 
     def test_default_as_of_is_now(self):
+        from datetime import date
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="fact_lookup", subject_canonical="x")
         ])
-        before = datetime.now(timezone.utc)
+        before = datetime.now(timezone.utc).date()
         result = plan(_make_parse_input(), po)
-        after = datetime.now(timezone.utc)
+        after = datetime.now(timezone.utc).date()
         as_of_str = result.tool_calls[0].params["as_of"]
-        as_of = datetime.fromisoformat(as_of_str)
+        as_of = date.fromisoformat(as_of_str)
         assert before <= as_of <= after
 
 

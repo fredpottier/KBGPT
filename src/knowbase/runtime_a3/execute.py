@@ -14,6 +14,7 @@ Domain-agnostic : aucun token, regex ou prédicat corpus-spécifique.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -27,10 +28,12 @@ from knowbase.runtime_a3.schemas import (
     ParseOutput,
     PlanOutput,
     RelationSummary,
+    ResolverResult,
     SectionSummary,
     ToolCall,
     ToolResult,
 )
+from knowbase.runtime_a3.subject_resolver import SubjectResolver
 
 logger = logging.getLogger("knowbase.runtime_a3.execute")
 
@@ -46,8 +49,8 @@ MATCH (c:Claim {tenant_id: $tenant_id})
 WHERE c.subject_canonical = $subject
   AND ($predicate IS NULL OR c.predicate = $predicate)
   AND c.invalidated_at IS NULL
-  AND (c.valid_from IS NULL OR c.valid_from <= datetime($as_of))
-  AND (c.valid_until IS NULL OR c.valid_until >= datetime($as_of))
+  AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
+  AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))
 OPTIONAL MATCH (c)-[:EVIDENCED_BY]->(s:Section)
 RETURN c, collect(s) AS sections
 LIMIT 50
@@ -59,8 +62,8 @@ MATCH (c:Claim {tenant_id: $tenant_id})
 WHERE ($subject_filter IS NULL OR c.subject_canonical = $subject_filter)
   AND ($predicate IS NULL OR c.predicate = $predicate)
   AND c.invalidated_at IS NULL
-  AND (c.valid_from IS NULL OR c.valid_from <= datetime($as_of))
-  AND (c.valid_until IS NULL OR c.valid_until >= datetime($as_of))
+  AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
+  AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))
 OPTIONAL MATCH (c)-[:EVIDENCED_BY]->(s:Section)
 RETURN c, collect(s) AS sections
 ORDER BY coalesce(c.confidence, 0.0) DESC
@@ -132,11 +135,24 @@ class Executor:
         qdrant_search: Optional[Callable] = None,
         embedder: Optional[Callable] = None,
         qdrant_collection: str = DEFAULT_QDRANT_COLLECTION,
+        subject_resolver: Optional[SubjectResolver] = None,
+        subject_resolver_enabled: Optional[bool] = None,
     ):
         self._neo4j = neo4j_client
         self._qdrant_search = qdrant_search
         self._embedder = embedder
         self._qdrant_collection = qdrant_collection
+        self._subject_resolver = subject_resolver
+        # Toggle env var pour rollback safe (cf A3.9)
+        if subject_resolver_enabled is None:
+            self._subject_resolver_enabled = (
+                os.getenv("V6_SUBJECT_RESOLVER_ENABLED", "1") == "1"
+            )
+        else:
+            self._subject_resolver_enabled = subject_resolver_enabled
+        # Trace par sub_goal du subject résolu (pour observability)
+        # Map sub_goal_idx → ResolverResult
+        self._last_resolutions: Dict[int, ResolverResult] = {}
 
     # ------------------------------------------------------------------
     # Lazy default clients (only when not injected)
@@ -160,6 +176,74 @@ class Executor:
             mgr = EmbeddingModelManager()
             self._embedder = lambda text: mgr.encode([text])[0].tolist()
         return self._embedder
+
+    def _get_subject_resolver(self) -> SubjectResolver:
+        """Lazy init du subject resolver (réutilise les mêmes clients neo4j/qdrant/embedder)."""
+        if self._subject_resolver is None:
+            self._subject_resolver = SubjectResolver(
+                neo4j_client=self._neo4j,
+                qdrant_search=self._qdrant_search,
+                embedder=self._embedder,
+                qdrant_collection=self._qdrant_collection,
+            )
+        return self._subject_resolver
+
+    def _resolve_subject_for_call(
+        self,
+        tc: ToolCall,
+        subject_param_key: str = "subject",
+    ) -> Dict[str, Any]:
+        """Applique le subject resolver sur les params d'un ToolCall, retourne les
+        params éventuellement modifiés.
+
+        Si le resolver est désactivé OU si le subject est absent du params OU si
+        le resolver abstient (confidence trop basse), retourne les params inchangés
+        (graceful fallback).
+        """
+        if not self._subject_resolver_enabled:
+            return tc.params
+
+        params = dict(tc.params)
+        original_subject = params.get(subject_param_key)
+        if not original_subject:
+            return tc.params
+
+        predicate_hint = params.get("predicate")
+        tenant_id = params.get("tenant_id", "default")
+
+        try:
+            result = self._get_subject_resolver().resolve(
+                user_subject=original_subject,
+                tenant_id=tenant_id,
+                predicate_hint=predicate_hint,
+            )
+        except Exception:
+            logger.exception(
+                "execute: subject_resolver failed for tool=%s sub_goal=%d, "
+                "falling back to original subject",
+                tc.tool, tc.sub_goal_idx,
+            )
+            return tc.params
+
+        # Trace pour observability
+        self._last_resolutions[tc.sub_goal_idx] = result
+
+        if result.resolved is None:
+            logger.info(
+                "execute: subject_resolver abstained for '%s' (reason=%s); "
+                "fallback to original subject",
+                original_subject, result.abstain_reason,
+            )
+            return tc.params
+
+        if result.resolved != original_subject:
+            logger.info(
+                "execute: subject_resolver mapped '%s' -> '%s' (conf=%.2f, method=%s)",
+                original_subject, result.resolved, result.confidence, result.method,
+            )
+            params[subject_param_key] = result.resolved
+
+        return params
 
     # ------------------------------------------------------------------
     # Top-level
@@ -201,24 +285,33 @@ class Executor:
         """Dispatch sur le bon handler en capturant les erreurs."""
         t0 = time.perf_counter()
         try:
+            # A3.9 : résoudre le subject_canonical avant les Cypher KG.
+            # kg_claims_list utilise `subject_filter`, les autres `subject`.
+            # qdrant_sections n'a pas de subject (passe par query texte).
             if tc.tool == "kg_claims":
-                claims, sections = self._call_kg_claims(tc.params)
+                resolved_params = self._resolve_subject_for_call(tc, "subject")
+                claims, sections = self._call_kg_claims(resolved_params)
                 relations: List[RelationSummary] = []
             elif tc.tool == "kg_claims_list":
-                claims, sections = self._call_kg_claims_list(tc.params)
+                resolved_params = self._resolve_subject_for_call(tc, "subject_filter")
+                claims, sections = self._call_kg_claims_list(resolved_params)
                 relations = []
             elif tc.tool == "lifecycle_query":
-                claims, sections, relations = self._call_lifecycle(tc.params)
+                resolved_params = self._resolve_subject_for_call(tc, "subject")
+                claims, sections, relations = self._call_lifecycle(resolved_params)
             elif tc.tool == "contradiction_surface":
-                claims, sections, relations = self._call_contradictions(tc.params)
+                resolved_params = self._resolve_subject_for_call(tc, "subject")
+                claims, sections, relations = self._call_contradictions(resolved_params)
             elif tc.tool == "qdrant_sections":
+                # Pas de subject (query texte direct), pas de resolver
                 claims, sections = self._call_qdrant(tc.params)
                 relations = []
             elif tc.tool == "comparison_query":
                 # Convention Plan v1.0 : comparison décomposé en kg_claims côté Plan,
                 # donc Execute ne devrait jamais recevoir comparison_query directement.
                 # Si jamais (pour V2 future), on traite comme kg_claims du subject.
-                claims, sections = self._call_kg_claims(tc.params)
+                resolved_params = self._resolve_subject_for_call(tc, "subject")
+                claims, sections = self._call_kg_claims(resolved_params)
                 relations = []
             else:
                 return ToolResult(
