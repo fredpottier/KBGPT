@@ -1134,16 +1134,30 @@ Les 2 endpoints coexistent pendant tout A3. Bench tape les 2 en parallèle (shad
 
 ### 10.2 Suppressions ciblées V5.1 (A3.6)
 
-Une fois A3 validé (GA3-5 + GA3-6 + GA3-7 atteints) :
+Une fois A3 validé (GA3-5 + GA3-6 + GA3-7 atteints via bench A3.8) ET Phase B
+cross-domain validée :
 
 - `src/knowbase/runtime_v5/query_reformulator.py` — multiform×5 remplacé par Parse sub_goals
-- `src/knowbase/runtime_v5/loop_signature.py` — agentic loop remplacée par Plan déterministe
-- `src/knowbase/runtime_v5/execution_plan.py` — idem
-- `src/knowbase/runtime_v5/domain_pack_loader.py` — Domain Packs réservés à Phase D (cf mémoire `feedback_domain_agnostic_pipeline_components.md`)
+- `src/knowbase/runtime_v5/agent/loop_signature.py` — agentic loop remplacée par Plan déterministe
+- `src/knowbase/runtime_v5/agent/execution_plan.py` — idem
 - `src/knowbase/runtime_v5/doc_topics_loader.py` — remplacé par lookup canonical entities
 - `src/knowbase/runtime_v5/anthropic_llm_caller.py` — viole charte open-source
 
-Code conservé tant que Phase B (cross-domain) n'est pas validée — fallback de secours.
+**Amendement A3.6 (2026-05-21)** : `domain_pack_loader.py` initialement listé
+ici a été **retiré** de la liste. La charte mémoire
+`feedback_domain_agnostic_pipeline_components` (21/05/2026) impose de conserver
+le module ET toute l'infrastructure `src/knowbase/domain_packs/` (11 consumers
+backend+frontend+tests dont `claimfirst/resolution/subject_resolver_v2` critique
+pour l'ingestion). Un futur corpus médical/légal/aerospace niche en aura besoin
+même si DeepSeek-V3.1 rend les packs inopérants sur le corpus SAP actuel.
+
+**Mécanique A3.6 livrée (2026-05-21)** : les 5 modules ci-dessus ont reçu :
+1. Banner DEPRECATED dans docstring
+2. Warning logger émis au premier import (dédupliqué via `_DEPRECATED_WARNED`)
+3. Référence à `doc/ongoing/POST_A36_V51_SUPPRESSIONS_AUDIT_2026-05-21.md`
+
+Code conservé tant que Phase B (cross-domain) n'est pas validée — fallback de
+secours.
 
 ### 10.3 Réutilisation V5.1 (65% selon audit 18/05)
 

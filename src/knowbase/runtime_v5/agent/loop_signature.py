@@ -1,5 +1,20 @@
 """V5 ReasoningAgent — Loop signature richer + novelty_score.
 
+⚠️ DEPRECATED (A3.6, 2026-05-21) — Réf ADR_PARSE_EVALUATE_RUNTIME §10.2.
+
+Ce module sera supprimé une fois :
+- Bench A3.8 validé (gates GA3-5/6/7 atteints)
+- Phase B cross-domain validée
+- V5.1 retiré comme endpoint de référence
+
+V6 (runtime_a3) utilise un Plan déterministe + boucle re-plan bornée
+(orchestrator.py), sans agent loop. L'anti-thrash novelty_score n'est plus
+nécessaire.
+
+⚠️ NE PAS étendre. Pour nouveaux développements, voir runtime_a3/.
+
+---
+
 ADR V1.5 §3e (Sprint S4.1) : anti-thrash robuste.
 
 Le POC actuel détecte la stagnation par `STAGNATION_MAX = 2 iter without new
@@ -28,10 +43,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
+
+# Warning DEPRECATED (A3.6, 2026-05-21) — émis une fois par import
+if not globals().get("_DEPRECATED_WARNED", False):
+    logger.warning(
+        "⚠️ DEPRECATED module loaded: runtime_v5.agent.loop_signature. "
+        "Replaced by deterministic Plan + bounded re-plan in runtime_a3.orchestrator. "
+        "Removal scheduled post-A3.8. "
+        "See doc/ongoing/POST_A36_V51_SUPPRESSIONS_AUDIT_2026-05-21.md"
+    )
+    _DEPRECATED_WARNED = True
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

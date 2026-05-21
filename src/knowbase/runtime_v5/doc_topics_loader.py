@@ -1,5 +1,19 @@
 """Loader pour les DocumentContext enrichis (doc_title, doc_summary, key_topics, key_terms).
 
+⚠️ DEPRECATED (A3.6, 2026-05-21) — Réf ADR_PARSE_EVALUATE_RUNTIME §10.2.
+
+Ce module sera supprimé une fois :
+- Bench A3.8 validé (gates GA3-5/6/7 atteints)
+- Phase B cross-domain validée
+- V5.1 retiré comme endpoint de référence
+
+Remplacé par : lookup canonical entities via Execute kg_claims (runtime_a3).
+Le routage par doc agrégé n'est plus nécessaire dans le pipeline déterministe V6.
+
+⚠️ NE PAS étendre. Pour nouveaux développements, voir runtime_a3/.
+
+---
+
 Lit depuis Neo4j la liste des documents disponibles avec leurs métadonnées de routage.
 Utilisé par reasoning_agent_v51._build_user_prompt pour donner à l'agent un signal
 discriminant entre les docs (vs juste les doc_ids opaques).
@@ -19,6 +33,16 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Warning DEPRECATED (A3.6, 2026-05-21) — émis une fois par import
+if not globals().get("_DEPRECATED_WARNED", False):
+    logger.warning(
+        "⚠️ DEPRECATED module loaded: runtime_v5.doc_topics_loader. "
+        "Replaced by canonical entities lookup via runtime_a3 Execute. "
+        "Removal scheduled post-A3.8. "
+        "See doc/ongoing/POST_A36_V51_SUPPRESSIONS_AUDIT_2026-05-21.md"
+    )
+    _DEPRECATED_WARNED = True
 
 
 @dataclass

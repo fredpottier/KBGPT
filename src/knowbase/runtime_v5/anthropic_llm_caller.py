@@ -1,8 +1,20 @@
 """V5 AnthropicLLMCaller — Claude (Sonnet/Opus/Haiku) wrapper pour bench calibration.
 
-⚠️ USAGE LIMITÉ : bench de calibration UNIQUEMENT (mesure plafond LLM).
-Charte OSMOSIS runtime production INTERDIT Claude (cf mémoire 10/05/2026) :
-runtime/operators/orchestrator utilisent uniquement open-source serverless.
+⚠️ DEPRECATED (A3.6, 2026-05-21) — Réf ADR_PARSE_EVALUATE_RUNTIME §10.2.
+
+Ce module sera supprimé une fois :
+- Bench A3.8 validé (gates GA3-5/6/7 atteints)
+- Phase B cross-domain validée
+- V5.1 retiré comme endpoint de référence
+
+Viole la charte open-source OSMOSIS (cf mémoire `feedback_no_proprietary_llm_in_production`
+du 10/05/2026) : Claude/GPT-4o interdits en runtime production.
+
+⚠️ USAGE STRICTEMENT LIMITÉ : bench de calibration ponctuel uniquement
+(mesure plafond LLM). Ne JAMAIS activer en production.
+⚠️ NE PAS étendre. Pour nouveaux développements, voir runtime_a3/ (open-source only).
+
+---
 
 Convertit l'API Anthropic native → format OpenAI attendu par ReasoningAgentV51 :
   - messages : extrait `system` séparé
@@ -22,6 +34,16 @@ from typing import Optional
 from knowbase.runtime_v5.reasoning_agent_v51 import LLMCaller
 
 logger = logging.getLogger(__name__)
+
+# Warning DEPRECATED (A3.6, 2026-05-21) — émis une fois par import
+if not globals().get("_DEPRECATED_WARNED", False):
+    logger.warning(
+        "⚠️ DEPRECATED module loaded: runtime_v5.anthropic_llm_caller. "
+        "Violates OSMOSIS open-source charter (no Claude/GPT in production runtime). "
+        "Bench-calibration use only. Removal scheduled post-A3.8. "
+        "See doc/ongoing/POST_A36_V51_SUPPRESSIONS_AUDIT_2026-05-21.md"
+    )
+    _DEPRECATED_WARNED = True
 
 
 DEFAULT_MODEL = "claude-sonnet-4-6"  # latest Sonnet via API name

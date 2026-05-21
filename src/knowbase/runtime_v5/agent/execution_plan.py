@@ -1,5 +1,19 @@
 """V5 ReasoningAgent — Plan-then-execute (Sprint S4.3).
 
+⚠️ DEPRECATED (A3.6, 2026-05-21) — Réf ADR_PARSE_EVALUATE_RUNTIME §10.2.
+
+Ce module sera supprimé une fois :
+- Bench A3.8 validé (gates GA3-5/6/7 atteints)
+- Phase B cross-domain validée
+- V5.1 retiré comme endpoint de référence
+
+Remplacé par : `runtime_a3.schemas.PlanOutput` + `runtime_a3.plan.plan()`
+(mapping déterministe sub_goal → tool, sans LLM dans Plan).
+
+⚠️ NE PAS étendre. Pour nouveaux développements, voir runtime_a3/.
+
+---
+
 ADR V1.5 §3e : pour les shapes complexes (comparison, lifecycle, multi_hop,
 causal), forcer la 1ère itération à produire un plan structuré Pydantic avant
 exécution. Anthropic Deep Research et Perplexity ont prouvé qu'un plan-then-
@@ -30,10 +44,23 @@ prompt LLM (rédigé en S4.5 final) restera générique.
 """
 from __future__ import annotations
 
+import logging
 from enum import Enum
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+logger = logging.getLogger(__name__)
+
+# Warning DEPRECATED (A3.6, 2026-05-21) — émis une fois par import
+if not globals().get("_DEPRECATED_WARNED", False):
+    logger.warning(
+        "⚠️ DEPRECATED module loaded: runtime_v5.agent.execution_plan. "
+        "Replaced by runtime_a3 PlanOutput + plan() (deterministic, no LLM). "
+        "Removal scheduled post-A3.8. "
+        "See doc/ongoing/POST_A36_V51_SUPPRESSIONS_AUDIT_2026-05-21.md"
+    )
+    _DEPRECATED_WARNED = True
 
 
 class PlanStatus(str, Enum):

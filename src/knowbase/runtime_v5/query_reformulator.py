@@ -1,5 +1,18 @@
 """V5.1 Voie A — Multi-formulation query (pattern EKX P1).
 
+⚠️ DEPRECATED (A3.6, 2026-05-21) — Réf ADR_PARSE_EVALUATE_RUNTIME §10.2.
+
+Ce module sera supprimé une fois :
+- Bench A3.8 validé (gates GA3-5/6/7 atteints)
+- Phase B cross-domain validée
+- V5.1 retiré comme endpoint de référence
+
+Remplacé par : décomposition `sub_goals` du module Parse (runtime_a3/parse.py).
+
+⚠️ NE PAS étendre. Pour nouveaux développements, voir runtime_a3/.
+
+---
+
 Génère N reformulations alternatives d'une question utilisateur pour
 maximiser la couverture du retrieval (entity expansion, synonymes,
 langue cible).
@@ -27,6 +40,15 @@ from typing import Optional
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Warning DEPRECATED (A3.6, 2026-05-21) — émis une fois par import
+if not globals().get("_DEPRECATED_WARNED", False):
+    logger.warning(
+        "⚠️ DEPRECATED module loaded: runtime_v5.query_reformulator. "
+        "Replaced by runtime_a3 Parse sub_goals. Removal scheduled post-A3.8. "
+        "See doc/ongoing/POST_A36_V51_SUPPRESSIONS_AUDIT_2026-05-21.md"
+    )
+    _DEPRECATED_WARNED = True
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
