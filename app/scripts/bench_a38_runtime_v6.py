@@ -1,0 +1,422 @@
+"""Bench A3.8 — Runtime V6 sur gold-set 50q SAP + 30q ConflictPending.
+
+Mesure les gates ADR §7.1 :
+    GA3-5 : C1 ≥ 0.75 sur 50q SAP stratifiées
+    GA3-6 : C3 ≥ 0.50 sur sous-set lifecycle (contingence ≥ 0.40)
+    GA3-7 : Latence p50 < 30s, p95 < 60s
+    GA3-9 : conflict_exposure_rate ≥ 5% sur 30q CP
+
+GA3-3 (filtres bitemporels) déjà couvert par tests unitaires Cypher (test_execute.py).
+GA3-4 (CP exposés correctement) sous-test du 30q CP run.
+
+Usage:
+    docker exec knowbase-app sh -c 'cd /app && python scripts/bench_a38_runtime_v6.py'
+    docker exec knowbase-app sh -c 'cd /app && python scripts/bench_a38_runtime_v6.py --limit 5'
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import statistics
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("bench_a38")
+
+
+# ============================================================================
+# LLM-judge for C1/C3 (correctness vs ground_truth)
+# ============================================================================
+
+
+JUDGE_SYSTEM_PROMPT = """You are an impartial benchmark judge.
+
+Compare a candidate ANSWER vs a REFERENCE ground truth. Decide if the candidate
+correctly answers the question (semantically equivalent to or stricter than
+reference). Tolerate paraphrasing.
+
+Score guide:
+- 1.0 : answer fully matches reference (same facts, same conclusion)
+- 0.5 : partial match (some facts correct, missing context OR small errors)
+- 0.0 : wrong / hallucinated / unrelated
+
+For ABSTENTION cases: if ground_truth says "out of scope" or marks the question
+as unanswerable, and the candidate answer abstains → score 1.0.
+If candidate fabricates facts on out-of-scope → 0.0.
+
+OUTPUT JSON ONLY:
+{"score": 0.0|0.5|1.0, "reasoning": "<short>"}
+"""
+
+
+def llm_judge(question: str, answer: str, ground_truth: str) -> Dict[str, Any]:
+    """LLM-judge C1/C3 score via llm_router (FAST_CLASSIFICATION → DeepSeek-V3.1)."""
+    try:
+        from knowbase.common.llm_router import LLMRouter, TaskType
+        router = LLMRouter()
+        user = (
+            f"QUESTION: {question}\n\n"
+            f"REFERENCE (ground truth): {ground_truth}\n\n"
+            f"CANDIDATE ANSWER: {answer}\n\n"
+            "Respond with JSON only."
+        )
+        raw = router.complete(
+            task_type=TaskType.FAST_CLASSIFICATION,
+            messages=[
+                {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.0,
+            max_tokens=200,
+        )
+        # Strip markdown fences si présent
+        text = raw.strip()
+        if text.startswith("```"):
+            import re
+            m = re.search(r"```(?:json)?\s*(.+?)\s*```", text, re.DOTALL)
+            if m:
+                text = m.group(1).strip()
+        parsed = json.loads(text)
+        score = float(parsed.get("score", 0.0))
+        score = max(0.0, min(1.0, score))  # clamp
+        return {"score": score, "reasoning": parsed.get("reasoning", "")}
+    except Exception as exc:
+        logger.warning("llm_judge failed: %s", exc)
+        return {"score": 0.0, "reasoning": f"judge_error:{str(exc)[:100]}"}
+
+
+# ============================================================================
+# Conflict exposure check (GA3-9)
+# ============================================================================
+
+
+def has_conflict_exposure(answer_text: str, conflict_pending_warning: Optional[str]) -> bool:
+    """Détecte si la réponse expose au moins une contradiction.
+
+    Au moins UN des signaux suivants : warning explicite OU mention ⚠ dans le texte
+    OU mots-clés génériques.
+    """
+    if conflict_pending_warning:
+        return True
+    if not answer_text:
+        return False
+    markers = [
+        "⚠",
+        "conflicting",
+        "contradict",
+        "divergent",
+        "different sources",
+        "conflict_pending",
+        "non résolu",
+        "contradictoire",
+    ]
+    low = answer_text.lower()
+    return any(m.lower() in low for m in markers)
+
+
+# ============================================================================
+# Run a single question via Orchestrator
+# ============================================================================
+
+
+def run_question(orch, question: str, tenant_id: str = "default") -> Dict[str, Any]:
+    """Run one question via Orchestrator and capture metrics."""
+    t0 = time.perf_counter()
+    try:
+        result = orch.run(
+            question=question,
+            tenant_id=tenant_id,
+            as_of_date=datetime.now(timezone.utc),
+            response_mode="structured",
+        )
+        dt = time.perf_counter() - t0
+        synth = result.synthesize_output
+        return {
+            "ok": True,
+            "duration_s": dt,
+            "answer_text": synth.answer_text,
+            "mode": synth.mode,
+            "n_iterations": len(result.iterations),
+            "terminated_reason": result.terminated_reason,
+            "conflict_pending_warning": synth.conflict_pending_warning,
+            "uncovered_sub_goals_warning": synth.uncovered_sub_goals_warning,
+            "citation_coverage_rate": synth.citation_coverage_rate,
+            "n_cited_claims": len(synth.cited_claims),
+            "synthesize_warnings": synth.synthesize_warnings,
+            # Trace minimale par iteration
+            "iterations_trace": [it.to_dict() for it in result.iterations],
+        }
+    except Exception as exc:
+        dt = time.perf_counter() - t0
+        logger.exception("run_question failed")
+        return {
+            "ok": False,
+            "duration_s": dt,
+            "error": str(exc)[:300],
+            "answer_text": "",
+            "mode": "ERROR",
+            "n_iterations": 0,
+            "terminated_reason": "exception",
+        }
+
+
+# ============================================================================
+# Bench runner
+# ============================================================================
+
+
+def run_bench_50q(orch, gold_path: Path, limit: Optional[int]) -> List[Dict[str, Any]]:
+    with open(gold_path, "r", encoding="utf-8") as f:
+        questions = json.load(f)
+    if limit:
+        questions = questions[:limit]
+    logger.info("Bench 50q: %d questions to run", len(questions))
+
+    results: List[Dict[str, Any]] = []
+    for i, q in enumerate(questions, 1):
+        logger.info("[50q %d/%d] type=%s id=%s", i, len(questions),
+                    q.get("primary_type"), q.get("id"))
+        run = run_question(orch, q["question"])
+        # LLM-judge C1 vs ground_truth.answer
+        gt_answer = q.get("ground_truth", {}).get("answer", "")
+        if gt_answer and run.get("ok"):
+            judge = llm_judge(q["question"], run["answer_text"], gt_answer)
+        else:
+            judge = {"score": 0.0, "reasoning": "no_ground_truth_or_run_failed"}
+        results.append({
+            "id": q["id"],
+            "primary_type": q.get("primary_type"),
+            "language": q.get("language"),
+            "question": q["question"],
+            "ground_truth_answer": gt_answer,
+            "run": run,
+            "judge_score": judge["score"],
+            "judge_reasoning": judge["reasoning"],
+        })
+    return results
+
+
+def run_bench_30q_cp(orch, gold_path: Path, limit: Optional[int]) -> List[Dict[str, Any]]:
+    with open(gold_path, "r", encoding="utf-8") as f:
+        questions = json.load(f)
+    if limit:
+        questions = questions[:limit]
+    logger.info("Bench 30q CP: %d questions to run", len(questions))
+
+    results: List[Dict[str, Any]] = []
+    for i, q in enumerate(questions, 1):
+        logger.info("[30q-CP %d/%d] cp_id=%s", i, len(questions), q.get("cp_id"))
+        run = run_question(orch, q["question"])
+        cp_exposed = has_conflict_exposure(
+            run.get("answer_text", ""),
+            run.get("conflict_pending_warning"),
+        )
+        results.append({
+            "id": q["id"],
+            "cp_id": q.get("cp_id"),
+            "question": q["question"],
+            "involved_claim_ids": [c.get("claim_id") for c in q.get("involved_claims", [])],
+            "run": run,
+            "conflict_exposed": cp_exposed,
+        })
+    return results
+
+
+# ============================================================================
+# Metrics aggregation + gates
+# ============================================================================
+
+
+def aggregate_50q(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Calcule C1 global + C3 (sous-set lifecycle) + latence + citation."""
+    n = len(results)
+    scores = [r["judge_score"] for r in results]
+    durations = [r["run"]["duration_s"] for r in results if r["run"]["ok"]]
+    cit_rates = [r["run"]["citation_coverage_rate"] for r in results
+                 if r["run"]["ok"] and r["run"].get("citation_coverage_rate") is not None]
+
+    # Lifecycle sous-set
+    lifecycle_scores = [r["judge_score"] for r in results
+                        if r.get("primary_type") == "lifecycle"]
+
+    # Per-type
+    by_type: Dict[str, List[float]] = {}
+    for r in results:
+        by_type.setdefault(r.get("primary_type", "unknown"), []).append(r["judge_score"])
+    per_type = {
+        t: {"n": len(s), "mean": statistics.mean(s) if s else 0.0}
+        for t, s in by_type.items()
+    }
+
+    return {
+        "n_total": n,
+        "C1_mean": statistics.mean(scores) if scores else 0.0,
+        "C3_lifecycle_mean": (statistics.mean(lifecycle_scores)
+                              if lifecycle_scores else None),
+        "n_lifecycle": len(lifecycle_scores),
+        "latency_p50_s": statistics.median(durations) if durations else 0.0,
+        "latency_p95_s": (sorted(durations)[int(len(durations) * 0.95)]
+                          if len(durations) >= 20
+                          else (max(durations) if durations else 0.0)),
+        "latency_max_s": max(durations) if durations else 0.0,
+        "citation_coverage_mean": statistics.mean(cit_rates) if cit_rates else None,
+        "n_run_ok": sum(1 for r in results if r["run"]["ok"]),
+        "n_run_failed": sum(1 for r in results if not r["run"]["ok"]),
+        "per_type": per_type,
+    }
+
+
+def aggregate_30q_cp(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    n = len(results)
+    exposed = sum(1 for r in results if r["conflict_exposed"])
+    return {
+        "n_total": n,
+        "n_conflict_exposed": exposed,
+        "conflict_exposure_rate": (exposed / n) if n else 0.0,
+        "n_run_ok": sum(1 for r in results if r["run"]["ok"]),
+        "n_run_failed": sum(1 for r in results if not r["run"]["ok"]),
+    }
+
+
+def compute_gates(agg_50q: Dict[str, Any], agg_30q_cp: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute pass/fail for each gate."""
+    c1 = agg_50q["C1_mean"]
+    c3 = agg_50q.get("C3_lifecycle_mean")
+    p50 = agg_50q["latency_p50_s"]
+    p95 = agg_50q["latency_p95_s"]
+    cp_rate = agg_30q_cp["conflict_exposure_rate"]
+
+    gates = {
+        "GA3-5_C1": {
+            "value": c1,
+            "threshold": 0.75,
+            "passed": c1 >= 0.75,
+        },
+        "GA3-6_C3_lifecycle": {
+            "value": c3,
+            "threshold": 0.50,
+            "contingency_threshold": 0.40,
+            "passed": (c3 >= 0.50) if c3 is not None else None,
+            "passed_with_contingency": (c3 >= 0.40) if c3 is not None else None,
+        },
+        "GA3-7_latency": {
+            "p50_s": p50,
+            "p95_s": p95,
+            "thresholds": {"p50_s": 30.0, "p95_s": 60.0},
+            "passed_p50": p50 < 30.0,
+            "passed_p95": p95 < 60.0,
+            "passed": (p50 < 30.0) and (p95 < 60.0),
+        },
+        "GA3-9_conflict_exposure": {
+            "value": cp_rate,
+            "threshold": 0.05,
+            "passed": cp_rate >= 0.05,
+        },
+    }
+    return gates
+
+
+# ============================================================================
+# Main
+# ============================================================================
+
+
+def main():
+    parser = argparse.ArgumentParser(description="A3.8 bench runtime_v6")
+    parser.add_argument("--gold-50q", type=Path,
+                        default=Path("benchmark/questions/gold_set_a38_50q.json"))
+    parser.add_argument("--gold-30q-cp", type=Path,
+                        default=Path("benchmark/questions/gold_set_a38_30q_cp.json"))
+    parser.add_argument("--output-dir", type=Path,
+                        default=Path("data/benchmark/a38_runtime_v6"))
+    parser.add_argument("--limit", type=int, default=None,
+                        help="Limit n questions per set (smoke test)")
+    parser.add_argument("--skip-50q", action="store_true")
+    parser.add_argument("--skip-30q-cp", action="store_true")
+    args = parser.parse_args()
+
+    from knowbase.runtime_a3.orchestrator import Orchestrator
+    orch = Orchestrator()
+
+    t0 = time.perf_counter()
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+    results_50q: List[Dict[str, Any]] = []
+    results_30q_cp: List[Dict[str, Any]] = []
+
+    if not args.skip_50q:
+        results_50q = run_bench_50q(orch, args.gold_50q, args.limit)
+    if not args.skip_30q_cp:
+        results_30q_cp = run_bench_30q_cp(orch, args.gold_30q_cp, args.limit)
+
+    agg_50q = aggregate_50q(results_50q) if results_50q else {}
+    agg_30q_cp = aggregate_30q_cp(results_30q_cp) if results_30q_cp else {}
+    gates = compute_gates(agg_50q, agg_30q_cp) if (agg_50q and agg_30q_cp) else {}
+
+    total_duration = time.perf_counter() - t0
+
+    # Print report
+    print("\n" + "=" * 70)
+    print(f"A3.8 BENCH RUNTIME_V6 — {timestamp}")
+    print("=" * 70)
+    if agg_50q:
+        print("\n50Q SAP STRATIFIÉ:")
+        print(f"  n={agg_50q['n_total']} run_ok={agg_50q['n_run_ok']} failed={agg_50q['n_run_failed']}")
+        print(f"  C1 (LLM-judge mean) : {agg_50q['C1_mean']:.3f}")
+        if agg_50q['C3_lifecycle_mean'] is not None:
+            print(f"  C3 lifecycle ({agg_50q['n_lifecycle']}q) : {agg_50q['C3_lifecycle_mean']:.3f}")
+        print(f"  Latency : p50={agg_50q['latency_p50_s']:.1f}s p95={agg_50q['latency_p95_s']:.1f}s max={agg_50q['latency_max_s']:.1f}s")
+        if agg_50q.get('citation_coverage_mean') is not None:
+            print(f"  Citation coverage : {agg_50q['citation_coverage_mean']:.1%}")
+        print("  Per type:")
+        for t, st in sorted(agg_50q["per_type"].items()):
+            print(f"    {t:20s} n={st['n']:2d} mean={st['mean']:.3f}")
+
+    if agg_30q_cp:
+        print("\n30Q ConflictPending:")
+        print(f"  n={agg_30q_cp['n_total']} exposed={agg_30q_cp['n_conflict_exposed']}")
+        print(f"  conflict_exposure_rate : {agg_30q_cp['conflict_exposure_rate']:.1%}")
+
+    if gates:
+        print("\nGATES:")
+        for k, v in gates.items():
+            ok = v.get("passed")
+            marker = "✓" if ok is True else ("?" if ok is None else "✗")
+            print(f"  {marker} {k}: {v}")
+
+    print(f"\nTotal duration: {total_duration:.1f}s")
+
+    # Persist
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    out_file = args.output_dir / f"run_{timestamp}.json"
+    with open(out_file, "w", encoding="utf-8") as f:
+        json.dump({
+            "timestamp": timestamp,
+            "total_duration_s": total_duration,
+            "agg_50q": agg_50q,
+            "agg_30q_cp": agg_30q_cp,
+            "gates": gates,
+            "results_50q": results_50q,
+            "results_30q_cp": results_30q_cp,
+        }, f, ensure_ascii=False, indent=2, default=str)
+    print(f"\nResults: {out_file}")
+
+    # Exit code: 0 si tous gates principaux ✓, 1 sinon
+    main_gates = ["GA3-5_C1", "GA3-7_latency", "GA3-9_conflict_exposure"]
+    if all(gates.get(g, {}).get("passed") for g in main_gates):
+        return 0
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

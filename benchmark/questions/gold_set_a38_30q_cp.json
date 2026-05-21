@@ -1,0 +1,962 @@
+[
+  {
+    "id": "GA3-9_CP_001",
+    "question": "What does the corpus say about the relation 'REQUIRES' for subject 'SAP Fiori apps'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "bec09cf6-c421-4c0d-a845-eb0cfdb09147",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "SAP Fiori apps need to be uninstalled if they are not released for USER INTERFACE TECHNOLOGY 7.50 (SAP_UI 7.50).",
+        "subject": "SAP Fiori apps",
+        "predicate": "REQUIRES",
+        "claim_id": "claim_c4b84f614bd0",
+        "value": "USER INTERFACE TECHNOLOGY 7.50 (SAP_UI 7.50)"
+      },
+      {
+        "text": "The Maintenance Planner will not allow a conversion if SAP Fiori apps not released for USER INTERFACE TECHNOLOGY 7.50 (SAP_UI 7.50) are not uninstalled.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_72b43e0c197e",
+        "value": null
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'REQUIRES' for 'SAP Fiori apps'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_002",
+    "question": "What does the corpus say about the relation 'INTEGRATES_VIA' for subject 'Process Foundation'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "62f04324-6a81-4ae6-b2c3-92fab7e0101a",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The process foundation links together the SAP Business Workflow engine and the BOPF business objects of Product Compliance for Discrete Industries",
+        "subject": "Process Foundation",
+        "predicate": "INTEGRATES_VIA",
+        "claim_id": "claim_703544c06bc2",
+        "value": "BAPI"
+      },
+      {
+        "text": "The process foundation links together the SAP Business Workflow engine and the BOPF business objects of Environment, Health, and Safety for all components that are part of the solution.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_8fba8aa8aa71",
+        "value": null
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'INTEGRATES_VIA' for 'Process Foundation'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_003",
+    "question": "What does the corpus say about the relation 'BASED_ON' for subject 'Usage Metric entitlement'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "664c7d68-cc84-4050-9864-852f68f3ccb7",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The Usage Metric entitlement in the Order Form depletes with usage and is based on a yearly entitlement.",
+        "subject": "Usage Metric entitlement",
+        "predicate": "BASED_ON",
+        "claim_id": "claim_fbfd8ee71762",
+        "value": "yearly entitlement"
+      },
+      {
+        "text": "The Usage Metric entitlement in the Order Form is based on a daily entitlement.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_b06ae32bd570",
+        "value": null
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'BASED_ON' for 'Usage Metric entitlement'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_004",
+    "question": "What does the corpus say about the relation 'BASED_ON' for subject 'Usage Metric entitlement'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "80856824-2c61-4093-b15d-7bfc4b264f45",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "Unless otherwise indicated herein, the Usage Metric entitlement in the Order Form is retained throughout the Subscription Term.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_ca7f4f28cde2",
+        "value": null
+      },
+      {
+        "text": "The Usage Metric entitlement in the Order Form depletes with usage and is based on a yearly entitlement.",
+        "subject": "Usage Metric entitlement",
+        "predicate": "BASED_ON",
+        "claim_id": "claim_fbfd8ee71762",
+        "value": "yearly entitlement"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'BASED_ON' for 'Usage Metric entitlement'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_005",
+    "question": "What does the corpus say about the relation 'USES' for subject 'Embedded BW'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "b924ee5a-1a95-47de-95fd-2abde493ec08",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "Embedded BW uses SAP BPC for SAP S/4HANA for certain business processes.",
+        "subject": "Embedded BW",
+        "predicate": "USES",
+        "claim_id": "claim_5ca8458608f9_d",
+        "value": "SAP BPC for SAP S/4HANA"
+      },
+      {
+        "text": "Embedded Business Warehouse (Embedded BW) is used to support certain business processes in SAP S/4HANA.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_8e2ed0fb314a_a",
+        "value": null
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'Embedded BW'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_006",
+    "question": "What does the corpus say about the relation 'USES' for subject 'TM'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "964d0356-581f-43e0-b85f-f6a465cc1e66",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "TM uses stock transport orders to create freight units.",
+        "subject": "TM",
+        "predicate": "USES",
+        "claim_id": "claim_1f9ffedc193f_c",
+        "value": "stock transport orders"
+      },
+      {
+        "text": "TM uses transport scheduling agreements to create freight units.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_c37684e4ce8b_d",
+        "value": null
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'TM'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_007",
+    "question": "What does the corpus say about the relation 'USES' for subject 'TM'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "4b51bb76-cad7-43a6-9c6b-122fdf54a892",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "TM uses purchase transport orders to create freight units.",
+        "subject": "TM",
+        "predicate": "USES",
+        "claim_id": "claim_1f9ffedc193f_b",
+        "value": "purchase transport orders"
+      },
+      {
+        "text": "TM uses transport scheduling agreements to create freight units.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_c37684e4ce8b_d",
+        "value": null
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'TM'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_008",
+    "question": "What does the corpus say about the relation 'USES' for subject 'TM'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "c8a79775-76bc-4081-8e1c-c8f37151f50c",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "TM uses transport scheduling agreements to create freight units.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_c37684e4ce8b_d",
+        "value": null
+      },
+      {
+        "text": "TM uses sales transport orders to create freight units.",
+        "subject": "TM",
+        "predicate": "USES",
+        "claim_id": "claim_1f9ffedc193f_a",
+        "value": "sales transport orders"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'TM'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_009",
+    "question": "What does the corpus say about the relation 'USES' for subject 'TM'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "7897d99e-4b6c-44a0-aef1-d81d13d44d92",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "TM uses stock transport orders to create freight units.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_c37684e4ce8b_c",
+        "value": null
+      },
+      {
+        "text": "TM uses transport scheduling agreements to create freight units.",
+        "subject": "TM",
+        "predicate": "USES",
+        "claim_id": "claim_1f9ffedc193f_d",
+        "value": "transport scheduling agreements"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'TM'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_010",
+    "question": "What does the corpus say about the relation 'USES' for subject 'TM'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "d717555e-7611-413c-ba83-f1b7f6f4d7a0",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "TM uses stock transport orders to create freight units.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_c37684e4ce8b_c",
+        "value": null
+      },
+      {
+        "text": "TM uses purchase transport orders to create freight units.",
+        "subject": "TM",
+        "predicate": "USES",
+        "claim_id": "claim_1f9ffedc193f_b",
+        "value": "purchase transport orders"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'TM'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_011",
+    "question": "What does the corpus say about the relation 'USES' for subject 'TM'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "46dc5a1e-3f5e-4c85-a655-1f013a7fe7cc",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "TM uses sales transport orders to create freight units.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_c37684e4ce8b_a",
+        "value": null
+      },
+      {
+        "text": "TM uses transport scheduling agreements to create freight units.",
+        "subject": "TM",
+        "predicate": "USES",
+        "claim_id": "claim_1f9ffedc193f_d",
+        "value": "transport scheduling agreements"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'TM'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_012",
+    "question": "What does the corpus say about the relation 'USES' for subject 'SAP S/4HANA migration cockpit'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "2c69004a-53c2-43dd-b09f-12ee122f8723",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The dispatcher job of SAP S/4HANA migration cockpit uses the report /LTB/JOB_DISPATCHER.",
+        "subject": "SAP S/4HANA migration cockpit",
+        "predicate": "USES",
+        "claim_id": "claim_e89a95071489",
+        "value": "report /LTB/JOB_DISPATCHER"
+      },
+      {
+        "text": "SAP S/4HANA migration cockpit generates staging tables in the local database schema of the SAP S/4HANA system when the option Local SAP S/4HANA Database Schema is used.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_8cd5012192d2",
+        "value": null
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'SAP S/4HANA migration cockpit'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_013",
+    "question": "What does the corpus say about the relation 'USES' for subject 'SAP S/4HANA migration cockpit'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "2f7f0ada-dea0-4574-a137-69cd0aa52504",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "SAP S/4HANA migration cockpit generates staging tables in the local database schema of the SAP S/4HANA system when the option Local SAP S/4HANA Database Schema is used.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_8cd5012192d2",
+        "value": null
+      },
+      {
+        "text": "SAP S/4HANA migration cockpit uses the option Remote SAP HANA Database Schema to generate staging tables on a remote SAP HANA system",
+        "subject": "SAP S/4HANA migration cockpit",
+        "predicate": "USES",
+        "claim_id": "claim_fd40181f25de",
+        "value": "option Remote SAP HANA Database Schema"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'SAP S/4HANA migration cockpit'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_014",
+    "question": "What does the corpus say about the relation 'PROCESSES' for subject 'Product Compliance for Discrete Industries process scheduler'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "d55db808-b59a-4b05-bde2-9441c6d12296",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The Product Compliance for Discrete Industries process scheduler launches processes scheduled from the tasks tab.",
+        "subject": "Product Compliance for Discrete Industries process scheduler",
+        "predicate": "PROCESSES",
+        "claim_id": "claim_236491b193d3",
+        "value": "Processes scheduled from the tasks tab"
+      },
+      {
+        "text": "The scheduler uses a self-rescheduling job to do its work.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_c9a2b22cce29",
+        "value": null
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'PROCESSES' for 'Product Compliance for Discrete Industries process scheduler'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_015",
+    "question": "What does the corpus say about the relation 'PROVIDES' for subject 'transaction CGSADM'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "789870db-1817-4fdc-ae0e-ea226aa2d3f0",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "Expert Server Administration (transaction CGSADM) offers the most commonly used administration and configuration options.",
+        "subject": "transaction CGSADM",
+        "predicate": "PROVIDES",
+        "claim_id": "claim_20686a184e4d_b",
+        "value": "Most commonly used administration and configuration options"
+      },
+      {
+        "text": "WWI offers the most commonly used administration and configuration options.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_6c22eda79905_a",
+        "value": null
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'PROVIDES' for 'transaction CGSADM'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_016",
+    "question": "What does the corpus say about the relation 'PROVIDES' for subject 'transaction CGSADM'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "6eb70d75-2b4a-469f-a501-21885f0b84c1",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The administration and configuration options offered by WWI and Expert Server Administration are necessary to implement Expert.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_617dd28725e6_d",
+        "value": null
+      },
+      {
+        "text": "Expert Server Administration (transaction CGSADM) offers the most commonly used administration and configuration options.",
+        "subject": "transaction CGSADM",
+        "predicate": "PROVIDES",
+        "claim_id": "claim_20686a184e4d_b",
+        "value": "Most commonly used administration and configuration options"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'PROVIDES' for 'transaction CGSADM'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_017",
+    "question": "What does the corpus say about the relation 'PROVIDES' for subject 'transaction CGSADM'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "ba6e352c-44f7-4745-bfd7-c12b41b572e6",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "Expert Server Administration (transaction CGSADM) offers the most commonly used administration and configuration options.",
+        "subject": "transaction CGSADM",
+        "predicate": "PROVIDES",
+        "claim_id": "claim_20686a184e4d_b",
+        "value": "Most commonly used administration and configuration options"
+      },
+      {
+        "text": "WWI offers the most commonly used administration and configuration options.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_617dd28725e6_a",
+        "value": null
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'PROVIDES' for 'transaction CGSADM'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_018",
+    "question": "What does the corpus say about the relation 'CONFIGURES' for subject 'Strategic buyers'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "077560eb-d2dc-42ce-9400-3b2466abf315",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "They can unblock the automatic creation of follow-on documents in the connected systems.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_86650d264529_b",
+        "value": null
+      },
+      {
+        "text": "They can block the automatic creation of follow-on documents in the connected systems.",
+        "subject": "Strategic buyers",
+        "predicate": "CONFIGURES",
+        "claim_id": "claim_ed8a05427acd_a",
+        "value": "automatic creation of follow-on documents"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'CONFIGURES' for 'Strategic buyers'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_019",
+    "question": "What does the corpus say about the relation 'PROVIDES' for subject 'S/4HANA sales order'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "2d489f1c-d0d9-4db4-9e9c-df476681687c",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "S/4HANA sales order can be used to trigger the process to change the product for a utilities sales contract.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_da40ae1b6b96",
+        "value": null
+      },
+      {
+        "text": "S/4HANA sales order can be used to create a new utilities sales contract.",
+        "subject": "S/4HANA sales order",
+        "predicate": "PROVIDES",
+        "claim_id": "claim_8f55d14c2015",
+        "value": "new utilities sales contract creation"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'PROVIDES' for 'S/4HANA sales order'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_020",
+    "question": "What does the corpus say about the relation 'SUPPORTS' for subject 'Financial Operations'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "a5b8774e-457a-4d60-ba2a-1fcff13c1498",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "Financial Operations supports the integration with the machine learning system SAP Cash Application",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_2760e54b82d9",
+        "value": null
+      },
+      {
+        "text": "Financial Operations supports the integration with SAP Cash Application to optimize banking processes.",
+        "subject": "Financial Operations",
+        "predicate": "SUPPORTS",
+        "claim_id": "claim_ea881417a0b5",
+        "value": "integration with SAP Cash Application"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'SUPPORTS' for 'Financial Operations'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_021",
+    "question": "What does the corpus say about the relation 'USES' for subject 'ABAP report Z_MATERIALS_W_COLLECTIVE_REQS'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "113e6677-5f7f-418f-b0ae-3aa2dd036715",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The ATP checking group creates individual requirements for materials found by the report.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_b616a1ae9347",
+        "value": null
+      },
+      {
+        "text": "The ABAP report Z_MATERIALS_W_COLLECTIVE_REQS is used to determine which materials use the ATP checking group that creates total customer requirements.",
+        "subject": "ABAP report Z_MATERIALS_W_COLLECTIVE_REQS",
+        "predicate": "USES",
+        "claim_id": "claim_ea9cf034bba1",
+        "value": "ATP checking group that creates total customer requirements"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'ABAP report Z_MATERIALS_W_COLLECTIVE_REQS'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_022",
+    "question": "What does the corpus say about the relation 'USES' for subject 'ABAP report Z_MATERIALS_W_COLLECTIVE_REQS'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "4ee7f9c9-195d-4c5f-abcb-71ef70f00d2e",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The ATP checking group creates individual requirements for materials found by the report in step 4.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_177a5720ddbc",
+        "value": null
+      },
+      {
+        "text": "The ABAP report Z_MATERIALS_W_COLLECTIVE_REQS is used to determine which materials use the ATP checking group that creates total customer requirements.",
+        "subject": "ABAP report Z_MATERIALS_W_COLLECTIVE_REQS",
+        "predicate": "USES",
+        "claim_id": "claim_ea9cf034bba1",
+        "value": "ATP checking group that creates total customer requirements"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'ABAP report Z_MATERIALS_W_COLLECTIVE_REQS'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_023",
+    "question": "What does the corpus say about the relation 'USES' for subject 'ABAP report Z_MATERIALS_W_COLLECTIVE_REQS'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "0641bb11-16b9-4768-a9ee-064f5403e773",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The ATP checking group creates individual requirements for materials found by the report.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_b616a1ae9347",
+        "value": null
+      },
+      {
+        "text": "The ABAP report Z_MATERIALS_W_COLLECTIVE_REQS is used to determine which materials use the ATP checking group that creates total customer requirements.",
+        "subject": "ABAP report Z_MATERIALS_W_COLLECTIVE_REQS",
+        "predicate": "USES",
+        "claim_id": "claim_a8d4a029ff15",
+        "value": "ATP checking group that creates total customer requirements"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'ABAP report Z_MATERIALS_W_COLLECTIVE_REQS'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_024",
+    "question": "What does the corpus say about the relation 'USES' for subject 'ABAP report Z_MATERIALS_W_COLLECTIVE_REQS'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "ec10cffc-0331-445c-8dc1-a2f6447d0eba",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The ATP checking group creates individual requirements for materials found by the report in step 4.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_50247f4afc9d",
+        "value": null
+      },
+      {
+        "text": "The ABAP report Z_MATERIALS_W_COLLECTIVE_REQS is used to determine which materials use the ATP checking group that creates total customer requirements.",
+        "subject": "ABAP report Z_MATERIALS_W_COLLECTIVE_REQS",
+        "predicate": "USES",
+        "claim_id": "claim_a8d4a029ff15",
+        "value": "ATP checking group that creates total customer requirements"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'ABAP report Z_MATERIALS_W_COLLECTIVE_REQS'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_025",
+    "question": "What does the corpus say about the relation 'USES' for subject 'ABAP report Z_MATERIALS_W_COLLECTIVE_REQS'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "d82fc00e-8e79-44b6-a2a0-f90cbabb3e17",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The ABAP report Z_MATERIALS_W_COLLECTIVE_REQS is used to determine which materials use the ATP checking group that creates total customer requirements.",
+        "subject": "ABAP report Z_MATERIALS_W_COLLECTIVE_REQS",
+        "predicate": "USES",
+        "claim_id": "claim_65332d6711c2",
+        "value": "ATP checking group that creates total customer requirements"
+      },
+      {
+        "text": "The ATP checking group creates individual requirements for materials found by the report in step 4.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_50247f4afc9d",
+        "value": null
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'ABAP report Z_MATERIALS_W_COLLECTIVE_REQS'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_026",
+    "question": "What does the corpus say about the relation 'USES' for subject 'ABAP report Z_MATERIALS_W_COLLECTIVE_REQS'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "31e3dd02-a21f-472a-8c32-f8945b201f80",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The ABAP report Z_MATERIALS_W_COLLECTIVE_REQS is used to determine which materials use the ATP checking group that creates total customer requirements.",
+        "subject": "ABAP report Z_MATERIALS_W_COLLECTIVE_REQS",
+        "predicate": "USES",
+        "claim_id": "claim_65332d6711c2",
+        "value": "ATP checking group that creates total customer requirements"
+      },
+      {
+        "text": "The ATP checking group creates individual requirements for materials found by the report in step 4.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_177a5720ddbc",
+        "value": null
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'USES' for 'ABAP report Z_MATERIALS_W_COLLECTIVE_REQS'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_027",
+    "question": "What does the corpus say about the relation 'BASED_ON' for subject 'Expected Cash Flow'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "5f339440-c039-45df-922d-4b1c33244a15",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The expected cash flow is based on special payments.",
+        "subject": "Expected Cash Flow",
+        "predicate": "BASED_ON",
+        "claim_id": "claim_3214b6fc3baa_c",
+        "value": "Special Payments"
+      },
+      {
+        "text": "The expected cash flow is based on the expected revenue from the liquidation of collateral.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_b31b7ee22356_d",
+        "value": null
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'BASED_ON' for 'Expected Cash Flow'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_028",
+    "question": "What does the corpus say about the relation 'BASED_ON' for subject 'Expected Cash Flow'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "f700bd75-4efd-4404-89e7-4458d1da31c2",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The expected cash flow is based on the expected revenue from the liquidation of collateral.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_b31b7ee22356_d",
+        "value": null
+      },
+      {
+        "text": "The expected cash flow is based on contractual cash flows.",
+        "subject": "Expected Cash Flow",
+        "predicate": "BASED_ON",
+        "claim_id": "claim_3214b6fc3baa_b",
+        "value": "Contractual Cash Flows"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'BASED_ON' for 'Expected Cash Flow'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_029",
+    "question": "What does the corpus say about the relation 'BASED_ON' for subject 'Expected Cash Flow'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "6fee5280-dad8-4bdd-9760-7ada3f2936c4",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The expected cash flow is based on special payments.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_b31b7ee22356_c",
+        "value": null
+      },
+      {
+        "text": "The expected cash flow is based on the expected revenue from the liquidation of collateral.",
+        "subject": "Expected Cash Flow",
+        "predicate": "BASED_ON",
+        "claim_id": "claim_3214b6fc3baa_d",
+        "value": "Expected Revenue from Liquidation of Collateral"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'BASED_ON' for 'Expected Cash Flow'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  },
+  {
+    "id": "GA3-9_CP_030",
+    "question": "What does the corpus say about the relation 'BASED_ON' for subject 'Expected Cash Flow'?",
+    "primary_type": "contradiction_check",
+    "language": "en",
+    "cp_id": "3392b883-9e33-4703-81ce-1b9626b40c99",
+    "cp_reason": null,
+    "involved_claims": [
+      {
+        "text": "The expected cash flow is based on special payments.",
+        "subject": null,
+        "predicate": null,
+        "claim_id": "claim_b31b7ee22356_c",
+        "value": null
+      },
+      {
+        "text": "The expected cash flow is based on contractual cash flows.",
+        "subject": "Expected Cash Flow",
+        "predicate": "BASED_ON",
+        "claim_id": "claim_3214b6fc3baa_b",
+        "value": "Contractual Cash Flows"
+      }
+    ],
+    "ground_truth": {
+      "answer": "The corpus contains conflicting claims about 'BASED_ON' for 'Expected Cash Flow'.",
+      "expected_conflict_exposure": true
+    },
+    "annotation_meta": {
+      "annotator": "auto_from_cp_neo4j",
+      "tenant_id": "default"
+    }
+  }
+]
