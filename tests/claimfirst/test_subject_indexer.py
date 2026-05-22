@@ -258,3 +258,84 @@ class TestToggle:
 class TestConstants:
     def test_min_confidence_sensible(self):
         assert 0.5 <= MIN_CONFIDENCE <= 0.9
+
+
+# ============================================================================
+# TestClaimNeo4jPersistence — Garantit que to_neo4j_properties() écrit bien
+# subject_canonical et marginal sur Claim post-A4.2, peu importe la source
+# (SF.subject ou SubjectIndexer)
+# ============================================================================
+
+
+class TestClaimNeo4jPersistence:
+    """Guard rails sur Claim.to_neo4j_properties() pour A4.2.
+
+    Garantit que tout nouveau Claim ingéré écrit bien subject_canonical et
+    marginal en Neo4j — quel que soit le chemin (SF rempli ou SubjectIndexer).
+    """
+
+    def _make_minimal_claim(self, **overrides):
+        """Crée un Claim minimal pour test, avec overrides."""
+        from knowbase.claimfirst.models.claim import Claim, ClaimType, ClaimScope
+        defaults = {
+            "claim_id": "c_test_001",
+            "tenant_id": "test",
+            "doc_id": "doc_001",
+            "text": "Test claim text.",
+            "claim_type": ClaimType.FACTUAL,
+            "verbatim_quote": "Test claim text.",
+            "passage_id": "p_001",
+            "unit_ids": ["u_001"],
+            "confidence": 0.9,
+            "scope": ClaimScope(),
+        }
+        defaults.update(overrides)
+        return Claim(**defaults)
+
+    def test_subject_canonical_from_structured_form_priority(self):
+        """SF.subject prend priorité absolue sur claim.subject_canonical."""
+        c = self._make_minimal_claim(
+            structured_form={"subject": "X_from_SF", "predicate": "USES", "object": "Y"},
+            subject_canonical="X_from_indexer",  # devrait être ignoré
+        )
+        props = c.to_neo4j_properties()
+        assert props["subject_canonical"] == "X_from_SF"
+
+    def test_subject_canonical_from_indexer_when_no_sf(self):
+        """Sans SF, subject_canonical du SubjectIndexer est persisté."""
+        c = self._make_minimal_claim(
+            structured_form=None,
+            subject_canonical="X_indexed",
+            subject_extraction_confidence=0.85,
+        )
+        props = c.to_neo4j_properties()
+        assert props["subject_canonical"] == "X_indexed"
+        assert props["subject_extraction_confidence"] == 0.85
+
+    def test_marginal_flag_persisted(self):
+        """Si claim est marginal, le flag passe en Neo4j."""
+        c = self._make_minimal_claim(
+            structured_form=None,
+            subject_canonical=None,
+            marginal=True,
+            subject_extraction_confidence=0.9,
+        )
+        props = c.to_neo4j_properties()
+        assert props.get("marginal") is True
+        assert "subject_canonical" not in props  # None → pas écrit
+        assert props["subject_extraction_confidence"] == 0.9
+
+    def test_marginal_false_not_written_implicitly(self):
+        """marginal=None ne doit pas être écrit (différencie 'pas traité' vs 'évalué non-marginal')."""
+        c = self._make_minimal_claim(structured_form=None, subject_canonical="X")
+        props = c.to_neo4j_properties()
+        # marginal pas dans props si None (claim pas encore traité par SubjectIndexer)
+        assert "marginal" not in props or props["marginal"] is None
+
+    def test_no_subject_no_marginal_writes_nothing(self):
+        """Claim brut sans aucun traitement A4.2 → props sans subject_canonical ni marginal."""
+        c = self._make_minimal_claim(structured_form=None)
+        props = c.to_neo4j_properties()
+        assert "subject_canonical" not in props
+        # marginal soit absent soit None
+        assert props.get("marginal") in (None,)
