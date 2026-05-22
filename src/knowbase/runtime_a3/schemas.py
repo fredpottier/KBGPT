@@ -591,6 +591,55 @@ class SubjectResolverError(Exception):
     pass
 
 
+# ============================================================================
+# Predicate Resolver runtime (A3.9-bis, post-A3.9 predicate-mismatch fix)
+# ============================================================================
+
+
+PredicateResolverSource = Literal[
+    "exact_kg",        # predicate_hint déjà UPPER_SNAKE et présent en KG
+    "embedding",       # cosine top-1 sur predicates KG via Sentence Transformer
+    "passthrough",     # predicate_hint=None à l'entrée, on laisse None
+]
+
+
+class PredicateCandidate(BaseModel):
+    """Un candidat predicate canonique."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    predicate: str = Field(..., description="Predicate canonique du KG (UPPER_SNAKE).")
+    score: float = Field(..., ge=0.0, le=1.0)
+    source: PredicateResolverSource
+
+
+class PredicateResolverResult(BaseModel):
+    """Output du PredicateResolver.
+
+    Si `resolved` est None, l'executor laisse passer le filtre Cypher
+    `$predicate IS NULL` (= no predicate filter).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    resolved: Optional[str] = Field(
+        default=None,
+        description="Predicate canonique KG ou None si abstention.",
+    )
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    method: str = Field(default="no_match")
+    candidates: List[PredicateCandidate] = Field(default_factory=list)
+    abstain_reason: Optional[str] = Field(default=None)
+    duration_s: float = Field(default=0.0, ge=0.0)
+    schema_version: str = Field(default="a3.0")
+
+
+class PredicateResolverError(Exception):
+    """Erreur générique du PredicateResolver."""
+
+    pass
+
+
 class EvaluateError(Exception):
     """Erreur générique du module Evaluate."""
 

@@ -173,7 +173,7 @@ class TestKgClaims:
                 },
             ]
         })
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="fact_lookup", subject_canonical="entity_x")
@@ -190,7 +190,7 @@ class TestKgClaims:
 
     def test_kg_claims_params_passed_to_neo4j(self):
         neo4j_mock = _make_neo4j_mock({"MATCH (c:Claim": []})
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         fixed_as_of = datetime(2026, 5, 21, tzinfo=timezone.utc)
         pi = _make_parse_input(as_of_date=fixed_as_of)
         po = _make_parse_output(sub_goals=[
@@ -217,7 +217,7 @@ class TestKgClaimsList:
             for i in range(10)
         ]
         neo4j_mock = _make_neo4j_mock({"ORDER BY coalesce(c.confidence": rows})
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="list_enumeration", subject_canonical="X", predicate_hint="contains")
@@ -237,7 +237,7 @@ class TestLifecycleQuery:
         neo4j_mock = _make_neo4j_mock({"r:EVOLUTION_OF|SUPERSEDES": [
             {"c": _claim_node("clm_old"), "sections": [], "rels": []}
         ]})
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="lifecycle_trace", subject_canonical="X")
@@ -276,7 +276,7 @@ class TestContradictionSurface:
             },
         ]
         neo4j_mock = _make_neo4j_mock({"r:CONTRADICTS": rows})
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="contradiction_check", subject_canonical="X")
@@ -317,7 +317,7 @@ class TestCoverageSignal:
             {"c": _claim_node("c2"), "sections": []},
         ]
         neo4j_mock = _make_neo4j_mock({"MATCH (c:Claim": rows})
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="fact_lookup", subject_canonical="X", priority=1)
@@ -329,7 +329,7 @@ class TestCoverageSignal:
     def test_priority_2_with_1_claim_full(self):
         rows = [{"c": _claim_node("c1"), "sections": []}]
         neo4j_mock = _make_neo4j_mock({"MATCH (c:Claim": rows})
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="fact_lookup", subject_canonical="X", priority=2)
@@ -340,7 +340,7 @@ class TestCoverageSignal:
 
     def test_empty_when_no_claims(self):
         neo4j_mock = _make_neo4j_mock({"MATCH (c:Claim": []})
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="fact_lookup", subject_canonical="X", priority=1)
@@ -384,7 +384,7 @@ class TestConflictPendingSideEffect:
             return []
 
         neo4j_mock.execute_query.side_effect = execute_query
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="fact_lookup", subject_canonical="X")
@@ -409,7 +409,7 @@ class TestConflictPendingSideEffect:
             return []
 
         neo4j_mock.execute_query.side_effect = execute_query
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="fact_lookup", subject_canonical="X")
@@ -429,7 +429,7 @@ class TestConflictPendingSideEffect:
             return [{"c": _claim_node("clm_001"), "sections": []}]
 
         neo4j_mock.execute_query.side_effect = execute_query
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="fact_lookup", subject_canonical="X")
@@ -473,6 +473,7 @@ class TestQdrantSections:
             qdrant_search=qdrant_mock,
             embedder=embedder_mock,
             subject_resolver_enabled=False,
+            predicate_resolver_enabled=False,
         )
         pi = _make_parse_input(question="my question?")
         # All sub_goals unmappable → fallback Qdrant
@@ -509,7 +510,7 @@ class TestErrorHandling:
     def test_neo4j_exception_captured_in_tool_result(self):
         neo4j_mock = MagicMock()
         neo4j_mock.execute_query.side_effect = Exception("Connection lost")
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="fact_lookup", subject_canonical="X")
@@ -536,7 +537,7 @@ class TestErrorHandling:
 
         neo4j_mock = MagicMock()
         neo4j_mock.execute_query.side_effect = execute_query
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="fact_lookup", subject_canonical="A"),
@@ -558,7 +559,7 @@ class TestErrorHandling:
 class TestExecuteOutput:
     def test_total_duration_measured(self):
         neo4j_mock = _make_neo4j_mock({"MATCH (c:Claim": []})
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="fact_lookup", subject_canonical="X")
@@ -570,7 +571,7 @@ class TestExecuteOutput:
 
     def test_schema_version(self):
         neo4j_mock = _make_neo4j_mock({"MATCH (c:Claim": []})
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="fact_lookup", subject_canonical="X")
@@ -587,7 +588,7 @@ class TestExecuteOutput:
 class TestEmptyPlan:
     def test_no_subgoals_returns_empty_results(self):
         neo4j_mock = MagicMock()
-        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False)
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False, predicate_resolver_enabled=False)
         pi = _make_parse_input()
         po = _make_parse_output(sub_goals=[])
         plan_out = plan(pi, po)

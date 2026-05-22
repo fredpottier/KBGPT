@@ -27,12 +27,14 @@ from knowbase.runtime_a3.schemas import (
     ParseInput,
     ParseOutput,
     PlanOutput,
+    PredicateResolverResult,
     RelationSummary,
     ResolverResult,
     SectionSummary,
     ToolCall,
     ToolResult,
 )
+from knowbase.runtime_a3.predicate_resolver import PredicateResolver
 from knowbase.runtime_a3.subject_resolver import SubjectResolver
 
 logger = logging.getLogger("knowbase.runtime_a3.execute")
@@ -137,22 +139,32 @@ class Executor:
         qdrant_collection: str = DEFAULT_QDRANT_COLLECTION,
         subject_resolver: Optional[SubjectResolver] = None,
         subject_resolver_enabled: Optional[bool] = None,
+        predicate_resolver: Optional[PredicateResolver] = None,
+        predicate_resolver_enabled: Optional[bool] = None,
     ):
         self._neo4j = neo4j_client
         self._qdrant_search = qdrant_search
         self._embedder = embedder
         self._qdrant_collection = qdrant_collection
         self._subject_resolver = subject_resolver
-        # Toggle env var pour rollback safe (cf A3.9)
+        self._predicate_resolver = predicate_resolver
+        # Toggles env var pour rollback safe (cf A3.9 / A3.9-bis)
         if subject_resolver_enabled is None:
             self._subject_resolver_enabled = (
                 os.getenv("V6_SUBJECT_RESOLVER_ENABLED", "1") == "1"
             )
         else:
             self._subject_resolver_enabled = subject_resolver_enabled
+        if predicate_resolver_enabled is None:
+            self._predicate_resolver_enabled = (
+                os.getenv("V6_PREDICATE_RESOLVER_ENABLED", "1") == "1"
+            )
+        else:
+            self._predicate_resolver_enabled = predicate_resolver_enabled
         # Trace par sub_goal du subject résolu (pour observability)
-        # Map sub_goal_idx → ResolverResult
+        # Map sub_goal_idx → ResolverResult / PredicateResolverResult
         self._last_resolutions: Dict[int, ResolverResult] = {}
+        self._last_predicate_resolutions: Dict[int, PredicateResolverResult] = {}
 
     # ------------------------------------------------------------------
     # Lazy default clients (only when not injected)
@@ -188,6 +200,22 @@ class Executor:
             )
         return self._subject_resolver
 
+    def _get_predicate_resolver(self) -> PredicateResolver:
+        """Lazy init du predicate resolver (A3.9-bis)."""
+        if self._predicate_resolver is None:
+            # Embedder predicates : batch List[str] → List[List[float]]
+            embedder_batch: Optional[Callable] = None
+            if self._embedder is not None:
+                # self._embedder est typé (text: str) -> List[float]
+                # On wrappe pour accepter une liste
+                _per_text = self._embedder
+                embedder_batch = lambda texts: [_per_text(t) for t in texts]
+            self._predicate_resolver = PredicateResolver(
+                neo4j_client=self._neo4j,
+                embedder=embedder_batch,
+            )
+        return self._predicate_resolver
+
     def _resolve_subject_for_call(
         self,
         tc: ToolCall,
@@ -200,13 +228,20 @@ class Executor:
         le resolver abstient (confidence trop basse), retourne les params inchangés
         (graceful fallback).
         """
-        if not self._subject_resolver_enabled:
-            return tc.params
-
         params = dict(tc.params)
+
+        if not self._subject_resolver_enabled:
+            # On résout quand même le predicate (toggle indépendant)
+            return self._resolve_predicate_in_params(
+                params, sub_goal_idx=tc.sub_goal_idx,
+            )
+
         original_subject = params.get(subject_param_key)
         if not original_subject:
-            return tc.params
+            # Pas de subject à résoudre, mais on traite le predicate
+            return self._resolve_predicate_in_params(
+                params, sub_goal_idx=tc.sub_goal_idx,
+            )
 
         predicate_hint = params.get("predicate")
         tenant_id = params.get("tenant_id", "default")
@@ -223,7 +258,10 @@ class Executor:
                 "falling back to original subject",
                 tc.tool, tc.sub_goal_idx,
             )
-            return tc.params
+            # Le subject échoue mais on poursuit avec le predicate_resolver
+            return self._resolve_predicate_in_params(
+                params, sub_goal_idx=tc.sub_goal_idx,
+            )
 
         # Trace pour observability
         self._last_resolutions[tc.sub_goal_idx] = result
@@ -234,7 +272,10 @@ class Executor:
                 "fallback to original subject",
                 original_subject, result.abstain_reason,
             )
-            return tc.params
+            # On garde le subject brut, mais on traite le predicate
+            return self._resolve_predicate_in_params(
+                params, sub_goal_idx=tc.sub_goal_idx,
+            )
 
         if result.resolved != original_subject:
             logger.info(
@@ -243,6 +284,67 @@ class Executor:
             )
             params[subject_param_key] = result.resolved
 
+        # A3.9-bis : résoudre aussi le predicate_hint (user-words → KG UPPER_SNAKE)
+        # si présent. Le toggle env est indépendant du subject resolver.
+        params = self._resolve_predicate_in_params(
+            params, sub_goal_idx=tc.sub_goal_idx,
+        )
+        return params
+
+    def _resolve_predicate_in_params(
+        self,
+        params: Dict[str, Any],
+        sub_goal_idx: int,
+    ) -> Dict[str, Any]:
+        """Applique le predicate_resolver sur params["predicate"] si présent.
+
+        Comportement fail-open : si le resolver abstient (low confidence),
+        on POSITIONNE params["predicate"]=None (= no filter en Cypher).
+        Cela évite de filtrer sur un predicate user-words qui ne matchera
+        jamais le canonical KG (cf cause racine post-A3.9 smoke).
+
+        Si le toggle est désactivé, le predicate brut du Parse est conservé.
+        """
+        if not self._predicate_resolver_enabled:
+            return params
+        original_pred = params.get("predicate")
+        # Si déjà None/absent, rien à faire
+        if original_pred is None or not str(original_pred).strip():
+            return params
+
+        tenant_id = params.get("tenant_id", "default")
+        try:
+            result = self._get_predicate_resolver().resolve(
+                predicate_hint=original_pred,
+                tenant_id=tenant_id,
+            )
+        except Exception:
+            logger.exception(
+                "execute: predicate_resolver failed for sub_goal=%d, "
+                "falling back to None (no filter)",
+                sub_goal_idx,
+            )
+            # Fail-open : pas de filter
+            params["predicate"] = None
+            return params
+
+        # Trace pour observability
+        self._last_predicate_resolutions[sub_goal_idx] = result
+
+        if result.resolved is None:
+            logger.info(
+                "execute: predicate_resolver abstained on '%s' (method=%s) → predicate=None (no filter)",
+                original_pred, result.method,
+            )
+            params["predicate"] = None
+            return params
+
+        if result.resolved != original_pred:
+            logger.info(
+                "execute: predicate_resolver mapped '%s' -> '%s' (conf=%.2f, method=%s)",
+                original_pred, result.resolved, result.confidence, result.method,
+            )
+            params["predicate"] = result.resolved
         return params
 
     # ------------------------------------------------------------------
