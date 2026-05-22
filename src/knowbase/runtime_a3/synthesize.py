@@ -25,7 +25,7 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from pydantic import ValidationError
 
@@ -148,6 +148,27 @@ def _aggregate_claims(execute_output: ExecuteOutput) -> List[ClaimSummary]:
     return out
 
 
+def _aggregate_claims_with_groups(
+    execute_output: ExecuteOutput,
+) -> Tuple[List[ClaimSummary], List[int]]:
+    """Agrège les claims uniques + leur sub_goal_idx d'origine.
+
+    Si un claim apparaît dans plusieurs ToolResult (rare), on garde la première
+    occurrence et son sub_goal_idx. Utilisé par A3.11 claim_filter pour
+    stratifier le top-K par sub_goal (préserve diversité comparison).
+    """
+    seen: Set[str] = set()
+    claims: List[ClaimSummary] = []
+    groups: List[int] = []
+    for r in execute_output.results:
+        for c in r.claims:
+            if c.claim_id and c.claim_id not in seen:
+                seen.add(c.claim_id)
+                claims.append(c)
+                groups.append(r.sub_goal_idx)
+    return claims, groups
+
+
 def _aggregate_conflict_pending_summaries(execute_output: ExecuteOutput) -> List[Dict[str, Any]]:
     """Agrège les :ConflictPending dédupliqués (par conflict_id)."""
     seen: Set[str] = set()
@@ -166,9 +187,20 @@ def _aggregate_conflict_pending_summaries(execute_output: ExecuteOutput) -> List
     return out
 
 
-def _serialize_input(inp: SynthesizeInput) -> str:
-    """User prompt pour le LLM Synthesize."""
-    claims = _aggregate_claims(inp.execute_output)
+def _serialize_input(
+    inp: SynthesizeInput,
+    override_claims: Optional[List[ClaimSummary]] = None,
+) -> str:
+    """User prompt pour le LLM Synthesize.
+
+    Args:
+        override_claims: Si fourni, utilisé au lieu de re-aggregating depuis
+            execute_output (point d'injection A3.11 claim_filter).
+    """
+    if override_claims is not None:
+        claims = override_claims
+    else:
+        claims = _aggregate_claims(inp.execute_output)
     # Limit pour bornage prompt (P0 max ~30 claims, sinon explose)
     claims = claims[:30]
 
@@ -317,9 +349,59 @@ class Synthesizer:
         - `max_retries` : nombre de retries LLM
     """
 
-    def __init__(self, llm_client: Any = None, max_retries: int = 2):
+    def __init__(
+        self,
+        llm_client: Any = None,
+        max_retries: int = 2,
+        claim_filter: Any = None,
+        claim_filter_enabled: Optional[bool] = None,
+    ):
         self._llm_client = llm_client
         self._max_retries = max_retries
+        self._claim_filter = claim_filter
+        # Toggle env A3.11 (default ON)
+        import os
+        if claim_filter_enabled is None:
+            self._claim_filter_enabled = (
+                os.getenv("V6_CLAIM_FILTER_ENABLED", "1") == "1"
+            )
+        else:
+            self._claim_filter_enabled = claim_filter_enabled
+        # Trace observability (filter result du dernier synthesize)
+        self._last_filter_result = None
+
+    def _get_claim_filter(self):
+        """Lazy init du claim filter (réutilise l'embedder de base)."""
+        if self._claim_filter is None:
+            from knowbase.runtime_a3.claim_filter import ClaimFilter
+            self._claim_filter = ClaimFilter()
+        return self._claim_filter
+
+    def _apply_claim_filter(
+        self,
+        inp: SynthesizeInput,
+    ) -> List[ClaimSummary]:
+        """Applique le filtre sémantique claim↔question si activé.
+
+        Stratifie par sub_goal_idx pour préserver la diversité (notamment
+        comparison qui décompose en 2× kg_claims).
+
+        Si désactivé, retourne claims inchangés. Si erreur, fail-open (claims bruts).
+        """
+        claims, groups = _aggregate_claims_with_groups(inp.execute_output)
+
+        if not self._claim_filter_enabled or not claims:
+            return claims
+        try:
+            question = inp.parse_output.raw_question
+            kept, result = self._get_claim_filter().filter(
+                question, claims, groups=groups,
+            )
+            self._last_filter_result = result
+            return kept
+        except Exception:
+            logger.exception("synthesize: claim_filter failed, fallback to unfiltered")
+            return claims
 
     def _get_llm_client(self):
         if self._llm_client is None:
@@ -354,24 +436,34 @@ class Synthesizer:
         if inp.evaluate_output.verdict == "INSUFFICIENT_EVIDENCE" or not claims:
             return self._build_abstention(inp)
 
+        # A3.11 : filtre sémantique claims↔question avant LLM (top-K pertinents).
+        # Stratifié par sub_goal_idx pour préserver la diversité (comparison etc.).
+        # Fait UNE FOIS ici pour éviter de re-encoder dans les retries.
+        filtered_claims = self._apply_claim_filter(inp)
+
         # Tentative LLM
         try:
-            out = self._call_llm_with_retry(inp)
+            out = self._call_llm_with_retry(inp, override_claims=filtered_claims)
             if out is not None:
                 return self._finalize(out, inp)
         except Exception:
             logger.exception("synthesize: LLM call raised, falling back to template")
 
-        # Fallback template déterministe
-        return self._build_template_fallback(inp, claims)
+        # Fallback template déterministe (utilise aussi les claims filtrés
+        # pour rester consistant avec ce que le LLM aurait vu)
+        return self._build_template_fallback(inp, filtered_claims)
 
     # ------------------------------------------------------------------
     # LLM call with retry
     # ------------------------------------------------------------------
 
-    def _call_llm_with_retry(self, inp: SynthesizeInput) -> Optional[SynthesizeOutput]:
+    def _call_llm_with_retry(
+        self,
+        inp: SynthesizeInput,
+        override_claims: Optional[List[ClaimSummary]] = None,
+    ) -> Optional[SynthesizeOutput]:
         system = _build_system_prompt()
-        user = _serialize_input(inp)
+        user = _serialize_input(inp, override_claims=override_claims)
         client = self._get_llm_client()
 
         last_error: Optional[Exception] = None

@@ -640,6 +640,40 @@ class PredicateResolverError(Exception):
     pass
 
 
+# ============================================================================
+# Claim Filter runtime (A3.11, post-A3.9-bis selection-grade fix)
+# ============================================================================
+
+
+class ScoredClaim(BaseModel):
+    """Un claim scoré par pertinence sémantique vs question."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim_id: str
+    score: float = Field(..., ge=0.0, le=1.0)
+    kept: bool = Field(default=True)
+
+
+class ClaimFilterResult(BaseModel):
+    """Output du ClaimFilter (pour observability)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scored: List[ScoredClaim] = Field(default_factory=list)
+    n_input: int = Field(default=0, ge=0)
+    n_kept: int = Field(default=0, ge=0)
+    method: str = Field(default="embedding_cosine")
+    duration_s: float = Field(default=0.0, ge=0.0)
+    schema_version: str = Field(default="a3.0")
+
+
+class ClaimFilterError(Exception):
+    """Erreur générique du ClaimFilter."""
+
+    pass
+
+
 class EvaluateError(Exception):
     """Erreur générique du module Evaluate."""
 
