@@ -236,6 +236,28 @@ class Claim(BaseModel):
         description="V1.4: ID of champion if redundant"
     )
 
+    # A4.2 (22/05/2026) — SubjectIndexer indépendant de structured_form
+    # cf doc/ongoing/A41_AUDIT_PIPELINE_CLAIMFIRST.md
+    # structured_form est réservé aux relations HIGH VALUE (S-P-O canonique).
+    # subject_canonical doit être peuplé pour TOUS les claims pour permettre
+    # l'indexation runtime_v6 par sujet, indépendamment de structured_form.
+    # Si SF rempli, subject_canonical = SF.subject (priorité SF).
+    # Sinon, subject_canonical extrait via SubjectIndexer (LLM zero-shot).
+    subject_canonical: Optional[str] = Field(
+        default=None,
+        description="A4.2: Subject d'indexation runtime. Priorité: SF.subject si présent, sinon extraction SubjectIndexer. NULL acceptable seulement si marginal=True."
+    )
+
+    marginal: Optional[bool] = Field(
+        default=None,
+        description="A4.2: True si le claim n'a pas de subject naturel (descriptif/fragmentaire). Exclu du retrieval principal."
+    )
+
+    subject_extraction_confidence: Optional[float] = Field(
+        default=None,
+        description="A4.2: Confidence du LLM SubjectIndexer (0-1). None si subject vient de SF.subject ou pas encore traité."
+    )
+
     @field_validator("text")
     @classmethod
     def validate_text_not_too_long(cls, v: str) -> str:
@@ -321,6 +343,18 @@ class Claim(BaseModel):
                 # c'est le `object` du structured_form (ADR_PARSE_EVALUATE_RUNTIME §4
                 # mapping documenté).
                 props["object_canonical"] = sf_object
+        # A4.2 (22/05/2026) — SubjectIndexer indépendant
+        # Si subject_canonical n'a PAS été défini par SF.subject ci-dessus,
+        # et qu'on a un subject_canonical posé par le SubjectIndexer, on l'écrit.
+        # Cohérence : SF.subject prend toujours priorité s'il existe.
+        if "subject_canonical" not in props and self.subject_canonical:
+            props["subject_canonical"] = self.subject_canonical
+        # marginal flag : True si pas de subject naturel (claim descriptif).
+        # Exclus du retrieval principal côté runtime_v6.
+        if self.marginal is not None:
+            props["marginal"] = self.marginal
+        if self.subject_extraction_confidence is not None:
+            props["subject_extraction_confidence"] = self.subject_extraction_confidence
         # V1.3: Quality gate fields
         if self.quality_status:
             props["quality_status"] = self.quality_status

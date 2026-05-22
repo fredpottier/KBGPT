@@ -457,6 +457,32 @@ class ClaimFirstOrchestrator:
                 f"  → {enrichment_result.claims_enriched}/{len(claims_without_sf)} enriched"
             )
 
+        # Phase 1.8 (A4.2, 22/05/2026): SubjectIndexer — peuple subject_canonical
+        # indépendamment de structured_form pour permettre l'indexation runtime_v6.
+        # cf doc/ongoing/A41_AUDIT_PIPELINE_CLAIMFIRST.md
+        # Cible : claims sans SF.subject (les avec SF garderont SF.subject comme priorité).
+        # Spike A4.2-EXTRACT-TEST a validé taux extraction 94% sur cat a, marginal 56% sur cat d.
+        from knowbase.claimfirst.subject_indexer import SubjectIndexer, is_enabled as subject_indexer_enabled
+        if subject_indexer_enabled():
+            claims_to_index = [
+                c for c in claims
+                if not (c.structured_form and c.structured_form.get("subject"))
+            ]
+            if claims_to_index:
+                logger.info(
+                    f"[OSMOSE:ClaimFirst] Phase 1.8: SubjectIndexer on {len(claims_to_index)} "
+                    f"claims without SF.subject..."
+                )
+                if not hasattr(self, "_subject_indexer"):
+                    self._subject_indexer = SubjectIndexer()
+                indexer_results = self._subject_indexer.index_claims(claims_to_index)
+                n_extracted = sum(1 for r in indexer_results if r.subject is not None)
+                n_marginal = sum(1 for r in indexer_results if r.marginal)
+                logger.info(
+                    f"  → {n_extracted}/{len(claims_to_index)} subjects extracted, "
+                    f"{n_marginal} marked marginal"
+                )
+
         # Phase 2: Extraire les Entities
         logger.info("[OSMOSE:ClaimFirst] Phase 2: Extracting entities...")
         entities, claim_entity_map = self.entity_extractor.extract_from_claims(
