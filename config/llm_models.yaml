@@ -14,9 +14,14 @@ task_models:
   metadata: "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
   # Résumés de textes longs (>10k tokens)
-  # DeepInfra DeepSeek-V4-Pro : flagship 2026, $1.74/$3.48 per M tokens, 1M context, niveau Sonnet 4
-  # Précédent défaut Qwen3-235B-A22B-Instruct-2507 ($0.071/$0.10) — basculer si on veut économique
-  long_summary: "deepseek-ai/DeepSeek-V4-Pro"
+  # 22/05/2026 — bake-off A4.6 runtime_v6 Synthesize (3 LLMs sur 20q SAP) :
+  # - Qwen2.5-14B-AWQ vLLM burst : C1=0.150-0.325 (variance n=20)
+  # - DeepSeek-V3.1 DeepInfra : C1=0.250 (factual 0.267, comparison 0.200)
+  # - DeepSeek-V4-Pro DeepInfra : C1=0.250 (IDEM)
+  # → LLM Synthesize n'est PAS le bottleneck. Retour à V3.1 (moins cher).
+  # Cf project_a46_llm_synthesize_not_bottleneck.md.
+  long_summary: "deepseek-ai/DeepSeek-V3.1"
+  # long_summary: "deepseek-ai/DeepSeek-V4-Pro"  # Flagship 2026 — pas de gain mesurable vs V3.1
 
   # Enrichissement de contenu court (table summaries, slot enrichment)
   # Migré du Qwen3-14B vers Qwen3-235B (moins cher de -41%/-58% in/out, context 6x plus grand)
@@ -44,6 +49,13 @@ task_models:
   # Pour réduire le coût ($66 sur 6 docs avec Qwen2.5-72B), explorer compact prompt + batch packing
   # + sampling sur pages bruyantes plutôt que la migration de modèle.
   knowledge_extraction: "Qwen/Qwen3-235B-A22B-Instruct-2507"  # DEBUG canary 2026-04-27 — dump responses
+
+  # Parse + Evaluate runtime_v6 (A4.8, 22/05/2026)
+  # Bug A4.7 : Qwen3-235B-Instruct-2507 tombe en empty/invalide JSON sur ~30% des questions runtime
+  # → fallback déterministe sans subject/predicate cohérents. Le retrieval n'a pas la chance de
+  # bien fonctionner. Switch vers DeepSeek-V3.1 (déjà utilisé par Synthesize sans souci).
+  # Cf doc/ongoing/A47_AUDIT_ORACLE_SYNTHESE.md.
+  runtime_parse_evaluate: "deepseek-ai/DeepSeek-V3.1"
 
 # Paramètres par type de tâche (basés sur les valeurs historiques du code)
 task_parameters:
@@ -92,6 +104,11 @@ task_parameters:
     temperature: 0.2  # Équilibre entre créativité et cohérence
     max_tokens: 4000  # Compatible Qwen3-14B (32768 context) en mode Burst
 
+  # Parse + Evaluate runtime_v6 (A4.8)
+  runtime_parse_evaluate:
+    temperature: 0.1  # Déterministe pour JSON structuré strict
+    max_tokens: 2000  # Couvre Parse (sub_goals + entities) ET Evaluate (verdict + reasoning 600char)
+
 # Configuration des providers LLM
 providers:
   openai:
@@ -115,6 +132,7 @@ providers:
     api_key_env: "DEEPINFRA_API_KEY"
     base_url: "https://api.deepinfra.com/v1/openai"
     models:
+      - "deepseek-ai/DeepSeek-V3.1"               # Test 22/05/2026 runtime_v6 Synthesize — moins cher que V4-Pro
       - "deepseek-ai/DeepSeek-V4-Pro"             # Flagship 2026 — $1.74 in / $3.48 out, 1M ctx, niveau Sonnet 4
       - "Qwen/Qwen3-Max"                          # Flagship Qwen 2026 — $1.20 in / $6.00 out, 250k ctx
       - "Qwen/Qwen3-235B-A22B-Instruct-2507"    # MoE 235B — $0.071 in / $0.10 out
@@ -181,6 +199,10 @@ fallback_strategy:
     - "qwen3.5:9b-q8_0"
     - "gpt-4o-mini"
     - "gpt-4o"
+
+  runtime_parse_evaluate:
+    - "Qwen/Qwen2.5-72B-Instruct"           # JSON-strict capable
+    - "deepseek-ai/DeepSeek-V4-Pro"          # Flagship plus cher
 
 # Configuration SageMaker Endpoints
 # À configurer selon vos déploiements AWS

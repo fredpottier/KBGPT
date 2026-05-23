@@ -169,7 +169,12 @@ class Planner:
         as_of: datetime,
     ) -> Tuple[List[ToolCall], Optional[str]]:
         """Build ToolCall pour kg_claims (fact_lookup, definition_lookup)."""
-        if not sub_goal.subject_canonical:
+        # A4.9-bis (23/05/2026) : en mode hybride, subject=None est toléré car
+        # Execute.kg_claims_hybrid utilise BM25 sur claim.text sans filtre exact subject.
+        # En mode legacy, subject=None reste unmappable (filtre Cypher strict).
+        import os as _os
+        hybrid_mode = _os.getenv("V6_HYBRID_RETRIEVAL", "0") == "1"
+        if not sub_goal.subject_canonical and not hybrid_mode:
             return [], "missing_subject_for_kg_claims"
 
         params: Dict = {

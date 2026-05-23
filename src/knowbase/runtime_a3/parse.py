@@ -8,7 +8,7 @@ Architecture :
 Logique :
     1. Charger few-shot examples depuis prompts/parse_examples.json (cached)
     2. Construire system prompt avec injection examples
-    3. Appeler LLM via llm_router (TaskType.KNOWLEDGE_EXTRACTION, Qwen3-235B par défaut)
+    3. Appeler LLM via llm_router (TaskType.KNOWLEDGE_EXTRACTION, Qwen3-235B par défaut — A4.8 rollback)
     4. Parser output JSON + valider Pydantic
     5. Si validation échoue → retry 1× avec instruction renforcée
     6. Si retry échoue → fallback déterministe (1 sub_goal fact_lookup naïf, confidence=0.3)
@@ -198,23 +198,21 @@ class Parser:
         return truncated, "question_truncated"
 
     def _call_llm_with_retry(self, question: str, parse_input: ParseInput) -> ParseOutput:
-        """Appelle le LLM avec 1 retry si validation Pydantic échoue."""
-        for attempt in range(2):
-            try:
-                raw_output = self._invoke_llm(question, parse_input, attempt=attempt)
-                output = self._parse_and_validate(raw_output, parse_input.question)
-                return output
-            except ValidationError as e:
-                logger.debug(f"[Parse] Validation failed (attempt {attempt + 1}/2): {e}")
-                if attempt == 1:
-                    raise ParseValidationError(f"LLM output invalide même après retry: {e}") from e
-            except json.JSONDecodeError as e:
-                logger.debug(f"[Parse] JSON decode failed (attempt {attempt + 1}/2): {e}")
-                if attempt == 1:
-                    raise ParseValidationError(f"LLM output JSON invalide même après retry: {e}") from e
+        """Appelle le LLM (A4.14 — retry désactivé, fallback déterministe direct).
 
-        # Théoriquement inatteignable (le raise ci-dessus se déclenche)
-        raise ParseValidationError("Retry exhausted without exception (logic error)")
+        Initialement 2 attempts (retry sur ValidationError/JSONDecodeError). Mais bench
+        50q montre que Qwen3-235B-Instruct-2507 rate JSON ~30% des cas et le retry
+        sauve <5% — coûteux (+15-30s par question) pour gain marginal.
+        Fallback déterministe activé direct dès le 1er échec.
+        """
+        try:
+            raw_output = self._invoke_llm(question, parse_input, attempt=0)
+            output = self._parse_and_validate(raw_output, parse_input.question)
+            return output
+        except ValidationError as e:
+            raise ParseValidationError(f"LLM output invalide: {e}") from e
+        except json.JSONDecodeError as e:
+            raise ParseValidationError(f"LLM output JSON invalide: {e}") from e
 
     def _invoke_llm(self, question: str, parse_input: ParseInput, attempt: int) -> str:
         """Invoke LLM via llm_router (ou client injecté) et retourne le raw text."""
@@ -229,6 +227,10 @@ class Parser:
         from knowbase.common.llm_router import get_llm_router, TaskType
 
         router = get_llm_router()
+        # A4.8 ROLLBACK (22/05/2026 soir) : switch DeepSeek-V3.1 a régressé C1 0.300→0.050
+        # car le fallback déterministe (avec subject=None) ratissait plus large que
+        # Parse réussi (avec subject_canonical trop précis qui sabotait le retrieval).
+        # Revert KNOWLEDGE_EXTRACTION (Qwen3-235B). Le vrai fix est dans Execute (Piste A).
         return router.complete(
             task_type=TaskType.KNOWLEDGE_EXTRACTION,
             messages=self._build_messages(question, parse_input, attempt),

@@ -412,9 +412,14 @@ class CitedClaim(BaseModel):
 
     `claim_verbatim` est le texte exact du claim (jamais reformulé par le LLM).
     `section_id` permet le click-to-source dans l'UI.
+
+    NOTE A4.7 (22/05/2026) : extra="ignore" car le LLM Synthesize a tendance à
+    recopier source_doc_id depuis l'input dans cited_claims output. Bug bloquant
+    avec extra="forbid" (échec validation → fallback template). Le runtime
+    discarde silencieusement les champs supplémentaires.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     claim_id: str = Field(..., description="ID du Claim Neo4j d'origine.")
     claim_verbatim: str = Field(

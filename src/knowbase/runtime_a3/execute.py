@@ -41,6 +41,29 @@ logger = logging.getLogger("knowbase.runtime_a3.execute")
 
 
 # ============================================================================
+# Helpers — Lucene escaping (A4.9 Hybrid retrieval BM25)
+# ============================================================================
+
+# Lucene query syntax special chars (domain-agnostic, applicable tout corpus)
+_LUCENE_SPECIAL_CHARS = set('+-&|!(){}[]^"~*?:\\/')
+
+
+def _escape_lucene_query(text: str) -> str:
+    """Échappe les caractères spéciaux Lucene pour query full-text Neo4j.
+
+    Sans cela, les questions contenant des codes/identifiants avec slashes,
+    parenthèses, etc. (ex `/SAPAPO/OM03`, `(2021/821)`, `<P>`) cassent la query.
+    """
+    out_chars = []
+    for ch in text:
+        if ch in _LUCENE_SPECIAL_CHARS:
+            out_chars.append("\\" + ch)
+        else:
+            out_chars.append(ch)
+    return "".join(out_chars).strip()
+
+
+# ============================================================================
 # Cypher templates (cf ADR §4)
 # ============================================================================
 
@@ -56,6 +79,61 @@ WHERE c.subject_canonical = $subject
 OPTIONAL MATCH (c)-[:EVIDENCED_BY]->(s:Section)
 RETURN c, collect(s) AS sections
 LIMIT 50
+"""
+
+# A4.9 (Piste A — Hybrid retrieval BM25 + ClaimFilter vector existant)
+# Bottleneck A4.7 verrouillé : filtre exact `c.subject_canonical = $subject` rate
+# 18/18 questions (retrieval recall=0.00). Mode hybride contourne le filtre strict :
+# BM25 full-text sur `c.text` via index `claim_text_search` (déjà ONLINE) →
+# top-50 candidats → ClaimFilter A3.11 cosine sur question prend le relai top-5.
+# Domain-agnostic strict : BM25 capture identifiants formels (codes, refs) sur tout corpus.
+# Activé via env V6_HYBRID_RETRIEVAL=1.
+CYPHER_KG_CLAIMS_HYBRID = """
+CALL db.index.fulltext.queryNodes('claim_text_search', $query_text)
+YIELD node AS c, score AS bm25_score
+WHERE c.tenant_id = $tenant_id
+  AND c.invalidated_at IS NULL
+  AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
+  AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))
+WITH c, bm25_score
+ORDER BY bm25_score DESC
+LIMIT 50
+OPTIONAL MATCH (c)-[:EVIDENCED_BY]->(s:Section)
+RETURN c, collect(s) AS sections
+"""
+
+# A4.9-ter (23/05/2026) — RRF hybrid : BM25 + vector parallèles, fusion rank-based.
+# Pattern littérature 2026 (cf doc A47 §3.3) : recall +48% vs BM25 seul.
+# Requirement : Vector Index `claim_embedding_idx` (1024d cosine) ONLINE.
+CYPHER_KG_CLAIMS_BM25_ONLY = """
+CALL db.index.fulltext.queryNodes('claim_text_search', $query_text)
+YIELD node AS c, score AS bm25_score
+WHERE c.tenant_id = $tenant_id
+  AND c.invalidated_at IS NULL
+  AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
+  AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))
+RETURN c.claim_id AS claim_id, bm25_score AS score
+ORDER BY bm25_score DESC
+LIMIT 50
+"""
+
+CYPHER_KG_CLAIMS_VECTOR_ONLY = """
+CALL db.index.vector.queryNodes('claim_embedding_idx', 50, $query_embedding)
+YIELD node AS c, score AS vec_score
+WHERE c.tenant_id = $tenant_id
+  AND c.invalidated_at IS NULL
+  AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
+  AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))
+RETURN c.claim_id AS claim_id, vec_score AS score
+ORDER BY vec_score DESC
+"""
+
+# Cypher pour charger les claims fusionnés par RRF (après calcul rank Python)
+CYPHER_LOAD_CLAIMS_BY_IDS = """
+MATCH (c:Claim {tenant_id: $tenant_id})
+WHERE c.claim_id IN $claim_ids
+OPTIONAL MATCH (c)-[:EVIDENCED_BY]->(s:Section)
+RETURN c, collect(s) AS sections
 """
 
 # §4.2 kg_claims_list — list_enumeration
@@ -216,6 +294,45 @@ class Executor:
             )
         return self._predicate_resolver
 
+    def _build_query_text_for_call(self, tc: "ToolCall", parse_input: "ParseInput") -> str:
+        """A4.9-bis — construit query Lucene depuis le sub_goal correspondant au ToolCall.
+
+        Stratégie :
+        - Si V6_HYBRID_QUERY_MODE=sub_goal (défaut) : utilise subject+predicate+object_hint
+          du sub_goal. Si tous vides, fallback question entière.
+        - Si V6_HYBRID_QUERY_MODE=question : utilise toujours parse_input.question.
+
+        Domain-agnostic : utilise uniquement les champs structurés du sub_goal,
+        pas de regex ou règle métier.
+        """
+        mode = os.getenv("V6_HYBRID_QUERY_MODE", "sub_goal").lower()
+        question = (parse_input.question or "").strip()
+
+        if mode == "question":
+            return question
+
+        # Mode sub_goal : récupérer le sub_goal depuis _current_parse_output
+        po = getattr(self, "_current_parse_output", None)
+        if po is None:
+            return question
+        try:
+            sub_goal = po.sub_goals[tc.sub_goal_idx]
+        except (AttributeError, IndexError):
+            return question
+
+        parts: List[str] = []
+        if sub_goal.subject_canonical:
+            parts.append(str(sub_goal.subject_canonical))
+        if sub_goal.predicate_hint:
+            # UPPER_SNAKE → "lower words" pour matching Lucene plus naturel
+            parts.append(str(sub_goal.predicate_hint).replace("_", " ").lower())
+        if sub_goal.object_hint:
+            parts.append(str(sub_goal.object_hint))
+
+        if not parts:
+            return question
+        return " ".join(parts).strip()
+
     def _resolve_subject_for_call(
         self,
         tc: ToolCall,
@@ -355,10 +472,16 @@ class Executor:
         self,
         parse_input: ParseInput,
         plan_output: PlanOutput,
+        parse_output: Optional["ParseOutput"] = None,
     ) -> ExecuteOutput:
-        """Exécute tous les ToolCall + side-effect ConflictPending."""
+        """Exécute tous les ToolCall + side-effect ConflictPending.
+
+        A4.9-bis : parse_output optionnel pour permettre query BM25 par sub_goal.
+        """
         t0 = time.perf_counter()
         results: List[ToolResult] = []
+        # A4.9-bis : stocker temporairement parse_output pour accès depuis _build_query_text_for_call
+        self._current_parse_output = parse_output
 
         # 1) Exécuter chaque ToolCall séquentiellement (parallélisation v2)
         for tc in plan_output.tool_calls:
@@ -392,6 +515,12 @@ class Executor:
             # qdrant_sections n'a pas de subject (passe par query texte).
             if tc.tool == "kg_claims":
                 resolved_params = self._resolve_subject_for_call(tc, "subject")
+                # A4.9 — query_text injecté pour mode hybride BM25.
+                # A4.9-bis (23/05/2026) : query par sub_goal au lieu de question entière.
+                # Si Parse a produit un sub_goal précis (subject/predicate/object_hint),
+                # on construit query Lucene depuis ces champs → recherche plus ciblée
+                # qu'avec la question complète. Fallback question si sub_goal vide.
+                resolved_params["query_text"] = self._build_query_text_for_call(tc, parse_input)
                 claims, sections = self._call_kg_claims(resolved_params)
                 relations: List[RelationSummary] = []
             elif tc.tool == "kg_claims_list":
@@ -483,7 +612,224 @@ class Executor:
     def _call_kg_claims(
         self, params: Dict[str, Any]
     ) -> Tuple[List[ClaimSummary], List[SectionSummary]]:
+        # A4.9 — toggle Hybrid retrieval. Valeurs supportées :
+        #   "0" / unset : legacy filtre exact subject_canonical
+        #   "1" / "bm25" : BM25 only via fulltext (A4.9, A4.9-bis)
+        #   "rrf" : RRF parallel BM25 + vector cosine (A4.9-ter winner A4.11)
+        #   "rrf_ce" : RRF + Cross-Encoder re-rank top-50 (A4.12 Étape B)
+        #   "vector" : Vector-only direct via Neo4j Vector Index (Choix 2)
+        mode = os.getenv("V6_HYBRID_RETRIEVAL", "0").lower()
+        if mode == "vector":
+            return self._call_kg_claims_vector_only(params)
+        if mode == "rrf_ce":
+            return self._call_kg_claims_rrf_ce(params)
+        if mode == "rrf":
+            return self._call_kg_claims_rrf(params)
+        if mode in ("1", "bm25"):
+            return self._call_kg_claims_hybrid(params)
         rows = self._get_neo4j().execute_query(CYPHER_KG_CLAIMS, **params)
+        return self._parse_claim_rows(rows)
+
+    def _call_kg_claims_rrf_ce(
+        self, params: Dict[str, Any]
+    ) -> Tuple[List[ClaimSummary], List[SectionSummary]]:
+        """A4.12 Étape B — RRF parallèle + Cross-Encoder re-rank.
+
+        Étape 1 : reuse `_call_kg_claims_rrf` pour obtenir top-50 RRF fusionnés.
+        Étape 2 : cross-encoder BGE-reranker-v2-m3 (multilingue) sur (question, claim_text)
+                  pour les 50 → re-tri par rerank score descendant.
+
+        Pattern littérature 2026 : cross-encoder re-rank ajoute +5-10pp NDCG@10
+        après hybrid retrieval. Domain-agnostic (modèle multilingue 100+ langues).
+        """
+        # Étape 1 : RRF top-50
+        claims, sections = self._call_kg_claims_rrf(params)
+        if not claims:
+            return claims, sections
+
+        query_text = (params.get("query_text") or "").strip()
+        if not query_text:
+            return claims, sections
+
+        # Étape 2 : Cross-Encoder re-rank
+        try:
+            from knowbase.common.clients.reranker import get_cross_encoder
+            ce_model_name = os.getenv("V6_CE_RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
+            ce = get_cross_encoder(model_name=ce_model_name, device="cpu")
+        except Exception as e:
+            logger.warning("rrf_ce: cross-encoder load failed (%s), fallback RRF only", e)
+            return claims, sections
+
+        # Construire les pairs (question, claim_text) — utiliser le texte le plus riche
+        # disponible : c.text > verbatim_quote > subject+predicate+value concat
+        def _claim_to_rerank_text(c: ClaimSummary) -> str:
+            # extra=allow → c peut avoir des champs additionnels du KG
+            extras = c.model_dump()
+            for key in ("text", "claim_text_full", "verbatim_quote", "passage_text"):
+                val = extras.get(key)
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+            parts: List[str] = []
+            if c.subject_canonical:
+                parts.append(c.subject_canonical)
+            if c.predicate:
+                parts.append(c.predicate.replace("_", " ").lower())
+            v = c.value or c.value_normalized
+            if v:
+                parts.append(str(v))
+            return " ".join(parts).strip()
+
+        rerank_texts = [_claim_to_rerank_text(c) for c in claims]
+        valid_idx = [i for i, t in enumerate(rerank_texts) if t]
+        if not valid_idx:
+            return claims, sections
+        pairs = [(query_text, rerank_texts[i]) for i in valid_idx]
+        try:
+            scores = ce.predict(pairs)
+        except Exception as e:
+            logger.warning("rrf_ce: cross-encoder predict failed (%s), fallback RRF only", e)
+            return claims, sections
+
+        # Re-tri descendant par score CE
+        idx_score = list(zip(valid_idx, (float(s) for s in scores)))
+        idx_score.sort(key=lambda x: x[1], reverse=True)
+        # Réordonner claims selon le nouveau classement
+        reordered_claims = [claims[i] for i, _ in idx_score]
+        # On garde sections inchangées (associées par claim_id côté ClaimFilter)
+        return reordered_claims, sections
+
+    def _call_kg_claims_vector_only(
+        self, params: Dict[str, Any]
+    ) -> Tuple[List[ClaimSummary], List[SectionSummary]]:
+        """Choix 2 — Vector-first retrieval direct (bypass entity linking).
+
+        Pattern Direct Fact Retrieval (arxiv 2305.12416). Élimine 2 maillons fragiles
+        (SubjectResolver + PredicateResolver). Domain-agnostic : embedding cosine
+        fonctionne identiquement sur médical, réglementaire, aerospace.
+        """
+        query_text = (params.get("query_text") or "").strip()
+        if not query_text:
+            return self._call_kg_claims_hybrid(params)
+        try:
+            emb = self._get_embedder()(f"query: {query_text}")
+        except Exception:
+            logger.warning("vector_only: embedder failed, fallback hybrid")
+            return self._call_kg_claims_hybrid(params)
+        try:
+            rows = self._get_neo4j().execute_query(
+                CYPHER_KG_CLAIMS_VECTOR_ONLY,
+                query_embedding=emb,
+                tenant_id=params["tenant_id"],
+                as_of=params["as_of"],
+            )
+        except Exception as e:
+            logger.warning("vector_only: vector query failed (%s), fallback hybrid", e)
+            return self._call_kg_claims_hybrid(params)
+        # Charger full claims pour les IDs retournés
+        claim_ids = [r["claim_id"] for r in rows]
+        if not claim_ids:
+            return [], []
+        load_rows = self._get_neo4j().execute_query(
+            CYPHER_LOAD_CLAIMS_BY_IDS,
+            claim_ids=claim_ids, tenant_id=params["tenant_id"],
+        )
+        return self._parse_claim_rows(load_rows)
+
+    def _call_kg_claims_rrf(
+        self, params: Dict[str, Any]
+    ) -> Tuple[List[ClaimSummary], List[SectionSummary]]:
+        """A4.9-ter — RRF parallèle BM25 + vector cosine via Neo4j Vector Index.
+
+        Strategy :
+        1. Encode query_text en vector e5-large
+        2. BM25 top-50 + Vector top-50 (Cypher parallel)
+        3. RRF fusion k=60 → top-50 unifié
+        4. Load full claims via batch Cypher
+        5. ClaimFilter A3.11 prend le relai top-5 final
+        """
+        query_text = (params.get("query_text") or "").strip()
+        if not query_text:
+            return self._call_kg_claims_hybrid(params)
+
+        # 1. Encode query (e5-large convention : "query: " prefix)
+        try:
+            emb = self._get_embedder()(f"query: {query_text}")
+        except Exception:
+            logger.warning("rrf: embedder failed, fallback BM25-only")
+            return self._call_kg_claims_hybrid(params)
+
+        escaped = _escape_lucene_query(query_text)
+        base_params = {
+            "tenant_id": params["tenant_id"],
+            "as_of": params["as_of"],
+        }
+
+        # 2. BM25 + Vector queries (séquentiel pour simplicité — Neo4j n'autorise
+        # pas le parallel intra-tx ; mais latence faible donc OK)
+        try:
+            bm25_rows = self._get_neo4j().execute_query(
+                CYPHER_KG_CLAIMS_BM25_ONLY,
+                query_text=escaped, **base_params,
+            )
+        except Exception as e:
+            logger.warning("rrf: BM25 failed (%s), fallback hybrid", e)
+            return self._call_kg_claims_hybrid(params)
+
+        try:
+            vec_rows = self._get_neo4j().execute_query(
+                CYPHER_KG_CLAIMS_VECTOR_ONLY,
+                query_embedding=emb, **base_params,
+            )
+        except Exception as e:
+            logger.warning("rrf: vector query failed (%s), fallback to BM25-only", e)
+            vec_rows = []
+
+        # 3. RRF fusion k=60 (paramètre standard littérature)
+        rrf_k = 60
+        scores: Dict[str, float] = {}
+        for rank_i, r in enumerate(bm25_rows):
+            cid = r["claim_id"]
+            scores[cid] = scores.get(cid, 0.0) + 1.0 / (rrf_k + rank_i + 1)
+        for rank_i, r in enumerate(vec_rows):
+            cid = r["claim_id"]
+            scores[cid] = scores.get(cid, 0.0) + 1.0 / (rrf_k + rank_i + 1)
+        # Top-50 par score RRF descendant
+        sorted_ids = [cid for cid, _ in sorted(scores.items(), key=lambda x: -x[1])[:50]]
+        if not sorted_ids:
+            return [], []
+
+        # 4. Charger full claims pour les top-50 IDs
+        rows = self._get_neo4j().execute_query(
+            CYPHER_LOAD_CLAIMS_BY_IDS,
+            claim_ids=sorted_ids, tenant_id=params["tenant_id"],
+        )
+        return self._parse_claim_rows(rows)
+
+    def _call_kg_claims_hybrid(
+        self, params: Dict[str, Any]
+    ) -> Tuple[List[ClaimSummary], List[SectionSummary]]:
+        """Mode hybride A4.9 — BM25 full-text sur claim.text via Neo4j fulltext index.
+
+        Params attendus : query_text, tenant_id, as_of. Subject/predicate ignorés
+        (le ClaimFilter cosine post-hoc fait le re-ranking sémantique).
+        """
+        query_text = (params.get("query_text") or "").strip()
+        if not query_text:
+            logger.warning("hybrid: empty query_text, falling back to legacy exact-match")
+            rows = self._get_neo4j().execute_query(CYPHER_KG_CLAIMS, **params)
+            return self._parse_claim_rows(rows)
+        # Échapper Lucene chars : + - && || ! ( ) { } [ ] ^ " ~ * ? : \ /
+        escaped = _escape_lucene_query(query_text)
+        hybrid_params = {
+            "query_text": escaped,
+            "tenant_id": params["tenant_id"],
+            "as_of": params["as_of"],
+        }
+        try:
+            rows = self._get_neo4j().execute_query(CYPHER_KG_CLAIMS_HYBRID, **hybrid_params)
+        except Exception as e:
+            logger.warning("hybrid: BM25 query failed (%s), falling back to legacy", e)
+            rows = self._get_neo4j().execute_query(CYPHER_KG_CLAIMS, **params)
         return self._parse_claim_rows(rows)
 
     def _call_kg_claims_list(
@@ -746,7 +1092,7 @@ def execute(
     sortie pour re-calculer coverage_signal correctement avec la priorité du sub_goal.
     """
     ex = executor or Executor()
-    out = ex.execute(parse_input, plan_output)
+    out = ex.execute(parse_input, plan_output, parse_output=parse_output)
 
     # Recalcul coverage_signal avec la vraie priorité
     for result in out.results:

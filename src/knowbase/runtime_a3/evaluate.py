@@ -210,6 +210,8 @@ class Evaluator:
                     self._router = LLMRouter()
 
                 def complete(self, system: str, user: str) -> str:
+                    # A4.8 ROLLBACK (22/05/2026 soir) : switch DeepSeek-V3.1 a régressé
+                    # C1 0.300→0.050. Cf A47 audit + commentaire parse.py. Revert.
                     return self._router.complete(
                         task_type=TaskType.FAST_CLASSIFICATION,
                         messages=[

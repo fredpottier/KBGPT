@@ -60,7 +60,7 @@ logger = logging.getLogger("knowbase.runtime_a3.orchestrator")
 
 # Hard caps (cf ADR §2.9)
 MAX_ITERATIONS = 2
-MAX_WALL_CLOCK_S = 60.0
+MAX_WALL_CLOCK_S = 180.0  # A4.14 — était 60s. Trop bas pour Parse Qwen3-235B retries (15-30s) + Synthesize DeepSeek-V3.1 sur 50 claims (30-90s).
 
 
 # ============================================================================

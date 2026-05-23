@@ -65,7 +65,8 @@ def main():
     print(f"  Has subject_canonical     : {g['n_subject']:>5d}  {has_subj_pct:6.1%}")
     print(f"  Flagged marginal          : {g['n_marginal']:>5d}  {marginal_pct:6.1%}")
     print(f"  Still orphan              : {g['n_orphan']:>5d}  {orphan_pct:6.1%}")
-    print(f"  With extraction confidence: {g['n_with_confidence']:>5d}  (avg conf = {g['avg_confidence']:.2f if g['avg_confidence'] is not None else 0:.2f})")
+    avg_conf = g['avg_confidence'] if g['avg_confidence'] is not None else 0.0
+    print(f"  With extraction confidence: {g['n_with_confidence']:>5d}  (avg conf = {avg_conf:.2f})")
 
     # 2. Distribution par claim_type
     print(f"\n[2/3] Distribution par claim_type ...")

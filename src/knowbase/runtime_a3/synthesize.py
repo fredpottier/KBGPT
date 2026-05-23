@@ -505,7 +505,9 @@ class Synthesizer:
         out: SynthesizeOutput,
         inp: SynthesizeInput,
     ) -> SynthesizeOutput:
-        """Calcule citation_coverage_rate + ajoute warning si <95%."""
+        """Calcule citation_coverage_rate + ajoute warning si <95%.
+        A4.5 : applique GroundingVerifier (NLI mDeBERTa) si activé.
+        """
         rate = _compute_citation_coverage(out.answer_text)
         out.citation_coverage_rate = rate
         warnings = list(out.synthesize_warnings)
@@ -513,6 +515,49 @@ class Synthesizer:
             warnings.append(
                 f"citation_coverage_below_threshold:{rate:.2f}_(target_0.95)"
             )
+
+        # A4.5 — GroundingVerifier post-Synthesize (anti-hallucination)
+        # cf project_a44_root_cause_synthesize_hallucination.md
+        try:
+            from knowbase.runtime_a3.grounding_verifier import (
+                GroundingVerifier,
+                apply_grounding_decision,
+                is_enabled as gv_enabled,
+                get_mode as gv_mode,
+            )
+            if gv_enabled() and out.mode not in ("ABSTENTION",) and out.cited_claims:
+                # Construire dict claim_id → verbatim depuis les cited_claims
+                claim_verbatim_by_id = {
+                    c.claim_id: c.claim_verbatim
+                    for c in out.cited_claims
+                    if c.claim_id and c.claim_verbatim
+                }
+                if claim_verbatim_by_id:
+                    if not hasattr(self, "_grounding_verifier"):
+                        self._grounding_verifier = GroundingVerifier()
+                    report = self._grounding_verifier.verify(
+                        out.answer_text, claim_verbatim_by_id,
+                    )
+                    self._last_grounding_report = report
+                    mode = gv_mode()
+                    new_text, gv_warnings = apply_grounding_decision(
+                        out.answer_text, report, mode=mode,
+                    )
+                    out.answer_text = new_text
+                    warnings.extend(gv_warnings)
+                    # Si abstention forcée, marquer le mode
+                    if (mode == "ABSTAIN" and report.n_checked > 0
+                            and report.hallucination_rate > 0.5):
+                        out.mode = "ABSTENTION"
+                    logger.info(
+                        "[GroundingVerifier] mode=%s n_sentences=%d n_checked=%d "
+                        "n_hallucinations=%d dur=%.2fs",
+                        mode, report.n_sentences, report.n_checked,
+                        report.n_hallucinations, report.duration_s,
+                    )
+        except Exception:
+            logger.exception("[GroundingVerifier] failed (non-fatal)")
+
         out.synthesize_warnings = warnings
         return out
 

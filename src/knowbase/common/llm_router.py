@@ -71,6 +71,11 @@ class TaskType(Enum):
     RFP_QUESTION_ANALYSIS = "rfp_question_analysis" # Analyse intelligente questions RFP
     TRANSLATION = "translation"           # Traduction de langues (tâche simple)
     KNOWLEDGE_EXTRACTION = "knowledge_extraction" # Extraction structurée concepts/facts/entities/relations
+    # A4.8 (22/05/2026) — Parse + Evaluate runtime_v6 :
+    # Qwen3-235B-Instruct-2507 (utilisé par knowledge_extraction) tombe en empty/invalide JSON
+    # sur ~30% des questions runtime. Cf doc/ongoing/A47_AUDIT_ORACLE_SYNTHESE.md.
+    # Nouveau TaskType isolé pour router Parse + Evaluate vers DeepSeek-V3.1 (JSON strict OK).
+    RUNTIME_PARSE_EVALUATE = "runtime_parse_evaluate"
 
 
 class LlmMode(Enum):
@@ -1078,6 +1083,9 @@ class LLMRouter:
                 TaskType.METADATA_EXTRACTION: UsageId.CLASSIFICATION,
                 TaskType.TRANSLATION: UsageId.CLASSIFICATION,
                 TaskType.RFP_QUESTION_ANALYSIS: UsageId.SEARCH_SIMPLE,
+                # A4.8 — runtime_v6 Parse + Evaluate : utilise les mêmes traits que LONG_TEXT_SUMMARY
+                # (JSON strict, modèle capable, pas de burst). Pas d'usage_id v2 dédié pour l'instant.
+                TaskType.RUNTIME_PARSE_EVALUATE: UsageId.SEARCH_SIMPLE,
             }.get(task_type)
         except Exception:
             return None
