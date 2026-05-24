@@ -386,12 +386,36 @@ class Synthesizer:
         Stratifie par sub_goal_idx pour préserver la diversité (notamment
         comparison qui décompose en 2× kg_claims).
 
+        P2.2 (23/05/2026) — toggle V6_CROSS_ENCODER_RERANK :
+            - "1" : cross-encoder reranker (BAAI/bge-reranker-v2-m3) sur top-N RRF
+            - "0" (défaut) : bi-encoder ClaimFilter (cosine sentence-transformers)
+
         Si désactivé, retourne claims inchangés. Si erreur, fail-open (claims bruts).
         """
         claims, groups = _aggregate_claims_with_groups(inp.execute_output)
 
         if not self._claim_filter_enabled or not claims:
             return claims
+
+        # P2.2 — Cross-encoder reranker prioritaire si activé
+        import os as _os
+        if _os.getenv("V6_CROSS_ENCODER_RERANK", "0") == "1":
+            try:
+                from knowbase.runtime_a3.reranker import ClaimReranker
+                reranker = ClaimReranker(top_k=5)
+                question = inp.parse_output.raw_question
+                kept_claims, kept_scores = reranker.rerank(question, claims)
+                self._last_filter_result = None  # cross-encoder n'utilise pas le même schema
+                logger.info(
+                    "[CROSS_ENCODER] kept %d/%d claims (top_score=%.3f)",
+                    len(kept_claims), len(claims),
+                    kept_scores[0] if kept_scores else 0.0,
+                )
+                return kept_claims
+            except Exception:
+                logger.exception("synthesize: cross_encoder reranker failed, fallback to bi-encoder filter")
+                # fall through to bi-encoder
+
         try:
             question = inp.parse_output.raw_question
             kept, result = self._get_claim_filter().filter(

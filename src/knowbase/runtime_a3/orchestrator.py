@@ -29,6 +29,7 @@ broaden_subject utilise une heuristique générale (drop trailing token).
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import datetime
@@ -315,6 +316,29 @@ class Orchestrator:
         self._synthesizer = synthesizer
         self._max_iterations = max_iterations
         self._max_wall_clock_s = max_wall_clock_s
+        self._log_runtime_config()
+
+    @staticmethod
+    def _log_runtime_config() -> None:
+        """P2.1 (23/05/2026) — log config retrieval/LLM/toggles en init Orchestrator.
+
+        Anti-épisode A4.15 : on a découvert que V6_HYBRID_RETRIEVAL n'était jamais
+        positionné côté env (défaut "0" silencieux) alors qu'on croyait bencher en RRF.
+        Ce log rend la config visible dès le démarrage du pipeline runtime_v6.
+        """
+        import os as _os
+        config = {
+            "V6_HYBRID_RETRIEVAL": _os.getenv("V6_HYBRID_RETRIEVAL", "0"),
+            "V6_HYBRID_QUERY_MODE": _os.getenv("V6_HYBRID_QUERY_MODE", "question"),
+            "V6_QDRANT_CASCADE": _os.getenv("V6_QDRANT_CASCADE", "0"),
+            "V6_CROSS_ENCODER_RERANK": _os.getenv("V6_CROSS_ENCODER_RERANK", "0"),
+            "V6_CE_RERANK_MODEL": _os.getenv("V6_CE_RERANK_MODEL", "(unset)"),
+            "V6_PARSE_LLM_DEEPSEEK": _os.getenv("V6_PARSE_LLM_DEEPSEEK", "0"),
+            "V6_CLAIM_FILTER_ENABLED": _os.getenv("V6_CLAIM_FILTER_ENABLED", "1"),
+            "MAX_WALL_CLOCK_S": MAX_WALL_CLOCK_S,
+            "MAX_ITERATIONS": MAX_ITERATIONS,
+        }
+        logger.info("[RUNTIME_V6_CONFIG] %s", json.dumps(config, ensure_ascii=False))
 
     # ------------------------------------------------------------------
     # Public API

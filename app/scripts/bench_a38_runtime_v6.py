@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import statistics
 import sys
 import time
@@ -59,10 +60,59 @@ OUTPUT JSON ONLY:
 """
 
 
-def llm_judge(question: str, answer: str, ground_truth: str) -> Dict[str, Any]:
-    """LLM-judge C1/C3 score via llm_router (FAST_CLASSIFICATION → DeepSeek-V3.1)."""
+_JUDGE_SCORE_REGEX = re.compile(r'"score"\s*:\s*([0-9]*\.?[0-9]+)')
+
+
+def _parse_judge_response(text: str) -> Optional[Dict[str, Any]]:
+    """Parse robuste de la réponse judge.
+
+    Stratégie :
+      1. Strip markdown fences
+      2. json.loads strict
+      3. Si échoue : regex `"score"\s*:\s*<float>` fallback (extrait score même si JSON malformé)
+
+    Returns:
+      - {"score": float, "reasoning": str} si parsing OK
+      - None si tout a échoué
+    """
+    if not text or not text.strip():
+        return None
+
+    stripped = text.strip()
+
+    # Strip markdown fences
+    if stripped.startswith("```"):
+        m = re.search(r"```(?:json)?\s*(.+?)\s*```", stripped, re.DOTALL)
+        if m:
+            stripped = m.group(1).strip()
+
+    # Tentative JSON strict
     try:
-        from knowbase.common.llm_router import LLMRouter, TaskType
+        parsed = json.loads(stripped)
+        if "score" in parsed:
+            score = float(parsed["score"])
+            score = max(0.0, min(1.0, score))
+            return {"score": score, "reasoning": parsed.get("reasoning", "")}
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+
+    # Fallback regex sur le score (tolère JSON malformé / texte autour)
+    m = _JUDGE_SCORE_REGEX.search(stripped)
+    if m:
+        try:
+            score = float(m.group(1))
+            score = max(0.0, min(1.0, score))
+            return {"score": score, "reasoning": "[regex_extract] " + stripped[:200]}
+        except (ValueError, TypeError):
+            pass
+
+    return None
+
+
+def _judge_call_once(task_type, question: str, answer: str, ground_truth: str) -> Optional[str]:
+    """Un seul appel LLM judge. Retourne raw text ou None si exception."""
+    try:
+        from knowbase.common.llm_router import LLMRouter
         router = LLMRouter()
         user = (
             f"QUESTION: {question}\n\n"
@@ -70,8 +120,8 @@ def llm_judge(question: str, answer: str, ground_truth: str) -> Dict[str, Any]:
             f"CANDIDATE ANSWER: {answer}\n\n"
             "Respond with JSON only."
         )
-        raw = router.complete(
-            task_type=TaskType.FAST_CLASSIFICATION,
+        return router.complete(
+            task_type=task_type,
             messages=[
                 {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
                 {"role": "user", "content": user},
@@ -79,20 +129,63 @@ def llm_judge(question: str, answer: str, ground_truth: str) -> Dict[str, Any]:
             temperature=0.0,
             max_tokens=200,
         )
-        # Strip markdown fences si présent
-        text = raw.strip()
-        if text.startswith("```"):
-            import re
-            m = re.search(r"```(?:json)?\s*(.+?)\s*```", text, re.DOTALL)
-            if m:
-                text = m.group(1).strip()
-        parsed = json.loads(text)
-        score = float(parsed.get("score", 0.0))
-        score = max(0.0, min(1.0, score))  # clamp
-        return {"score": score, "reasoning": parsed.get("reasoning", "")}
     except Exception as exc:
-        logger.warning("llm_judge failed: %s", exc)
-        return {"score": 0.0, "reasoning": f"judge_error:{str(exc)[:100]}"}
+        logger.debug("judge call exception: %s", exc)
+        return None
+
+
+def llm_judge(question: str, answer: str, ground_truth: str) -> Dict[str, Any]:
+    """LLM-judge C1/C3 score (P0.1 — retry exponentiel + parsing tolérant + fallback LLM).
+
+    Stratégie :
+      1. 3 tentatives avec primary LLM (FAST_CLASSIFICATION = Qwen3-235B) — backoff 1s/3s
+      2. Si toutes échouent : 1 tentative fallback LLM (LONG_TEXT_SUMMARY = DeepSeek-V3.1)
+      3. Si tout échoue : retourne score=None (exclu de l'agrégation, anti-biais)
+
+    Returns:
+      {"score": float|None, "reasoning": str, "attempts": int, "used_fallback": bool}
+    """
+    from knowbase.common.llm_router import TaskType
+
+    # Tentatives primary LLM avec backoff exponentiel
+    backoffs = [0, 1, 3]  # 1ère tentative immédiate, puis 1s, puis 3s
+    for attempt in range(3):
+        if backoffs[attempt] > 0:
+            time.sleep(backoffs[attempt])
+        raw = _judge_call_once(TaskType.FAST_CLASSIFICATION, question, answer, ground_truth)
+        if raw is None:
+            continue
+        parsed = _parse_judge_response(raw)
+        if parsed is not None:
+            return {
+                "score": parsed["score"],
+                "reasoning": parsed["reasoning"],
+                "attempts": attempt + 1,
+                "used_fallback": False,
+            }
+        logger.debug("judge primary attempt %d/3 unparseable: %r", attempt + 1, raw[:120])
+
+    # Fallback LLM (DeepSeek-V3.1 plus stable sur JSON strict)
+    logger.warning("llm_judge: primary 3/3 failed, trying fallback DeepSeek-V3.1")
+    raw = _judge_call_once(TaskType.LONG_TEXT_SUMMARY, question, answer, ground_truth)
+    if raw is not None:
+        parsed = _parse_judge_response(raw)
+        if parsed is not None:
+            return {
+                "score": parsed["score"],
+                "reasoning": "[fallback_deepseek] " + parsed["reasoning"],
+                "attempts": 4,
+                "used_fallback": True,
+            }
+
+    # Tout a échoué — return None (exclu de l'agrégation)
+    logger.warning("llm_judge failed all 4 attempts (primary + fallback)")
+    return {
+        "score": None,
+        "reasoning": "judge_error_all_attempts_failed",
+        "attempts": 4,
+        "used_fallback": True,
+    }
 
 
 # ============================================================================
@@ -202,6 +295,8 @@ def run_bench_50q(orch, gold_path: Path, limit: Optional[int]) -> List[Dict[str,
             "run": run,
             "judge_score": judge["score"],
             "judge_reasoning": judge["reasoning"],
+            "judge_attempts": judge.get("attempts"),
+            "judge_used_fallback": judge.get("used_fallback", False),
         })
     return results
 
@@ -238,29 +333,52 @@ def run_bench_30q_cp(orch, gold_path: Path, limit: Optional[int]) -> List[Dict[s
 
 
 def aggregate_50q(results: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Calcule C1 global + C3 (sous-set lifecycle) + latence + citation."""
+    """Calcule C1 global + C3 (sous-set lifecycle) + latence + citation.
+
+    P0.1 (23/05/2026) — exclut les judge_score=None (judge a échoué tous attempts)
+    de l'agrégation pour éviter le biais 0.0 systématique. Reporte n_judge_failed
+    et taux d'erreur pour visibilité.
+    """
     n = len(results)
-    scores = [r["judge_score"] for r in results]
+    # Séparer les scores valides (non-None) des judge failures
+    valid_scores = [r["judge_score"] for r in results if r["judge_score"] is not None]
+    n_judge_failed = sum(1 for r in results if r["judge_score"] is None)
+    n_judge_fallback = sum(1 for r in results if r.get("judge_used_fallback"))
+
     durations = [r["run"]["duration_s"] for r in results if r["run"]["ok"]]
     cit_rates = [r["run"]["citation_coverage_rate"] for r in results
                  if r["run"]["ok"] and r["run"].get("citation_coverage_rate") is not None]
 
-    # Lifecycle sous-set
+    # Lifecycle sous-set (scores valides seulement)
     lifecycle_scores = [r["judge_score"] for r in results
-                        if r.get("primary_type") == "lifecycle"]
+                        if r.get("primary_type") == "lifecycle"
+                        and r["judge_score"] is not None]
 
-    # Per-type
+    # Per-type (scores valides seulement)
     by_type: Dict[str, List[float]] = {}
+    by_type_failures: Dict[str, int] = {}
     for r in results:
-        by_type.setdefault(r.get("primary_type", "unknown"), []).append(r["judge_score"])
+        t = r.get("primary_type", "unknown")
+        if r["judge_score"] is not None:
+            by_type.setdefault(t, []).append(r["judge_score"])
+        else:
+            by_type_failures[t] = by_type_failures.get(t, 0) + 1
     per_type = {
-        t: {"n": len(s), "mean": statistics.mean(s) if s else 0.0}
+        t: {
+            "n": len(s),
+            "mean": statistics.mean(s) if s else 0.0,
+            "n_judge_failed": by_type_failures.get(t, 0),
+        }
         for t, s in by_type.items()
     }
 
     return {
         "n_total": n,
-        "C1_mean": statistics.mean(scores) if scores else 0.0,
+        "n_judge_valid": len(valid_scores),
+        "n_judge_failed": n_judge_failed,
+        "judge_failure_rate": n_judge_failed / n if n else 0.0,
+        "n_judge_fallback_used": n_judge_fallback,
+        "C1_mean": statistics.mean(valid_scores) if valid_scores else 0.0,
         "C3_lifecycle_mean": (statistics.mean(lifecycle_scores)
                               if lifecycle_scores else None),
         "n_lifecycle": len(lifecycle_scores),
@@ -372,7 +490,7 @@ def main():
     if agg_50q:
         print("\n50Q SAP STRATIFIÉ:")
         print(f"  n={agg_50q['n_total']} run_ok={agg_50q['n_run_ok']} failed={agg_50q['n_run_failed']}")
-        print(f"  C1 (LLM-judge mean) : {agg_50q['C1_mean']:.3f}")
+        print(f"  C1 (LLM-judge mean) : {agg_50q['C1_mean']:.3f}  [valid={agg_50q['n_judge_valid']}/{agg_50q['n_total']}, judge_failed={agg_50q['n_judge_failed']} ({agg_50q['judge_failure_rate']:.1%}), fallback_used={agg_50q['n_judge_fallback_used']}]")
         if agg_50q['C3_lifecycle_mean'] is not None:
             print(f"  C3 lifecycle ({agg_50q['n_lifecycle']}q) : {agg_50q['C3_lifecycle_mean']:.3f}")
         print(f"  Latency : p50={agg_50q['latency_p50_s']:.1f}s p95={agg_50q['latency_p95_s']:.1f}s max={agg_50q['latency_max_s']:.1f}s")
@@ -380,7 +498,9 @@ def main():
             print(f"  Citation coverage : {agg_50q['citation_coverage_mean']:.1%}")
         print("  Per type:")
         for t, st in sorted(agg_50q["per_type"].items()):
-            print(f"    {t:20s} n={st['n']:2d} mean={st['mean']:.3f}")
+            jf = st.get("n_judge_failed", 0)
+            jf_suffix = f" judge_failed={jf}" if jf > 0 else ""
+            print(f"    {t:20s} n={st['n']:2d} mean={st['mean']:.3f}{jf_suffix}")
 
     if agg_30q_cp:
         print("\n30Q ConflictPending:")

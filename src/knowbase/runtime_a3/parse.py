@@ -225,14 +225,33 @@ class Parser:
             )
 
         from knowbase.common.llm_router import get_llm_router, TaskType
+        import os as _os
 
         router = get_llm_router()
-        # A4.8 ROLLBACK (22/05/2026 soir) : switch DeepSeek-V3.1 a régressé C1 0.300→0.050
-        # car le fallback déterministe (avec subject=None) ratissait plus large que
-        # Parse réussi (avec subject_canonical trop précis qui sabotait le retrieval).
-        # Revert KNOWLEDGE_EXTRACTION (Qwen3-235B). Le vrai fix est dans Execute (Piste A).
+
+        # P2.3 (23/05/2026) — Switch Parse vers DeepSeek-V3.1 conditionnel.
+        #
+        # Historique :
+        #   A4.8 (22/05/2026) avait switché Parse vers DeepSeek-V3.1 → C1 0.300→0.050
+        #   régression -25pp. CAUSE : Parse réussi avec subject_canonical précis sabotait
+        #   le retrieval Cypher LEGACY (filtre exact subject_canonical = $subject).
+        #   Le fallback déterministe Qwen3-235B (subject=None) ratissait plus large.
+        #   Bug stabilisateur classique.
+        #
+        # Pourquoi ça marche maintenant (P2.3) :
+        #   RRF activé par défaut (V6_HYBRID_RETRIEVAL=rrf, P2.1) → le retrieval ne
+        #   filtre plus subject_canonical exact, il fait BM25+Vector RRF sur claim.text.
+        #   Le couplage qui faisait régresser A4.8 n'existe plus → DeepSeek-V3.1 sur
+        #   Parse devrait apporter ~+0.05-0.10pp en réduisant les 30% Parse JSON empty.
+        #
+        # Toggle V6_PARSE_LLM_DEEPSEEK=1 (défaut "1" via docker-compose) pour rollback rapide.
+        use_deepseek = _os.getenv("V6_PARSE_LLM_DEEPSEEK", "1") == "1"
+        task_type = (
+            TaskType.RUNTIME_PARSE_EVALUATE if use_deepseek
+            else TaskType.KNOWLEDGE_EXTRACTION
+        )
         return router.complete(
-            task_type=TaskType.KNOWLEDGE_EXTRACTION,
+            task_type=task_type,
             messages=self._build_messages(question, parse_input, attempt),
             temperature=0.1,
             max_tokens=2000,

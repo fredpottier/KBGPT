@@ -77,6 +77,16 @@ services:
       # auto DeepInfra (Mistral-Small-3.2-24B + Qwen2.5-72B).
       TOGETHER_API_KEY: ${TOGETHER_API_KEY}
       TOGETHER_RUNTIME_MODEL: meta-llama/Llama-3.3-70B-Instruct-Turbo
+      # Phase B P2.1 (23/05/2026) — RRF hybrid retrieval activé par défaut runtime_v6.
+      # Code A4.11-ter (RRF parallèle BM25 + vector via Neo4j vector index 1024d).
+      # Anti-épisode A4.15 : variable maintenant pinned via env, plus de drift dans bench.
+      V6_HYBRID_RETRIEVAL: rrf
+      # P2.2 (toggle OFF par défaut tant que reranker pas validé) : cross-encoder rerank post-RRF.
+      V6_CROSS_ENCODER_RERANK: "0"
+      V6_CE_RERANK_MODEL: BAAI/bge-reranker-v2-m3
+      # P2.3 — Switch Parse vers DeepSeek-V3.1 (revert rollback A4.8, valide car RRF
+      # actif détruit le couplage subject_canonical exact qui avait fait régresser).
+      V6_PARSE_LLM_DEEPSEEK: "1"
     ports:
       - "${APP_PORT}:8000"
       - "5678:5678"
