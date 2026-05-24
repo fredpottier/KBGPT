@@ -208,11 +208,21 @@ def _serialize_input(
     for c in claims:
         # Le LLM verra `claim_verbatim` via `value` (best-effort) +
         # `subject_canonical`/`predicate` pour contexte
+        # FIX BUG #2 — Option ε (24/05/2026) : injecter c.text (verbatim Claim) dans
+        # le payload Synthesize. Sans ce champ, le LLM ne voit que (subject, predicate,
+        # value) qui peut être incomplet — notamment pour les claims narratifs où la
+        # `value` (object_canonical) est None. Ex HUM_0028 : claim CG5Z a
+        # subject="Monitor (transaction CG5Z)" et value=None → le LLM ne voit pas
+        # clairement "transaction CG5Z" et choisit un autre claim plus structuré
+        # (SWI1) malgré CE top-1 score 0.965. Le verbatim text règle le problème.
+        extras = c.model_dump() if hasattr(c, "model_dump") else {}
+        claim_text = extras.get("text")  # verbatim Neo4j c.text (extra Pydantic)
         claims_payload.append({
             "claim_id": c.claim_id,
             "subject": c.subject_canonical,
             "predicate": c.predicate,
             "value": c.value or c.value_normalized,
+            "text": (claim_text[:600] if isinstance(claim_text, str) else None),
             "source_doc_id": c.source_doc_id,
             "marker_type": c.marker_type,
         })
@@ -411,6 +421,17 @@ class Synthesizer:
                     len(kept_claims), len(claims),
                     kept_scores[0] if kept_scores else 0.0,
                 )
+                # P2 Option ε debug : logger top-5 envoyé à Synthesize avec subject + score
+                if _os.getenv("V6_DEBUG_SYNTHESIZE_TOP5", "0") == "1":
+                    for i, (c, s) in enumerate(zip(kept_claims, kept_scores)):
+                        text_excerpt = (c.value or c.value_normalized or "")[:80]
+                        logger.info(
+                            "[SYNTHESIZE_TOP5] rank=%d score=%.3f claim_id=%s subj=%s pred=%s text=%s",
+                            i + 1, s, c.claim_id[:14],
+                            (c.subject_canonical or "")[:40],
+                            (c.predicate or "")[:20],
+                            text_excerpt,
+                        )
                 return kept_claims
             except Exception:
                 logger.exception("synthesize: cross_encoder reranker failed, fallback to bi-encoder filter")

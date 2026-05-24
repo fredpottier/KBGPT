@@ -1026,6 +1026,16 @@ class Executor:
         # Le KG stocke en `object_canonical` (dénormalisé de structured_form.object)
         # — on le mappe sur le champ Pydantic `value` (output ADR §2.3).
         # `value_normalized` reste optionnel pour cas futurs.
+        #
+        # FIX BUG #1 — Option ε (24/05/2026) :
+        #   On expose aussi `text` (verbatim Claim) en extra Pydantic (extra="allow")
+        #   pour que le cross-encoder reranker (P2.2) puisse l'utiliser. Sans ce
+        #   champ, le reranker tombait sur un fallback "subject+predicate+value"
+        #   qui ne contenait pas l'identifiant clé (ex: WWI Monitor → CG5Z).
+        #   Confirmé sur HUM_0028 : avec c.text, le claim CG5Z = BM25 rank 1 +
+        #   Vector rank 1 ; sans c.text, le CE ne peut pas matcher la question
+        #   sur l'identifiant rare. Pattern littérature 2026 : cross-encoder
+        #   doit voir le verbatim complet, pas un triplet reconstruit minimaliste.
         return ClaimSummary(
             claim_id=str(node.get("claim_id") or node.get("id") or ""),
             subject_canonical=node.get("subject_canonical"),
@@ -1039,6 +1049,8 @@ class Executor:
             invalidated_at=node.get("invalidated_at"),
             marker_type=node.get("marker_type"),
             source_doc_id=node.get("source_doc_id") or node.get("doc_id") or node.get("document_id"),
+            # Extra (Pydantic extra="allow") — verbatim Claim text pour cross-encoder
+            text=node.get("text"),
         )
 
     @staticmethod
