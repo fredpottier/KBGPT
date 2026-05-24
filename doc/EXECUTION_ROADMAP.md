@@ -246,6 +246,27 @@ L'audit des 15 étapes du pipeline `/admin/post-import` a révélé 4 problèmes
 
 **Réutilisation infrastructure V5.1** (audit 18/05 — 65% réutilisable) : API Pydantic models, AdmissionController, IdempotencyStore, JobStore, SSE, OTel/metrics, ToolRegistry, Verifier (devient `evaluate/` module), BudgetTracker, CancellationToken.
 
+### 🚧 Statut Phase A au 2026-05-23 — TECHNIQUEMENT TERMINÉE, GATES NON ATTEINTES
+
+**Phase A clôturée techniquement** (toute l'architecture livrée : A1 bitemporal, A2 relations claims, A3 runtime KG-first, A4 audit oracle + bottleneck timeout). **Mais aucune des gates Phase A n'est validée de façon ferme** :
+
+| Gate | Cible | Mesuré (runtime_v6 baseline A4.14) | Verdict |
+|---|---|---|---|
+| GA3-5 C1 | ≥0.75 | 0.500 sur 50q SAP | ❌ gap -0.25pp |
+| GA3-6 C3 lifecycle | ≥0.50 | 0.33-0.67 (variance n=3) | ⚠ insuffisant |
+| GA3-7 latence p50 | ≤30s | 30-44s | ⚠ marginal |
+| GA3-7 latence p95 | ≤60s | 85-91s | ❌ |
+| GA3-9 conflict exposure | ≥5% | 0% par défaut | ❌ (cascade Qdrant désactivée car régressait) |
+
+**3 leviers évidents testés en session 23/05/2026, tous régressifs ou neutres** :
+- RRF retrieval hybrid (A4.15) : -0.14pp seul
+- Cascade Qdrant systématique (A3.10) : -0.34pp (l'abstention salvatrice bat la cascade brute sur le judge LLM)
+- Switch LLM Synthesize (A4.6) : pas le bottleneck (Qwen14B = DeepSeek-V3.1 = DeepSeek-V4-Pro)
+
+Seul gain réel : fixes infra timeout/retries (A4.14, +0.23pp gratuits).
+
+**Conséquence sur la roadmap** : Phase B (validation cross-domain) reste **bloquée** tant que C1 Phase A est sous le seuil. Investigation en cours (doc `ETAT_ART_KG_RAG_2026_DIAGNOSTIC_OSMOSE.md`) pour identifier les vrais leviers (extraction plus fine, multi-hop architectural, expansion entité au query-time façon EKX). Décision attendue : pivoter vers re-architecture / hybrider V5.1 / re-ingestion riche / ajuster la cible.
+
 ### Phase B — Validation cross-domain (2 semaines)
 
 **Objectif** : prouver empiriquement l'agnosticité du **core** (sans Domain Pack) ou pivoter.
