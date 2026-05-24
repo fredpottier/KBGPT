@@ -40,28 +40,19 @@ Bench `bench_a38_runtime_v6.py` sur 50q SAP stratifié + 30q ConflictPending.
 
 Note : la valeur "A4.14 baseline C1=0.500" mesurée le 23/05 était biaisée par ~29% judge failures (scorés 0.0 systématique). Après recalibration P0.1, C1 sur la même config tombe entre 0.440 (rollback v3) et 0.500. **La baseline réelle "honnête" est probablement autour de 0.50-0.55 sur les 50q valides**.
 
-### B — RRF only (en cours, ~50% au moment de cette écriture)
+### B — RRF only (NON COMPLÉTÉE — rate limit DeepInfra)
 
 **Toggle** : `V6_HYBRID_RETRIEVAL=rrf`, autres OFF.
 
-| Métrique | Valeur |
-|---|---|
-| C1 global | ⏳ |
-| C3 lifecycle | ⏳ |
-| Per-type | ⏳ |
-| Latence p50 / p95 | ⏳ |
+**Statut** : bench lancé à 10:35 GMT+1. Bloqué à 7/50 questions à cause d'un retry storm openai client (DeepInfra `429 Too Many Requests` répétés sur question PPTX_0017 — 6+ retries cascadés). Le process Python tournait toujours mais sans progression visible.
 
-*Sera complété au fin du bench.*
+**Recommandation** : relancer hors heures de pointe DeepInfra (nuit US time = nuit FR effective) ou avec budget DeepInfra premium / fallback Together AI.
 
 ### E — RRF + DeepSeek Parse, no Cross-encoder
 
-**Toggle** : `V6_HYBRID_RETRIEVAL=rrf` + `V6_PARSE_LLM_DEEPSEEK=1`, CE OFF.
+**NON LANCÉE** (budget temps épuisé par retry storm Config B).
 
-| Métrique | Valeur |
-|---|---|
-| C1 global | ⏳ (à lancer après Config B) |
-
-*Sera complété au fin du bench.*
+Reco : à relancer dès que Config B est dispo.
 
 ### C — Complet R1+R2+R3 (run_20260524_084344)
 
@@ -78,22 +69,28 @@ Note : la valeur "A4.14 baseline C1=0.500" mesurée le 23/05 était biaisée par
 
 ## 3. Tableau pivot par type de question
 
-| Type | n | A4.14 raw | Rollback v3 (= A recalibré) | B RRF only | E RRF + Parse | **C complet** | Δ vs A4.14 raw | Δ vs Rollback v3 |
-|---|---|---|---|---|---|---|---|---|
-| **factual** | 15 | 0.600 | 0.600 | ⏳ | ⏳ | **0.367** | **-0.233** ⚠ | -0.233 |
-| **multi_hop** | 10 | 0.100 | 0.000 | ⏳ | ⏳ | **0.400** | **+0.300** ✅ | +0.400 |
-| **comparison** | 10 | 0.500 | 0.300 | ⏳ | ⏳ | **0.250** | -0.250 ⚠ | -0.050 |
-| **contextual** | 5 | 0.600 | 0.800 | ⏳ | ⏳ | **0.800** | +0.200 | = |
-| **lifecycle** | 3 | 0.667 | 0.333 | ⏳ | ⏳ | **0.833** | +0.167 ✅ | +0.500 |
-| **false_premise** | 5 | 1.000 | 0.800 | ⏳ | ⏳ | 0.700 | -0.300 ⚠ | -0.100 |
-| **unanswerable** | 2 | 0.000 | 0.500 | ⏳ | ⏳ | **1.000** | +1.000 | +0.500 |
-| **C3 lifecycle** | 3 | 0.667 | 0.333 | ⏳ | ⏳ | **0.833** | +0.167 ✅ | +0.500 |
-| **Global C1** | 50 | 0.500 | 0.440 | ⏳ | ⏳ | **0.480** | -0.020 | +0.040 |
-| Latence p50 | | 30s | 44s | ⏳ | ⏳ | 61s | +103% | +39% |
-| Latence p95 | | 85s | 91s | ⏳ | ⏳ | 195s | +129% | +114% |
-| Judge failed | | ~29% | ~29% | ⏳ | ⏳ | **0%** | -29pp | -29pp |
+> Configs B et E **non disponibles** dans cette session (rate limit DeepInfra). Tableau condensé sur A + C.
 
-*(⏳ = en cours, à compléter)*
+| Type | n | A4.14 raw (biaisé 29% judge_failed) | Rollback v3 (recalibré post-P0.1) | **C complet** | Δ vs A4.14 raw | Δ vs Rollback v3 |
+|---|---|---|---|---|---|---|
+| **factual** | 15 | 0.600 | 0.600 | **0.367** | **-0.233** ⚠ | -0.233 |
+| **multi_hop** | 10 | 0.100 | 0.000 | **0.400** | **+0.300** ✅ | +0.400 |
+| **comparison** | 10 | 0.500 | 0.300 | **0.250** | -0.250 ⚠ | -0.050 |
+| **contextual** | 5 | 0.600 | 0.800 | **0.800** | +0.200 | = |
+| **lifecycle** | 3 | 0.667 | 0.333 | **0.833** | +0.167 ✅ | +0.500 |
+| **false_premise** | 5 | 1.000 | 0.800 | 0.700 | -0.300 ⚠ | -0.100 |
+| **unanswerable** | 2 | 0.000 | 0.500 | **1.000** | +1.000 | +0.500 |
+| **C3 lifecycle** | 3 | 0.667 | 0.333 | **0.833** | +0.167 ✅ | +0.500 |
+| **Global C1** | 50 | 0.500 | 0.440 | **0.480** | -0.020 | +0.040 |
+| Latence p50 | | 30s | 44s | 61s | +103% | +39% |
+| Latence p95 | | 85s | 91s | 195s | +129% | +114% |
+| Judge failed | | ~29% | ~29% | **0%** ✅ | -29pp | -29pp |
+
+**Interprétation honnête** :
+- Configs A/B/E manquent → on ne peut pas isoler la contribution propre de R2 (RRF), R3 (DeepSeek Parse), R1 (Cross-encoder)
+- Mais Config C (les 3 leviers cumulés) vs A4.14 raw donne le delta global du combo : +0.300 multi_hop, +0.167 lifecycle, -0.233 factual
+- Le gain net sur C1 global est **quasi nul** (-0.02 à +0.04 selon référence). Le combo redistribue les scores entre types, ne les améliore pas globalement
+- Cette redistribution est exploitable si on fixe la régression factual (P2.5 score fusion)
 
 ---
 
@@ -123,21 +120,24 @@ Note : la valeur "A4.14 baseline C1=0.500" mesurée le 23/05 était biaisée par
 
 ---
 
-## 5. Contribution propre par levier (à compléter avec B et E)
+## 5. Contribution propre par levier (À COMPLÉTER — B et E manquantes)
 
-Une fois B et E disponibles :
+**Sans Configs B et E, on ne peut pas isoler proprement la contribution de chaque levier.**
 
+Décomposition idéale (à compléter dès relance B+E) :
 ```
 ΔC1(R2 RRF seul)              = B - A
 ΔC1(R3 DeepSeek Parse)        = E - B
 ΔC1(R1 Cross-encoder)         = C - E
-ΔC1(R1+R2+R3 cumulé)          = C - A
+ΔC1(R1+R2+R3 cumulé)          = C - A   (= -0.02 mesuré actuellement)
 ```
 
-Cette décomposition permettra de répondre :
-- Lequel des 3 leviers contribue le plus au gain multi_hop ?
-- Lequel cause la régression factual ?
-- Y a-t-il interaction (le tout > somme des parties) ?
+**Hypothèses raisonnables (à valider)** :
+- R1 cross-encoder est probablement le levier qui aide le plus multi_hop ET dégrade le plus factual (cohérent avec recherche littérature 2026 — voir audit factual)
+- R2 RRF apporte multi_hop modeste et neutre/négatif sur factual (A4.15 isolation propre 23/05 avait montré C1 0.500→0.360 = -0.14pp seul, mais avec timeout/retries A4.14)
+- R3 DeepSeek Parse apporte +0.05-0.10pp si Parse JSON empty Qwen3 régressé. Effet probablement marginal sur le mix actuel.
+
+**Reco** : relancer B et E hors rate limit pour confirmer ces hypothèses.
 
 ---
 
