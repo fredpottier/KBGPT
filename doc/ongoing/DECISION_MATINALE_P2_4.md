@@ -40,13 +40,26 @@ Bench `bench_a38_runtime_v6.py` sur 50q SAP stratifié + 30q ConflictPending.
 
 Note : la valeur "A4.14 baseline C1=0.500" mesurée le 23/05 était biaisée par ~29% judge failures (scorés 0.0 systématique). Après recalibration P0.1, C1 sur la même config tombe entre 0.440 (rollback v3) et 0.500. **La baseline réelle "honnête" est probablement autour de 0.50-0.55 sur les 50q valides**.
 
-### B — RRF only (NON COMPLÉTÉE — rate limit DeepInfra)
+### B — RRF only (COMPLÉTÉE, run_20260524_110245)
 
 **Toggle** : `V6_HYBRID_RETRIEVAL=rrf`, autres OFF.
 
-**Statut** : bench lancé à 10:35 GMT+1. Bloqué à 7/50 questions à cause d'un retry storm openai client (DeepInfra `429 Too Many Requests` répétés sur question PPTX_0017 — 6+ retries cascadés). Le process Python tournait toujours mais sans progression visible.
+**Statut** : bench complet 50q + 30q CP malgré rate limit DeepInfra (retry storm fini par passer). Durée totale 10241s = 2h50min (vs ~30-50 min habituels) — toute la latence est gonflée par les 429.
 
-**Recommandation** : relancer hors heures de pointe DeepInfra (nuit US time = nuit FR effective) ou avec budget DeepInfra premium / fallback Together AI.
+| Métrique | Valeur |
+|---|---|
+| C1 global | **0.420** |
+| C3 lifecycle (n=3) | 0.667 ✅ |
+| Multi_hop (n=10) | **0.200** |
+| Factual (n=15) | 0.400 |
+| Comparison (n=10) | 0.300 |
+| Contextual (n=5) | 0.600 |
+| False_premise (n=5) | 0.600 |
+| Unanswerable (n=2) | 1.000 |
+| Latence p50 | 40.5s |
+| Latence p95 | 590s (gonflé par retry storm, non représentatif) |
+| Judge failed | **0%** ✅ (6 fallback DeepSeek utilisés) |
+| Conflict exposure (30q) | 0% |
 
 ### E — RRF + DeepSeek Parse, no Cross-encoder
 
@@ -67,30 +80,52 @@ Reco : à relancer dès que Config B est dispo.
 
 ---
 
-## 3. Tableau pivot par type de question
+## 3. Tableau pivot par type de question (avec contribution propre par levier)
 
-> Configs B et E **non disponibles** dans cette session (rate limit DeepInfra). Tableau condensé sur A + C.
+> Config E **non disponible** (budget temps + rate limit). Configs A + B + C dispo permettent d'isoler R2 RRF vs (R1+R3) cumulés.
 
-| Type | n | A4.14 raw (biaisé 29% judge_failed) | Rollback v3 (recalibré post-P0.1) | **C complet** | Δ vs A4.14 raw | Δ vs Rollback v3 |
-|---|---|---|---|---|---|---|
-| **factual** | 15 | 0.600 | 0.600 | **0.367** | **-0.233** ⚠ | -0.233 |
-| **multi_hop** | 10 | 0.100 | 0.000 | **0.400** | **+0.300** ✅ | +0.400 |
-| **comparison** | 10 | 0.500 | 0.300 | **0.250** | -0.250 ⚠ | -0.050 |
-| **contextual** | 5 | 0.600 | 0.800 | **0.800** | +0.200 | = |
-| **lifecycle** | 3 | 0.667 | 0.333 | **0.833** | +0.167 ✅ | +0.500 |
-| **false_premise** | 5 | 1.000 | 0.800 | 0.700 | -0.300 ⚠ | -0.100 |
-| **unanswerable** | 2 | 0.000 | 0.500 | **1.000** | +1.000 | +0.500 |
-| **C3 lifecycle** | 3 | 0.667 | 0.333 | **0.833** | +0.167 ✅ | +0.500 |
-| **Global C1** | 50 | 0.500 | 0.440 | **0.480** | -0.020 | +0.040 |
-| Latence p50 | | 30s | 44s | 61s | +103% | +39% |
-| Latence p95 | | 85s | 91s | 195s | +129% | +114% |
-| Judge failed | | ~29% | ~29% | **0%** ✅ | -29pp | -29pp |
+| Type | n | **A4.14 raw** (biaisé 29% judge_failed) | **A** Rollback v3 (recalibré P0.1) | **B** RRF only | **C** Complet R1+R2+R3 | **ΔB-A** (R2 RRF) | **ΔC-B** (R1+R3) | **ΔC-A** (cumulé) | **Δ vs A4.14 raw** |
+|---|---|---|---|---|---|---|---|---|---|
+| **factual** | 15 | 0.600 | 0.600 | 0.400 | **0.367** | **-0.20** ⚠ | -0.033 | -0.233 | **-0.233** ⚠ |
+| **multi_hop** | 10 | 0.100 | 0.000 | 0.200 | **0.400** | **+0.20** ✅ | **+0.20** ✅ | **+0.40** ✅ | **+0.300** ✅ |
+| **comparison** | 10 | 0.500 | 0.300 | 0.300 | 0.250 | 0 | -0.05 | -0.05 | -0.250 |
+| **contextual** | 5 | 0.600 | 0.800 | 0.600 | 0.800 | -0.20 ⚠ | +0.20 ✅ | 0 | +0.200 |
+| **lifecycle** | 3 | 0.667 | 0.333 | 0.667 | **0.833** | **+0.333** ✅ | +0.167 | **+0.50** ✅ | +0.167 ✅ |
+| **false_premise** | 5 | 1.000 | 0.800 | 0.600 | 0.700 | -0.20 ⚠ | +0.10 | -0.10 | -0.300 |
+| **unanswerable** | 2 | 0.000 | 0.500 | 1.000 | 1.000 | +0.50 | 0 | +0.50 | +1.000 |
+| **C3 lifecycle** | 3 | 0.667 | 0.333 | 0.667 | **0.833** | +0.333 ✅ | +0.167 | +0.500 ✅ | +0.167 ✅ |
+| **Global C1** | 50 | 0.500 | 0.440 | **0.420** | **0.480** | -0.02 | +0.06 | +0.04 | -0.020 |
+| Latence p50 | | 30s | 44s | 40.5s | 61s | -8% | +51% | +39% | +103% |
+| Latence p95 | | 85s | 91s | 590s* | 195s | (retry storm) | — | — | +129% |
+| Judge failed | | ~29% | ~29% | **0%** ✅ | **0%** ✅ | -29pp | = | -29pp | -29pp |
 
-**Interprétation honnête** :
-- Configs A/B/E manquent → on ne peut pas isoler la contribution propre de R2 (RRF), R3 (DeepSeek Parse), R1 (Cross-encoder)
-- Mais Config C (les 3 leviers cumulés) vs A4.14 raw donne le delta global du combo : +0.300 multi_hop, +0.167 lifecycle, -0.233 factual
-- Le gain net sur C1 global est **quasi nul** (-0.02 à +0.04 selon référence). Le combo redistribue les scores entre types, ne les améliore pas globalement
-- Cette redistribution est exploitable si on fixe la régression factual (P2.5 score fusion)
+\* p95 590s Config B = gonflé par retry storm DeepInfra (rate limit 11h-12h GMT+1), pas représentatif
+
+### Findings critiques de l'ablation
+
+**RRF (R2) seul** :
+- ✅ Gain massif sur multi_hop (+0.20), lifecycle (+0.333), unanswerable (+0.50)
+- ⚠ **Dégrade factual (-0.20), contextual (-0.20), false_premise (-0.20)** — pattern cohérent avec A4.15 (RRF -0.14pp seul) et littérature 2026 (dense retrieval dégrade exact-match)
+- Bilan net global : **-0.02pp** (neutralité, gain/perte se compensent)
+
+**R1 cross-encoder + R3 DeepSeek Parse cumulés** :
+- ✅ Améliorent encore multi_hop (+0.20), contextual (+0.20), lifecycle (+0.167), false_premise (+0.10)
+- Dégradent légèrement factual (-0.033), comparison (-0.05)
+- Bilan net global : **+0.06pp**
+
+### Réinterprétation cruciale
+
+**Mon audit factual matinal était partiellement faux** : j'avais attribué la régression factual au cross-encoder. Les données montrent que **RRF est responsable de la majorité** (-0.20 sur -0.233). Le cross-encoder n'aggrave que de -0.033.
+
+C'est cohérent avec :
+- A4.15 du 23/05 (RRF isolé → factual -0.333pp)
+- Littérature 2026 : "Pure dense retrieval fails silently on exact identifiers" (TianPan), "BM25 outperforms dense on financial/structured docs"
+
+**Implication majeure pour le fix P2.5** :
+- α=0.7 (CE dominant) **ne va pas suffire** car le problème est en amont (RRF dilue déjà)
+- α=0.3 (RRF dominant) **probablement plus utile**, mais alors le cross-encoder devient marginal
+- **OU** : toggle conditionnel par `sub_goal.kind` (factual → bypass RRF/garder retrieval legacy exact-match ; multi_hop/lifecycle → RRF+CE)
+- **OU** : revenir à un retrieval hybride conditionnel (BM25 dominant pour identifiants, dense pour sémantique)
 
 ---
 
@@ -120,35 +155,57 @@ Reco : à relancer dès que Config B est dispo.
 
 ---
 
-## 5. Contribution propre par levier (À COMPLÉTER — B et E manquantes)
+## 5. Contribution propre par levier — MESURÉE
 
-**Sans Configs B et E, on ne peut pas isoler proprement la contribution de chaque levier.**
+Décomposition obtenue avec Configs A + B + C (E manquante mais R1+R3 sont mesurés cumulés) :
 
-Décomposition idéale (à compléter dès relance B+E) :
 ```
-ΔC1(R2 RRF seul)              = B - A
-ΔC1(R3 DeepSeek Parse)        = E - B
-ΔC1(R1 Cross-encoder)         = C - E
-ΔC1(R1+R2+R3 cumulé)          = C - A   (= -0.02 mesuré actuellement)
+ΔC1(R2 RRF seul)              = B - A = 0.420 - 0.440 = -0.02
+ΔC1(R1 + R3 cumulé)           = C - B = 0.480 - 0.420 = +0.06
+ΔC1(R1+R2+R3 cumulé)          = C - A = 0.480 - 0.440 = +0.04
 ```
 
-**Hypothèses raisonnables (à valider)** :
-- R1 cross-encoder est probablement le levier qui aide le plus multi_hop ET dégrade le plus factual (cohérent avec recherche littérature 2026 — voir audit factual)
-- R2 RRF apporte multi_hop modeste et neutre/négatif sur factual (A4.15 isolation propre 23/05 avait montré C1 0.500→0.360 = -0.14pp seul, mais avec timeout/retries A4.14)
-- R3 DeepSeek Parse apporte +0.05-0.10pp si Parse JSON empty Qwen3 régressé. Effet probablement marginal sur le mix actuel.
+**Par type** :
 
-**Reco** : relancer B et E hors rate limit pour confirmer ces hypothèses.
+| Type | ΔR2 (RRF) | ΔR1+R3 (CE + DeepSeek Parse) |
+|---|---|---|
+| multi_hop | +0.20 ✅ | +0.20 ✅ |
+| lifecycle | +0.333 ✅ | +0.167 |
+| unanswerable | +0.50 ✅ | 0 |
+| **factual** | **-0.20** ⚠ | -0.033 |
+| **contextual** | -0.20 ⚠ | +0.20 ✅ (compensation) |
+| **false_premise** | -0.20 ⚠ | +0.10 |
+| comparison | 0 | -0.05 |
+
+**Reste à mesurer** : Config E (RRF + DeepSeek Parse, no CE) permettrait d'isoler R1 cross-encoder vs R3 DeepSeek Parse pris séparément. Mais on a déjà l'essentiel : RRF est le levier dominant en gain ET en régression.
 
 ---
 
-## 6. Options décisionnelles (préliminaires, à finaliser)
+## 6. Options décisionnelles (révisées après Config B)
 
-### Option α — Implémenter P2.5 score fusion RRF + Cross-encoder
+### Option α-revised — Score fusion RRF + Cross-encoder avec α=0.3 (RRF dominant)
 
-- **Justification** : pattern standard littérature 2026, adresse la régression factual sans casser le gain multi_hop, **domain-agnostic strict**.
-- **Effort** : 2 jours (exposer RRF score depuis Execute, intégrer fusion pondérée, bench A/B 3 poids différents).
-- **Gain attendu** : récupérer +0.10-0.20pp factual, maintenir +0.300pp multi_hop.
-- **Risque** : tuning des poids (1.0/0.0 vs 0.7/0.3 vs 0.5/0.5). Faible.
+- **Justification révisée** : RRF est l'origine de la régression factual (-0.20pp), pas le cross-encoder. Le fix doit pondérer **RRF dominant** (α=0.3 → CE en simple tie-breaker) au lieu de CE-dominant.
+- **Effort** : 2-2.5j (idem spec P2.5, juste paramètre α différent au défaut)
+- **Gain attendu** : récupérer +0.10pp factual (vers 0.45-0.50), préserver gain multi_hop +0.20 (RRF apport propre)
+- **Risque** : avec α=0.3, le cross-encoder devient marginal. Le gain +0.20 multi_hop de R1+R3 vient surtout de DeepSeek Parse + contextes Synthesize. À mesurer en bench.
+
+### Option δ (NOUVELLE, recommandée) — Routing conditionnel par sub_goal.kind
+
+- **Justification** : RRF a un compromis franc (gain sémantique vs perte exact-match). Toggle conditionnel résout :
+  - `fact_lookup` / `definition_lookup` → **retrieval legacy exact-match** (filtre Cypher `subject_canonical = $subject`) OU BM25 dominant pur (pas RRF)
+  - `comparison` / `lifecycle_trace` / `multi_hop` / `contradiction_check` → **RRF + cross-encoder** (gain mesuré)
+- **Domain-agnostic** : `sub_goal.kind` est un classifier neutre (déjà existant en sortie de Parse), pas corpus-spécifique
+- **Effort** : 1-1.5j (modifier Plan pour router selon kind)
+- **Gain attendu** : récupérer **toute** la régression factual (-0.233 → ~0) + préserver gain multi_hop/lifecycle
+- **Risque** : sub_goal.kind doit être fiable (mesurer accuracy classification Parse)
+
+### Option β — Aller directement Phase 3 (tools dédiés)
+
+- **Justification** : tools `compare_by_axis` + `procedure_chain` exploiteront RRF + cross-encoder où ils brillent (multi-hop, comparison structurée). Laisser factual avec retrieval actuel.
+- **Effort** : 4-6j Phase 3
+- **Gain attendu** : +0.10-0.15pp comparison/multi_hop
+- **Risque** : factual reste sous baseline tant qu'on n'a pas Option α-revised ou δ
 
 ### Option β — Passer directement Phase 3 (tools dédiés `compare_by_axis` + `procedure_chain`)
 
@@ -183,20 +240,25 @@ Conséquences :
 - ⚠ Config B en cours (probablement incomplète à ton retour, rate limit)
 - ❌ Config E non lancée (budget épuisé)
 
-## 9. Recommandation finale
+## 9. Recommandation finale (RÉVISÉE post-Config B)
 
-Si tu veux gagner du temps, **autorise directement l'implémentation P2.5 score fusion** (Option α). C'est :
-- **Action la plus alignée avec la littérature 2026** (pattern Two-Stage + score fusion)
-- **Conservatrice** : ne touche ni à l'extraction ni au schéma Neo4j, juste un score weighting léger
-- **Domain-agnostic strict** : pas de classifier corpus-spécifique
-- **2-2.5j effort total** (modif Execute + Reranker + bench A/B α)
-- **Gain attendu** : récupérer +0.10-0.20pp factual sans casser +0.300pp multi_hop
+**Reco : Option δ (routing conditionnel par sub_goal.kind)** est la plus prometteuse à la lumière des Configs A+B+C.
 
-Si validé, on pourrait être prêt pour bench P2.5a (α=0.7) demain.
+Raison : on dispose d'un classifier neutre (`sub_goal.kind` sortie de Parse) qui permet d'utiliser :
+- Le **bon retrieval** pour chaque type de question (RRF pour sémantique, exact-match/BM25 pour identifiants)
+- Sans tuning de poids fragile (α du score fusion)
+- Sans risque domain-specific (kind est universel : fact_lookup / list_enumeration / comparison / lifecycle_trace / contradiction_check / definition_lookup)
+
+**Hiérarchie des options** :
+1. **Option δ** (routing par kind) — 1-1.5j, gain attendu max, simple
+2. **Option α-revised** (score fusion α=0.3) — 2-2.5j, gain attendu modéré, paramétrable
+3. **Option β** (direct Phase 3) — 4-6j, laisse factual en régression
+
+Si tu valides Option δ, je peux démarrer immédiatement P2.5-bis (1.5j) et bencher demain.
 
 ---
 
 *Document produit en autonomie 24/05/2026 par Claude pendant absence Fred (~5h).*
-*Limitation rate limit DeepInfra : Configs B/E partielles.*
-*Référence audit factual : [P2_DIAGNOSTIC_FACTUAL_REGRESSION.md](P2_DIAGNOSTIC_FACTUAL_REGRESSION.md)*
-*Référence spec P2.5 : [P2_5_SPEC_SCORE_FUSION.md](P2_5_SPEC_SCORE_FUSION.md)*
+*Configs A + B + C disponibles. Config E (RRF + DeepSeek Parse, no CE) reportée pour isoler R1 vs R3.*
+*Référence audit factual : [P2_DIAGNOSTIC_FACTUAL_REGRESSION.md](P2_DIAGNOSTIC_FACTUAL_REGRESSION.md) — note : audit révisé par les données Config B, RRF est le coupable principal de la régression factual.*
+*Référence spec P2.5 : [P2_5_SPEC_SCORE_FUSION.md](P2_5_SPEC_SCORE_FUSION.md) — à compléter avec Option δ.*
