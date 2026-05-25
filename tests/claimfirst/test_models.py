@@ -301,6 +301,19 @@ class TestPhaseBClaimEnrichment:
         restored = Claim.from_neo4j_record(record)
         assert restored.qualifiers == []
 
+    def test_open_predicate_round_trip(self):
+        """P1.3.5 : open_predicate sérialisé/désérialisé (open-then-canonicalize)."""
+        claim = Claim(**self._base_claim_kwargs(open_predicate=True))
+        props = claim.to_neo4j_properties()
+        assert props["open_predicate"] is True
+        restored = Claim.from_neo4j_record(dict(props))
+        assert restored.open_predicate is True
+
+        # défaut : pas de pollution du payload si None
+        claim2 = Claim(**self._base_claim_kwargs())
+        assert "open_predicate" not in claim2.to_neo4j_properties()
+        assert claim2.open_predicate is None
+
 
 class TestEntity:
     """Tests for Entity model."""

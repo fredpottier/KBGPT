@@ -86,6 +86,34 @@ class TestClaimExtractor:
         assert ClaimExtractor._parse_qualifiers("foo") == []
         assert ClaimExtractor._parse_qualifiers({}) == []
 
+    def test_prompt_includes_decontextualization_and_question_coverage(self):
+        """P1.3.5 #1/#2 : le prompt exige décontextualisation + couverture questions."""
+        prompt = build_claim_extraction_prompt(
+            units_text="U1: It must be initialized before use.",
+            doc_title="Guide",
+            doc_type="technical",
+        )
+        low = prompt.lower()
+        # #1 décontextualisation
+        assert "decontextualiz" in low
+        assert "anaphora" in low
+        assert "molecular" in low
+        # #2 question coverage (archétypes universels)
+        assert "prerequisite" in low
+        assert "sequences" in low or "order" in low
+        assert "versions" in low or "temporal validity" in low
+
+    def test_prompt_includes_open_predicate(self):
+        """P1.3.5 #3 : le prompt autorise un prédicat libre flaggé."""
+        prompt = build_claim_extraction_prompt(
+            units_text="U1: X relies on Y.",
+            doc_title="Guide",
+            doc_type="technical",
+        )
+        assert "open_predicate" in prompt
+        # n'est plus une whitelist strictement fermée (fallback open documenté)
+        assert "free predicate" in prompt.lower()
+
     def test_extractor_initialization(self):
         """Test extractor initialization."""
         mock_llm = MockLLMClient()

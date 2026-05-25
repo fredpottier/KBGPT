@@ -144,6 +144,39 @@ Not all claims have the same value. Prioritize in this order:
 - PERMISSIVE: Permission or authorization
 - PROCEDURAL: Step or process
 
+## DECONTEXTUALIZATION — every claim_text must be self-standing (CRITICAL)
+
+A claim must be understandable ALONE, without reading the source unit or any
+neighbouring sentence. Before writing each `claim_text`:
+- **Resolve every anaphora**: replace "it / this / that / the latter / the former /
+  the system / the above" with the explicit named entity it refers to.
+- **Name the subject explicitly**: never start with a bare pronoun or a generic
+  noun. State WHICH entity/product/object/article the claim is about.
+- **Include the minimal disambiguating scope** inline: which version, which
+  region, which condition makes the claim true — just enough to remove ambiguity,
+  not the whole paragraph.
+- **Do NOT over-stuff**: keep it one precise statement. Decontextualized AND
+  minimal (a "molecular" fact), not a paragraph.
+
+Bad (too atomic / context-stripped): "It must be initialized before use."
+Good (molecular): "The Expert cache must be initialized via transaction CG5Z
+before it can be used."
+
+## What to look for — question coverage (IMPORTANT)
+
+Documents are queried with multi-step, conditional and time-scoped questions.
+Actively extract claims that answer these universal question archetypes WHEN the
+unit contains the information (never invent):
+- **Conditions / prerequisites**: what must be true / done / authorized BEFORE
+  something applies or works ("requires X", "only if Y", "after Z").
+- **Sequences / order**: the order of steps, what comes before/after, dependencies.
+- **Versions / temporal validity**: from which version/date something applies,
+  until when, what changed between versions.
+- **Comparisons / distinctions**: how one option/version/entity differs from another.
+- **Causes / consequences**: why something happens, what it leads to.
+These often need TWO linked claims (e.g. a condition claim + the conditioned fact)
+rather than one — extract both, each self-standing.
+
 ## Response format (JSON)
 
 [
@@ -159,7 +192,8 @@ Not all claims have the same value. Prioritize in this order:
     "structured_form": {{
       "subject": "Name of the subject entity",
       "predicate": "USES",
-      "object": "Name of the object entity"
+      "object": "Name of the object entity",
+      "open_predicate": false
     }}
   }}
 ]
@@ -183,17 +217,23 @@ Rules:
 - `confidence` in [0,1] reflects how explicitly the qualifier is stated.
 - Do not duplicate the same condition in both `scope` and `qualifiers`; prefer `qualifiers`.
 
-## STRICT CONSTRAINT — structured_form predicates
+## structured_form predicates — prefer the closed list, else open
 
-You MUST choose EXACTLY one predicate from this CLOSED list:
+Preferred predicates (CLOSED list — use one of these whenever it fits):
 
 {predicates_table}
 
 **RULES:**
-- NEVER invent a predicate outside this list. No synonyms, no inflections, no invented forms.
-- If the relationship does not fit any predicate above, set "structured_form": null.
+- **First choice**: pick EXACTLY one predicate from the list above (set
+  `"open_predicate": false`). No synonyms/inflections of a listed predicate —
+  use the listed form.
+- **Fallback (open predicate)**: if there IS a clear relation between two named
+  entities but NONE of the listed predicates fits, do NOT discard it. Instead use
+  a concise free predicate (a short lowercase verb phrase, e.g. "is_initialized_by",
+  "expires_after") and set `"open_predicate": true`. This preserves the relation
+  for retrieval instead of losing it.
 - Subject and object must be proper nouns or technical terms, NOT descriptions or clauses.
-- If no clear relation between two named entities → "structured_form": null.
+- If there is genuinely no relation between two named entities → "structured_form": null.
 
 ## Rules
 
@@ -1077,7 +1117,27 @@ Reply ONLY with a JSON array, one entry per claim:
 
             return claim, None
 
-        # Non mappable → marquer pour retry LLM (Layer C)
+        # Non mappable par la whitelist.
+        # P1.3.5 (open-then-canonicalize) : si le LLM a flaggé open_predicate,
+        # CONSERVER le prédicat libre (au lieu de retry/drop) pour préserver le
+        # rappel relationnel — à condition que sujet/objet soient des entités valides.
+        if claim.open_predicate:
+            subj = claim.structured_form["subject"]
+            obj = claim.structured_form["object"]
+            if not is_valid_entity_name(subj) or not is_valid_entity_name(obj):
+                self.stats["sf_dropped_invalid_entity"] += 1
+                claim.structured_form = None
+                claim.open_predicate = None
+            else:
+                # Normaliser la forme du prédicat libre (lowercase, espaces → _)
+                claim.structured_form["predicate"] = (
+                    raw_pred.strip().lower().replace(" ", "_")
+                )
+                self.stats.setdefault("predicates_open", 0)
+                self.stats["predicates_open"] += 1
+            return claim, None
+
+        # Non mappable et non flaggé open → marquer pour retry LLM (Layer C)
         return claim, raw_pred
 
     def _build_claim(
@@ -1162,6 +1222,7 @@ Reply ONLY with a JSON array, one entry per claim:
 
         # Parser le structured_form
         structured_form = None
+        open_predicate: Optional[bool] = None
         sf_raw = raw.get("structured_form")
         if sf_raw and isinstance(sf_raw, dict):
             subj = sf_raw.get("subject", "").strip()
@@ -1173,6 +1234,9 @@ Reply ONLY with a JSON array, one entry per claim:
                     "predicate": pred,
                     "object": obj,
                 }
+                # P1.3.5 (open-then-canonicalize) : flag prédicat libre
+                if bool(sf_raw.get("open_predicate", False)):
+                    open_predicate = True
 
         # Phase B (25/05/2026) : parser les qualifiers (domain-agnostic)
         qualifiers = self._parse_qualifiers(raw.get("qualifiers"))
@@ -1194,6 +1258,7 @@ Reply ONLY with a JSON array, one entry per claim:
             confidence=confidence,
             structured_form=structured_form,
             qualifiers=qualifiers,
+            open_predicate=open_predicate,
         )
 
     @staticmethod

@@ -325,6 +325,11 @@ class Claim(BaseModel):
         description="Phase B: ordre du claim dans la procédure (1-based). None si non-procédural."
     )
 
+    open_predicate: Optional[bool] = Field(
+        default=None,
+        description="P1.3.5 (open-then-canonicalize): True si structured_form.predicate est un prédicat libre (hors whitelist) conservé pour le rappel au lieu d'être droppé. None/False si prédicat canonique."
+    )
+
     @field_validator("text")
     @classmethod
     def validate_text_not_too_long(cls, v: str) -> str:
@@ -447,6 +452,9 @@ class Claim(BaseModel):
             props["procedure_id"] = self.procedure_id
         if self.step_index is not None:
             props["step_index"] = self.step_index
+        # P1.3.5 : prédicat ouvert (hors whitelist) conservé
+        if self.open_predicate is not None:
+            props["open_predicate"] = self.open_predicate
         return props
 
     @classmethod
@@ -512,6 +520,7 @@ class Claim(BaseModel):
             procedure_role=record.get("procedure_role"),
             procedure_id=record.get("procedure_id"),
             step_index=record.get("step_index"),
+            open_predicate=record.get("open_predicate"),
         )
 
 
