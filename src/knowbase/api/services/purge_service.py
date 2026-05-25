@@ -647,6 +647,22 @@ class PurgeService:
                     except Exception as e:
                         logger.warning(f"    ⚠ Erreur schéma Claim-First: {e}")
 
+                    # --- Schéma v6 Procedure (Phase B) ---
+                    logger.info("  - Création schéma Procedure v6 (Phase B)...")
+                    try:
+                        from knowbase.claimfirst.v6.schema import ensure_v6_schema
+                        v6_stats = ensure_v6_schema(driver)
+                        constraints_created += v6_stats.get("constraints_applied", 0)
+                        indexes_created += v6_stats.get("indexes_applied", 0)
+                        logger.info(
+                            f"    ✓ Procedure v6: {v6_stats.get('constraints_applied', 0)} contraintes, "
+                            f"{v6_stats.get('indexes_applied', 0)} index"
+                        )
+                    except ImportError as e:
+                        logger.warning(f"    ⚠ Module v6 non disponible: {e}")
+                    except Exception as e:
+                        logger.warning(f"    ⚠ Erreur schéma Procedure v6: {e}")
+
                     # --- Wiki Atlas (Phase 4) ---
                     logger.info("  - Création schéma Wiki Atlas (Phase 4)...")
                     WIKI_CONSTRAINTS = [
