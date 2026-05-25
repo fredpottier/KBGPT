@@ -89,7 +89,9 @@ Parameters:
 
   KeyName:
     Type: String
-    Default: "osmose-burst-key"
+    # osmose-burst-debug = clé importée depuis config/keys/osmose-burst-ssh.pem
+    # (la paire AWS-générée "osmose-burst-key" n'a pas sa .pem en local → SSH KO).
+    Default: "osmose-burst-debug"
 
 Conditions:
   UseDefaultVpc: !Equals [!Ref VpcId, ""]
