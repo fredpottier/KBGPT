@@ -243,7 +243,18 @@ Preferred predicates (CLOSED list — use one of these whenever it fits):
 - Extract every genuine claim. Only abstain if the unit is truly non-informative (title, label, boilerplate).
 - IMPORTANT: Write all claim_text in the SAME LANGUAGE as the source document units.
 
-## Units to analyze
+## Source passage (CONTEXT ONLY — for disambiguation, do NOT extract from here)
+
+The full source passage is provided below SOLELY to resolve anaphora and name
+implicit subjects when writing self-contained claims. Use it to understand what
+"it / this / the system / the latter" refers to. You MUST still extract claims
+only from the numbered units listed afterwards (point to their unit_id).
+
+\"\"\"
+{passage_context}
+\"\"\"
+
+## Units to analyze (extract claims from THESE)
 
 {units_text}
 
@@ -260,8 +271,14 @@ def build_claim_extraction_prompt(
     section_concepts: str = "",
     domain_context: str = "",
     predicates_table: str = "",
+    passage_context: str = "",
 ) -> str:
-    """Construit le prompt d'extraction de claims (V2 enrichi, domain-aware)."""
+    """Construit le prompt d'extraction de claims (V2 enrichi, domain-aware).
+
+    passage_context : texte brut complet du passage source. Fourni en lecture
+    seule pour permettre la résolution d'anaphores / la nomination du sujet
+    implicite (décontextualisation P1.3.5), indépendamment du batch_size.
+    """
     if not predicates_table:
         predicates_table = build_predicates_table(CORE_PREDICATE_DESCRIPTIONS)
     return CLAIM_EXTRACTION_PROMPT_TEMPLATE.format(
@@ -273,6 +290,7 @@ def build_claim_extraction_prompt(
         section_concepts=section_concepts or "N/A",
         domain_context=domain_context,
         predicates_table=predicates_table,
+        passage_context=(passage_context or "(not available)"),
     )
 
 
@@ -586,6 +604,8 @@ class ClaimExtractor:
             section_concepts=task.section_concepts,
             domain_context=task.domain_context,
             predicates_table=self._predicates_table,
+            # P1.3.5 : passage source complet pour résolution d'anaphores
+            passage_context=(task.passage.text if task.passage else ""),
         )
 
         # DEBUG dump PROMPT input (canary 2026-04-27 phase 2 — diagnostiquer empty claims)
@@ -800,6 +820,8 @@ Reply ONLY with a JSON array, one entry per claim:
             section_concepts=section_concepts,
             domain_context=domain_context,
             predicates_table=self._predicates_table,
+            # P1.3.5 : passage source complet pour résolution d'anaphores
+            passage_context=(passage.text if passage else ""),
         )
 
         # Appel LLM
