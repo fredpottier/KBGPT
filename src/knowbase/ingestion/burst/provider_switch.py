@@ -288,12 +288,18 @@ def activate_burst_providers(
             result["errors"].append(f"LLMRouter: {e}")
             logger.error(f"[BURST:SWITCH] Failed to enable LLMRouter burst: {e}")
 
-    # Activer EmbeddingManager
+    # Activer EmbeddingManager — UNIQUEMENT si un endpoint distant est fourni.
+    # URL vide (profil B) → embeddings calculés en LOCAL par le worker (e5-large
+    # sur le GPU local). Ne PAS appeler enable_burst_mode("") qui déchargerait le
+    # modèle local et pointerait vers un endpoint vide.
     try:
-        embedding_manager = get_embedding_manager()
-        embedding_manager.enable_burst_mode(embeddings_url)
+        if embeddings_url and embeddings_url.strip():
+            embedding_manager = get_embedding_manager()
+            embedding_manager.enable_burst_mode(embeddings_url)
+            logger.info(f"[BURST:SWITCH] EmbeddingManager → {embeddings_url}")
+        else:
+            logger.info("[BURST:SWITCH] EmbeddingManager → LOCAL (in-worker, pas de burst embeddings)")
         result["embedding_manager"] = True
-        logger.info(f"[BURST:SWITCH] EmbeddingManager → {embeddings_url}")
     except Exception as e:
         result["errors"].append(f"EmbeddingManager: {e}")
         logger.error(f"[BURST:SWITCH] Failed to enable EmbeddingManager burst: {e}")
@@ -924,7 +930,10 @@ def start_local_tei(
     except Exception:
         pass
 
-    hf_cache_host = os.getenv("HF_CACHE_HOST_PATH", "/c/Users/fredp/.cache/huggingface")
+    # IMPORTANT : TEI veut un /data PROPRE (volume dédié), PAS le cache HF de
+    # l'hôte (la structure hub/ incomplète provoque "relative URL without a base").
+    # Volume nommé → persiste le modèle entre redémarrages, sans conflit.
+    tei_cache_volume = os.getenv("TEI_CACHE_VOLUME", "osmose_tei_cache")
     docker_network = os.getenv("DOCKER_NETWORK", "knowbase_network")
     image = "ghcr.io/huggingface/text-embeddings-inference:1.5"
 
@@ -944,7 +953,7 @@ def start_local_tei(
         "--gpus", "all",
         "--network", docker_network,
         "-p", f"{port}:80",
-        "-v", f"{hf_cache_host}:/data",
+        "-v", f"{tei_cache_volume}:/data",
         image,
         "--model-id", model,
         "--dtype", "float16",

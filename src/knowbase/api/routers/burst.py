@@ -2118,20 +2118,11 @@ async def start_standalone(
         # IMPORTANT : _deploy_spot_infrastructure utilise orchestrator.config (pas state.config)
         orchestrator.config = config
 
-        # Profil B : démarrer le TEI local AVANT le switch des providers (embeddings local)
+        # Profil B : embeddings calculés en LOCAL par le worker (e5-large sur le
+        # GPU local RTX 5070 Ti, comme en ingestion normale). Pas de sidecar TEI :
+        # _wait_for_services met embeddings_url="" → EmbeddingManager reste local.
         if not config.embeddings_on_ec2:
-            from knowbase.ingestion.burst.provider_switch import start_local_tei, is_local_tei_running
-            if is_local_tei_running():
-                logger.info("[BURST] TEI local déjà actif")
-            else:
-                logger.info("[BURST] Profil B : démarrage du TEI local (embeddings sur GPU local)...")
-                tei_res = await asyncio.to_thread(start_local_tei)
-                if not tei_res.get("success"):
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Échec démarrage TEI local: {tei_res.get('error')}"
-                    )
-                logger.info(f"[BURST] TEI local actif: {tei_res.get('url')}")
+            logger.info("[BURST] Profil B : embeddings en LOCAL (worker e5-large, GPU local), pas de TEI EC2")
 
         orchestrator.state = BurstState(
             batch_id=standalone_id,

@@ -699,10 +699,10 @@ class BurstOrchestrator:
         if embeddings_on_ec2:
             embeddings_url = f"http://{self.state.instance_ip}:{self.config.embeddings_port}"
         else:
-            # Profil B : TEI sur GPU local (atteint depuis le container via host.docker.internal)
-            embeddings_url = _os.getenv(
-                "BURST_LOCAL_EMBEDDINGS_URL", "http://host.docker.internal:8001"
-            )
+            # Profil B : embeddings calculés en LOCAL par le worker (e5-large sur
+            # le GPU local RTX 5070 Ti). embeddings_url="" → activate_burst_providers
+            # laisse l'EmbeddingManager en mode local (pas de sidecar TEI fragile).
+            embeddings_url = ""
 
         self.state.vllm_url = vllm_url
         self.state.embeddings_url = embeddings_url
