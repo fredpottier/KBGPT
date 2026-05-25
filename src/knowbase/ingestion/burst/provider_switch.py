@@ -881,3 +881,132 @@ def is_local_vllm_running() -> bool:
         return proc.stdout.strip() == "true"
     except Exception:
         return False
+
+
+# ============================================================================
+# TEI local (Phase B — profil B : embeddings sur GPU local pendant que le 72B
+# occupe tout le GPU de l'EC2). Symetrique de start_local_vllm.
+# ============================================================================
+TEI_LOCAL_CONTAINER = "osmose-tei-local"
+TEI_LOCAL_PORT = 8001  # port publie sur l'hote (debug) ; les containers usent le nom
+TEI_LOCAL_MODEL = "intfloat/multilingual-e5-large"
+# URL atteinte par worker/app via le reseau Docker (nom de container, port interne 80)
+TEI_LOCAL_URL = f"http://{TEI_LOCAL_CONTAINER}:80"
+
+
+def start_local_tei(
+    model: str = TEI_LOCAL_MODEL,
+    port: int = TEI_LOCAL_PORT,
+) -> Dict[str, Any]:
+    """Lance un container TEI (embeddings) sur le GPU local (profil B).
+
+    Le 72B occupe tout le GPU de l'EC2 → les embeddings (e5-large ~2GB) tournent
+    sur le GPU local (RTX 5070 Ti 16GB, large). Le container rejoint le reseau
+    Docker partage → atteint via TEI_LOCAL_URL (nom de container, comme le vLLM
+    local). Pas de decharge Ollama : e5-large est petit.
+
+    Returns: {"success": bool, "container_id": str, "url": str, "error": str}
+    """
+    import subprocess
+    import time
+    import urllib.request
+
+    result: Dict[str, Any] = {
+        "success": False, "container_id": None, "url": TEI_LOCAL_URL, "error": None,
+    }
+
+    # Arreter un eventuel container existant
+    try:
+        subprocess.run(
+            ["docker", "rm", "-f", TEI_LOCAL_CONTAINER],
+            capture_output=True, timeout=15,
+        )
+    except Exception:
+        pass
+
+    hf_cache_host = os.getenv("HF_CACHE_HOST_PATH", "/c/Users/fredp/.cache/huggingface")
+    docker_network = os.getenv("DOCKER_NETWORK", "knowbase_network")
+
+    cmd = [
+        "docker", "run", "-d",
+        "--name", TEI_LOCAL_CONTAINER,
+        "--gpus", "all",
+        "--network", docker_network,
+        "-p", f"{port}:80",
+        "-v", f"{hf_cache_host}:/data",
+        "ghcr.io/huggingface/text-embeddings-inference:1.5",
+        "--model-id", model,
+        "--dtype", "float16",
+        "--port", "80",
+    ]
+
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if proc.returncode != 0:
+            result["error"] = f"Docker run failed: {proc.stderr[:300]}"
+            return result
+        result["container_id"] = proc.stdout.strip()[:12]
+        logger.info(f"[BURST:LOCAL] TEI container started: {result['container_id']}")
+    except Exception as e:
+        result["error"] = f"Docker run exception: {e}"
+        return result
+
+    # Health wait (via nom de container sur le reseau Docker)
+    health_url = f"http://{TEI_LOCAL_CONTAINER}:80/health"
+    max_wait = 36  # 36 x 5s = 180s
+    logger.info(f"[BURST:LOCAL] Waiting for TEI health at {health_url} (max {max_wait*5}s)...")
+    for _ in range(max_wait):
+        time.sleep(5)
+        try:
+            check = subprocess.run(
+                ["docker", "inspect", "--format={{.State.Running}}", TEI_LOCAL_CONTAINER],
+                capture_output=True, text=True, timeout=5,
+            )
+            if check.stdout.strip() != "true":
+                logs = subprocess.run(
+                    ["docker", "logs", "--tail", "20", TEI_LOCAL_CONTAINER],
+                    capture_output=True, text=True, timeout=5,
+                )
+                result["error"] = f"TEI container exited. Logs: {logs.stderr[:300]}{logs.stdout[:300]}"
+                return result
+            resp = urllib.request.urlopen(health_url, timeout=5)
+            if resp.status == 200:
+                result["success"] = True
+                logger.info(f"[BURST:LOCAL] TEI local ACTIVE: {model} → {TEI_LOCAL_URL}")
+                return result
+        except Exception:
+            continue
+
+    result["error"] = f"TEI not healthy within {max_wait*5}s (docker logs {TEI_LOCAL_CONTAINER})"
+    return result
+
+
+def stop_local_tei() -> Dict[str, Any]:
+    """Arrete le container TEI local."""
+    import subprocess
+    result: Dict[str, Any] = {"success": False, "error": None}
+    try:
+        proc = subprocess.run(
+            ["docker", "rm", "-f", TEI_LOCAL_CONTAINER],
+            capture_output=True, text=True, timeout=15,
+        )
+        result["success"] = proc.returncode == 0
+        if proc.returncode != 0:
+            result["error"] = f"Docker rm failed: {proc.stderr[:200]}"
+    except Exception as e:
+        result["error"] = f"Docker rm exception: {e}"
+    logger.info("[BURST:LOCAL] TEI local STOPPED")
+    return result
+
+
+def is_local_tei_running() -> bool:
+    """Verifie si le container TEI local tourne."""
+    import subprocess
+    try:
+        proc = subprocess.run(
+            ["docker", "inspect", "--format={{.State.Running}}", TEI_LOCAL_CONTAINER],
+            capture_output=True, text=True, timeout=5,
+        )
+        return proc.stdout.strip() == "true"
+    except Exception:
+        return False

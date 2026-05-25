@@ -1733,6 +1733,27 @@ class StartStandaloneRequest(BaseModel):
         True,
         description="Si True, garde le fleet avec capacity=0 pour redémarrage rapide"
     )
+    profile: str = Field(
+        "profile_a",
+        description="Profil burst : 'profile_a' (g6+14B+TEI EC2) ou 'profile_b' (g6e+72B+TEI local)"
+    )
+
+
+class BurstProfileInfo(BaseModel):
+    """Description d'un profil burst pour l'UI."""
+    id: str
+    label: str
+    instance_types: List[str]
+    vllm_model: str
+    embeddings_on_ec2: bool
+    gpu_memory_utilization: float
+    max_num_seqs: int
+
+
+class BurstProfilesResponse(BaseModel):
+    """Liste des profils burst disponibles."""
+    profiles: List[BurstProfileInfo]
+    default: str
 
 
 class StartStandaloneResponse(BaseModel):
@@ -2013,6 +2034,33 @@ async def resume_batch(
 # Standalone EC2 Mode - On-demand vLLM (sans batch)
 # ============================================================================
 
+@router.get(
+    "/profiles",
+    response_model=BurstProfilesResponse,
+    summary="Lister les profils burst disponibles",
+    description="Profils sélectionnables (g6+14B+TEI EC2 vs g6e+72B+TEI local).",
+)
+async def get_burst_profiles(
+    tenant_id: str = Depends(get_tenant_id),
+) -> BurstProfilesResponse:
+    """Retourne les profils burst (presets) pour le sélecteur /admin/gpu."""
+    from knowbase.ingestion.burst.types import BURST_PROFILES, DEFAULT_BURST_PROFILE
+
+    profiles = [
+        BurstProfileInfo(
+            id=pid,
+            label=preset["label"],
+            instance_types=list(preset["spot_instance_types"]),
+            vllm_model=preset["vllm_model"],
+            embeddings_on_ec2=bool(preset["embeddings_on_ec2"]),
+            gpu_memory_utilization=float(preset["vllm_gpu_memory_utilization"]),
+            max_num_seqs=int(preset["vllm_max_num_seqs"]),
+        )
+        for pid, preset in BURST_PROFILES.items()
+    ]
+    return BurstProfilesResponse(profiles=profiles, default=DEFAULT_BURST_PROFILE)
+
+
 @router.post(
     "/start-standalone",
     response_model=StartStandaloneResponse,
@@ -2064,8 +2112,26 @@ async def start_standalone(
                 )
 
         # Créer un état minimal "standalone" (sans documents)
+        # Phase B : appliquer le profil burst choisi (instance type, modèle, TEI EC2/local)
         standalone_id = f"standalone-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-        config = BurstConfig.from_env()
+        config = BurstConfig.for_profile(request.profile)
+        # IMPORTANT : _deploy_spot_infrastructure utilise orchestrator.config (pas state.config)
+        orchestrator.config = config
+
+        # Profil B : démarrer le TEI local AVANT le switch des providers (embeddings local)
+        if not config.embeddings_on_ec2:
+            from knowbase.ingestion.burst.provider_switch import start_local_tei, is_local_tei_running
+            if is_local_tei_running():
+                logger.info("[BURST] TEI local déjà actif")
+            else:
+                logger.info("[BURST] Profil B : démarrage du TEI local (embeddings sur GPU local)...")
+                tei_res = await asyncio.to_thread(start_local_tei)
+                if not tei_res.get("success"):
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Échec démarrage TEI local: {tei_res.get('error')}"
+                    )
+                logger.info(f"[BURST] TEI local actif: {tei_res.get('url')}")
 
         orchestrator.state = BurstState(
             batch_id=standalone_id,
@@ -2078,11 +2144,11 @@ async def start_standalone(
 
         orchestrator._add_event(
             "standalone_starting",
-            "Démarrage mode standalone (vLLM on-demand)",
-            details={"hibernate_on_stop": request.hibernate_on_stop}
+            f"Démarrage mode standalone (profil {request.profile}, modèle {config.vllm_model})",
+            details={"hibernate_on_stop": request.hibernate_on_stop, "profile": request.profile}
         )
 
-        logger.info(f"[BURST] Starting standalone mode: {standalone_id}")
+        logger.info(f"[BURST] Starting standalone mode: {standalone_id} (profil {request.profile})")
 
         # Démarrer l'infrastructure (sync call wrapped)
         success = await asyncio.to_thread(orchestrator.start_infrastructure)
@@ -2147,6 +2213,15 @@ async def stop_standalone(
         from knowbase.ingestion.burst import get_burst_orchestrator, deactivate_burst_providers
         from knowbase.ingestion.burst.types import BurstStatus
         import boto3
+
+        # Phase B : arrêter le TEI local s'il tournait (profil B), best-effort
+        try:
+            from knowbase.ingestion.burst.provider_switch import is_local_tei_running, stop_local_tei
+            if is_local_tei_running():
+                stop_local_tei()
+                logger.info("[BURST] TEI local arrêté (profil B)")
+        except Exception as _tei_err:
+            logger.warning(f"[BURST] Arrêt TEI local non-bloquant: {_tei_err}")
 
         orchestrator = get_burst_orchestrator()
 
