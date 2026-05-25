@@ -502,45 +502,62 @@ class BurstOrchestrator:
         stack_name = f"knowwhere-burst-{self.state.batch_id}"
         self.state.stack_name = stack_name
 
-        # Charger template
-        template_path = Path(__file__).parent / "cloudformation" / "burst-spot.yaml"
+        # Phase B : sélection du template + jeu de paramètres selon le profil burst.
+        # profile_b utilise un template DÉDIÉ (g6e + 72B, vLLM seul, sans TEI) avec
+        # un jeu de paramètres restreint (pas d'embeddings sur l'EC2).
+        is_profile_b = getattr(self.config, "burst_profile", "profile_a") == "profile_b"
+        template_name = "burst-spot-72b.yaml" if is_profile_b else "burst-spot.yaml"
+        template_path = Path(__file__).parent / "cloudformation" / template_name
 
         if not template_path.exists():
-            # Utiliser template inline si fichier non présent
+            if is_profile_b:
+                raise BurstOrchestrationError(
+                    f"Template profil B introuvable: {template_path}"
+                )
+            # Profil A : template inline si fichier non présent (rétrocompat)
             template_body = self._get_inline_cloudformation_template()
         else:
-            with open(template_path, "r") as f:
+            with open(template_path, "r", encoding="utf-8") as f:
                 template_body = f.read()
 
-        # Paramètres CloudFormation
+        # Paramètres vLLM communs aux deux profils
         parameters = [
             {"ParameterKey": "BatchId", "ParameterValue": self.state.batch_id},
             {"ParameterKey": "VllmModel", "ParameterValue": self.config.vllm_model},
-            {"ParameterKey": "EmbeddingsModel", "ParameterValue": self.config.embeddings_model},
             {"ParameterKey": "SpotMaxPrice", "ParameterValue": str(self.config.spot_max_price)},
             {"ParameterKey": "VllmPort", "ParameterValue": str(self.config.vllm_port)},
-            {"ParameterKey": "EmbeddingsPort", "ParameterValue": str(self.config.embeddings_port)},
-            # Paramètres vLLM additionnels
             {"ParameterKey": "VllmGpuMemoryUtilization", "ParameterValue": str(self.config.vllm_gpu_memory_utilization)},
             {"ParameterKey": "VllmQuantization", "ParameterValue": self.config.vllm_quantization},
             {"ParameterKey": "VllmDtype", "ParameterValue": self.config.vllm_dtype},
             {"ParameterKey": "VllmMaxModelLen", "ParameterValue": str(self.config.vllm_max_model_len)},
             {"ParameterKey": "VllmMaxNumSeqs", "ParameterValue": str(self.config.vllm_max_num_seqs)},
-            # Optimisations vLLM (2026-01-27)
             {"ParameterKey": "VllmEnablePrefixCaching", "ParameterValue": "true" if self.config.vllm_enable_prefix_caching else "false"},
             {"ParameterKey": "VllmEnableChunkedPrefill", "ParameterValue": "true" if self.config.vllm_enable_chunked_prefill else "false"},
             {"ParameterKey": "VllmMaxNumBatchedTokens", "ParameterValue": str(self.config.vllm_max_num_batched_tokens)},
         ]
 
-        # Ajouter VPC/Subnet si configurés
+        if is_profile_b:
+            # Profil B : instance g6e (premier de la liste du preset), pas d'embeddings EC2
+            instance_type = (self.config.spot_instance_types or ["g6e.2xlarge"])[0]
+            parameters.append({"ParameterKey": "InstanceType", "ParameterValue": instance_type})
+        else:
+            # Profil A : embeddings TEI embarqués + callback interruption
+            parameters.append({"ParameterKey": "EmbeddingsModel", "ParameterValue": self.config.embeddings_model})
+            parameters.append({"ParameterKey": "EmbeddingsPort", "ParameterValue": str(self.config.embeddings_port)})
+            if self.config.callback_url:
+                parameters.append({"ParameterKey": "CallbackUrl", "ParameterValue": self.config.callback_url})
+
+        # VPC/Subnet (commun, optionnel) — déclarés dans les deux templates
         if self.config.vpc_id:
             parameters.append({"ParameterKey": "VpcId", "ParameterValue": self.config.vpc_id})
         if self.config.subnet_id:
             parameters.append({"ParameterKey": "SubnetId", "ParameterValue": self.config.subnet_id})
 
-        # Ajouter CallbackUrl pour notifications d'interruption Spot
-        if self.config.callback_url:
-            parameters.append({"ParameterKey": "CallbackUrl", "ParameterValue": self.config.callback_url})
+        logger.info(
+            f"[BURST:ORCHESTRATOR] Profil={getattr(self.config, 'burst_profile', 'profile_a')} "
+            f"template={template_name} model={self.config.vllm_model} "
+            f"embeddings_on_ec2={getattr(self.config, 'embeddings_on_ec2', True)}"
+        )
 
         try:
             self.cf_client.create_stack(
@@ -666,12 +683,26 @@ class BurstOrchestrator:
             return None
 
     def _wait_for_services(self):
-        """Attend que les services vLLM et Embeddings soient prêts (healthcheck)."""
+        """Attend que les services vLLM et Embeddings soient prêts (healthcheck).
+
+        Phase B : en profil B (embeddings_on_ec2=False), le TEI tourne sur le GPU
+        LOCAL (pas sur l'EC2). On ne bloque alors QUE sur le vLLM de l'EC2 ;
+        l'embeddings_url pointe vers le TEI local et sa disponibilité est gérée
+        séparément (start_local_tei + activation des providers).
+        """
         if not self.state.instance_ip:
             raise BurstOrchestrationError("No instance IP available")
 
+        import os as _os
         vllm_url = f"http://{self.state.instance_ip}:{self.config.vllm_port}"
-        embeddings_url = f"http://{self.state.instance_ip}:{self.config.embeddings_port}"
+        embeddings_on_ec2 = getattr(self.config, "embeddings_on_ec2", True)
+        if embeddings_on_ec2:
+            embeddings_url = f"http://{self.state.instance_ip}:{self.config.embeddings_port}"
+        else:
+            # Profil B : TEI sur GPU local (atteint depuis le container via host.docker.internal)
+            embeddings_url = _os.getenv(
+                "BURST_LOCAL_EMBEDDINGS_URL", "http://host.docker.internal:8001"
+            )
 
         self.state.vllm_url = vllm_url
         self.state.embeddings_url = embeddings_url
@@ -682,18 +713,30 @@ class BurstOrchestrator:
         timeout = self.config.instance_boot_timeout
 
         while time.time() - start_time < timeout:
-            health = check_burst_providers_health(
-                vllm_url,
-                embeddings_url,
-                timeout=self.config.healthcheck_timeout
-            )
+            if embeddings_on_ec2:
+                health = check_burst_providers_health(
+                    vllm_url, embeddings_url,
+                    timeout=self.config.healthcheck_timeout,
+                )
+                ready = health['all_healthy']
+            else:
+                # Profil B : seul le vLLM EC2 conditionne la disponibilité
+                ready = False
+                try:
+                    import httpx
+                    resp = httpx.get(f"{vllm_url}/health", timeout=self.config.healthcheck_timeout)
+                    ready = resp.status_code == 200
+                except Exception:
+                    ready = False
 
-            if health['all_healthy']:
+            if ready:
                 self._add_event(
                     "services_ready",
-                    "Services vLLM et Embeddings prêts"
+                    "Service vLLM prêt" if not embeddings_on_ec2 else "Services vLLM et Embeddings prêts"
                 )
-                logger.info("[BURST:ORCHESTRATOR] Services ready")
+                logger.info(
+                    f"[BURST:ORCHESTRATOR] Services ready (embeddings={'EC2' if embeddings_on_ec2 else 'local'})"
+                )
                 return
 
             elapsed = int(time.time() - start_time)
