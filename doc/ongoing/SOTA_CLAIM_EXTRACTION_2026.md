@@ -54,7 +54,77 @@ Séquence : implémenter #1+#2+#3 → smoke 2-5 docs (DeepSeek + Qwen) → si ra
 - Granularité fine (proposition) ↔ Dense X Retrieval — mais « moléculaire », pas « atomique pur ».
 - Procedure_chain runtime (P1.5-tool) ↔ PropRAG (chemins de propositions).
 
-## Sources (25, datées) — voir transcript agent. Principales :
+---
+
+# VOLET 2 — Correctif : réduire le volume/redondance SANS perdre le signal (post-mortem sur-extraction)
+
+> Date : 2026-05-25 (soir)
+> Déclencheur : l'implémentation P1.3.5 (Volet 1 ci-dessus : décontextualisation + question-guided + open-predicate + « extract EVERY genuine claim ») a produit une **sur-extraction massive** mesurée sur 4 docs ré-ingérés (cf `CLAIM_ANALYSIS_P1_4.md`) : 8530 claims / 4 docs ≈ 73% de l'ancien corpus entier ; Feature Scope = 6934 claims (×23). Sur-décomposition de listes/catalogues + ~6% quasi-doublons.
+> But : 2e recherche littéraire — challenger Volet 1 dans l'autre sens. Volet 1 visait le **rappel** (sous-extraction Qwen) ; on a basculé dans l'excès inverse. Ce volet cherche le **point d'équilibre**.
+
+## Renversement de diagnostic
+
+Volet 1 nous a fait optimiser le **rappel** (« extract EVERY genuine claim » + question-guided agressif). Résultat empirique : on a viré dans l'excès opposé. La littérature 2025-2026 est sans ambiguïté sur ce point :
+
+> **Plus de claims atomiques ≠ meilleur retrieval. La sur-atomisation dilue le signal et le bruit dégrade KG-RAG.**
+
+- **DEG-RAG (« Less is More: Denoising KGs for RAG », arXiv:2510.14271, oct 2025)** : supprimer **40% des entités / 30-60% des relations améliore SYSTÉMATIQUEMENT** la perf RAG (winning rates 42-61%). Phrase-clé : *« knowledge graph quality matters more than size »*. **Validation empirique directe de notre intuition.**
+- **Proposition-based chunking parmi les PIRES performers** (langcopilot 10/2025, ragaboutit « 2026 RAG Performance Paradox ») : *« when your system retrieves 20 tiny propositions instead of 5 coherent chunks, you're not improving context quality »*. → notre ×23 risque d'**activement dégrader** le retrieval, pas juste de coûter cher.
+- **Gleaning GraphRAG = anti-pattern pour nous** : le gleaning re-demande N fois au LLM les claims manqués → conçu pour LLM qui *sous-extraient*. Notre prompt « extract every genuine claim » **reproduit l'esprit du gleaning** — c'est la cause du ×23. LazyGraphRAG (2025) a réduit ce coût à 0.1% en différant l'extraction exhaustive. → **max_gleanings = 0, un seul passage, pencher rappel→précision.**
+
+## Concepts-clés à injecter
+
+1. **Molecular Facts (EMNLP 2024)** [déjà cité Volet 1, mais mal appliqué] : deux critères opposés — **décontextualité** (tient seul) ET **minimalité** (le minimum d'info). *« Les faits totalement atomiques ne sont PAS la bonne représentation. »* Variance énorme entre méthodes (20.2 vs 32.9 sous-claims/bio) → la granularité est un **hyperparamètre, pas une vérité**. On a gardé la décontextualité (bien : 96%) mais **violé la minimalité** (énumération `X available in A,B,C` → 11 claims).
+2. **Granularité adaptative par densité (Optimizing Decomposition, ACL 2025, arXiv:2503.15354)** : les politiques fixes (FactScore, SAFE) gèrent mal les **densités factuelles variables** — exactement notre cas (Feature Scope catalogue dense vs doc narratif). Une politique uniforme est inadaptée. → granularité plus **grossière** pour les docs catalogue.
+3. **CORE (arXiv:2403.11903)** : décorateur post-décomposition en 3 temps — (a) filtrage par entailment (vire hallucinations), (b) scoring d'informativité (∆Info), (c) **dé-dup par maximum-weight independent set** (si claim A ⊨ B, redondants). Conçu pile pour retenir un **set minimal unique informatif**.
+4. **Hybrid verification regex + LLM-judge (arXiv:2602.11886, 2026)** : hallucination de sujet **65.2% → 1.6%**. Le **regex-match** est l'outil pour préserver/valider nos identifiants exacts (transactions SAP, codes WWI, ALL_CAPS / `\w+_\w+`) — là où le cross-encoder sémantique régressait (cf factual -0.233pp Config C).
+
+## CLASSEMENT — Top 5 leviers ROI (réduire volume sans perdre valeur)
+
+| # | Levier | Type | Source | Effort | Pourquoi |
+|---|---|---|---|---|---|
+| **1** | **Granularité MOLÉCULAIRE + anti-énumération explicite** : remplacer « extract EVERY genuine claim » par critères molecular fact ; règle dure « an enumeration (X available in A,B,C) is ONE claim with a list value or qualifiers, NOT N claims » | PROMPT | Molecular Facts | Faible | Attaque la cause racine du ×23 (sur-décompo listes). Exploite l'infra **ClaimQualifier (P1.1) déjà livrée** pour porter les énumérations. |
+| **2** | **Dédup sémantique en cascade tiered** : (1) exact/MinHash → (2) embedding cosine ~0.93 (SemHash, on a déjà `claim_embeddings`) → (3) entailment NLI sur paires candidates (logique CORE) | POST | DEG-RAG, CORE, SemHash | Faible-Moyen | Déterministe, mesurable, vire les ~6% doublons + résidu sur-décompo. Réutilise HHEM-2.1 / bge-reranker en place. **Filet de sécurité indépendant de la variance LLM.** |
+| **3** | **Filtre d'utilité / check-worthiness** : gate LLM-judge « worth storing? » + seuil fiabilité (triple reflection DEG-RAG). **Garde-fou : ne JAMAIS filtrer un claim contenant un identifiant ALL_CAPS** (regex protect) | POST | DEG-RAG, CheckThat! 2024, Noise-or-Nuance | Faible | Vire le trivial (« the document describes… »). On a déjà l'infra LLM-judge. |
+| **4** | **Granularité adaptative par type de doc** : détecter docs catalogue/spec denses (« Feature Scope ») → granularité grossière + extraction structure-aware (1 claim/entrée de liste) | PROMPT+ROUTING | Optimizing Decomposition ACL 2025, Mix-of-Granularity | Moyen | C'est LE doc qui explose à 6934. |
+| **5** | **Summarization-guided / salience** : « extract only propositions that would appear in an extractive summary » | PROMPT | Salient Proposition Annotation 2026 | Faible | Filtre le « not worth mentioning » en amont. Complément de #1. |
+| transverse | **Désactiver tout gleaning / exhaustivité** : un seul passage, max_gleanings=0 | PROMPT | GraphRAG, LazyGraphRAG | Faible | Notre prompt = esprit gleaning. |
+
+## Séquencement recommandé (critique)
+
+1. **D'ABORD #2 (dédup post) + #3 (filtre utilité)** : déterministes, mesurables isolément, **pas de variance LLM**. Mesurer la réduction de volume + l'effet retrieval AVANT de toucher au prompt (cohérent avec « recall audit avant optim » + « smoke-first »).
+2. **PUIS #1 + #4 (prompt)** : valider par smoke 2-5 docs que Qwen/DeepSeek respectent la granularité moléculaire — **risque de variance open-source réel** (notre historique le montre : les petits LLM ratent les consignes fines de granularité sous pression).
+3. **#5** en affinage.
+
+**Point critique (vs erreur Volet 1)** : ne PAS régler le volume par le prompt seul. Le post-traitement déterministe (#2/#3) est le filet de sécurité — c'est aussi ce que la littérature 2025-2026 recommande (DEG-RAG, CORE = couches post-extraction, pas confiance aveugle à l'extracteur). Volet 1 a fait l'erreur inverse : tout miser sur le prompt.
+
+## GraphRAG / LightRAG / HippoRAG — ne résolvent PAS notre cas
+
+- GraphRAG : pas d'anti-redondance natif (au contraire, gleaning). Merge d'entités demandé mais pas natif (issue #401).
+- LightRAG : dédup limitée au **string-matching exact** (issues #1323/#2528) → rate les paraphrases.
+- nano-graphrag : exact-match aussi.
+- HippoRAG : PageRank au retrieval, rien à l'extraction.
+- → notre problème (claims-phrases redondants, pas entités) **exige une couche sémantique ajoutée** (CORE/SemHash/DEG-RAG-like). Aucun framework ne nous l'offre gratuitement.
+
+## Sources Volet 2 (≥12 datées)
+- Less is More / DEG-RAG (oct 2025) https://arxiv.org/abs/2510.14271
+- CORE: A Closer Look at Claim Decomposition (2024) https://arxiv.org/abs/2403.11903 — repo https://github.com/zipJiang/Core
+- Optimizing Decomposition for Optimal Claim Verification (ACL 2025) https://arxiv.org/html/2503.15354
+- Not Worth Mentioning? Salient Proposition Annotation (2026) https://arxiv.org/abs/2603.27358
+- Noise or Nuance: Filtering for LLM-Driven AKBC (2025) https://arxiv.org/pdf/2509.08903
+- Document Chunking for RAG, 9 strategies tested (10/2025) https://langcopilot.com/posts/2025-10-11-document-chunking-for-rag-practical-guide
+- The 2026 RAG Performance Paradox https://ragaboutit.com/the-2026-rag-performance-paradox-why-simpler-chunking-strategies-are-outperforming-complex-ai-driven-methods/
+- SemHash semantic dedup (2024-2025) https://minishlab.github.io/semhash-blogpost/
+- MinHash LSH in Milvus (2025) https://milvus.io/blog/minhash-lsh-in-milvus-the-secret-weapon-for-fighting-duplicates-in-llm-training-data.md
+- CheckThat! 2024 check-worthiness https://arxiv.org/pdf/2406.18297
+- LLM Triplet Extraction regex+judge 65%→1.6% (2026) https://arxiv.org/abs/2602.11886
+- GraphRAG gleaning issues https://github.com/microsoft/graphrag/issues/613
+- LightRAG dedup string-exact issues https://github.com/HKUDS/LightRAG/issues/1323
+- Mix-of-Granularity for RAG (2024) https://arxiv.org/html/2406.00456v1
+
+---
+
+## Sources Volet 1 (25, datées) — voir transcript agent. Principales :
 - Molecular Facts (EMNLP 2024) https://arxiv.org/html/2406.20079v1
 - Dense X Retrieval / Propositionizer (EMNLP 2024) https://arxiv.org/abs/2312.06648
 - APS / Gemma-APS (EMNLP Findings 2024) https://arxiv.org/abs/2406.19803
