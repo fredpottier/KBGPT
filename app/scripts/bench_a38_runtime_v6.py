@@ -134,18 +134,63 @@ def _judge_call_once(task_type, question: str, answer: str, ground_truth: str) -
         return None
 
 
-def llm_judge(question: str, answer: str, ground_truth: str) -> Dict[str, Any]:
-    """LLM-judge C1/C3 score (P0.1 — retry exponentiel + parsing tolérant + fallback LLM).
+_ABSTENTION_MARKERS = (
+    "documents indexés contiennent des informations proches",
+    "documents indexés ne",
+    "aucune information",
+    "no relevant claim",
+    "ne peut être fournie",
+    "prémisse que les documents",
+    "risquerait d'être inexact",
+)
 
-    Stratégie :
-      1. 3 tentatives avec primary LLM (FAST_CLASSIFICATION = Qwen3-235B) — backoff 1s/3s
-      2. Si toutes échouent : 1 tentative fallback LLM (LONG_TEXT_SUMMARY = DeepSeek-V3.1)
-      3. Si tout échoue : retourne score=None (exclu de l'agrégation, anti-biais)
+
+def _is_abstention(answer: str, mode: Optional[str]) -> bool:
+    """Détecte si la réponse candidate est une abstention.
+
+    Priorité au mode pipeline (ABSTENTION), fallback sur marqueurs texte.
+    """
+    if mode == "ABSTENTION":
+        return True
+    if not answer:
+        return False
+    low = answer.lower()
+    return any(m.lower() in low for m in _ABSTENTION_MARKERS)
+
+
+def llm_judge(question: str, answer: str, ground_truth: str,
+              answerability: str = "answerable", false_premise: bool = False,
+              mode: Optional[str] = None) -> Dict[str, Any]:
+    """LLM-judge C1/C3 score (P0.1 + fix anti-overfit abstention 25/05/2026).
+
+    RÈGLE DÉTERMINISTE ANTI-OVERFIT (avant LLM) :
+      Une abstention n'est récompensée (1.0) QUE si la question est légitimement
+      non-répondable (answerability != "answerable" OU false_premise). Sinon,
+      abstenir sur une question répondable = 0.0 (le système n'a pas fait son
+      travail). Évite le mirage où le pipeline gagne en abstenant + judge laxiste.
+
+    Stratégie LLM (cas non-abstention) :
+      1. 3 tentatives primary LLM (FAST_CLASSIFICATION) — backoff 1s/3s
+      2. Si échouent : 1 fallback LLM (LONG_TEXT_SUMMARY = DeepSeek-V3.1)
+      3. Si tout échoue : score=None (exclu de l'agrégation)
 
     Returns:
       {"score": float|None, "reasoning": str, "attempts": int, "used_fallback": bool}
     """
     from knowbase.common.llm_router import TaskType
+
+    # --- Règle déterministe abstention (anti-overfit) ---
+    if _is_abstention(answer, mode):
+        legitimate_abstention = (answerability != "answerable") or bool(false_premise)
+        if legitimate_abstention:
+            return {"score": 1.0, "attempts": 0, "used_fallback": False,
+                    "reasoning": f"[deterministic] Legitimate abstention "
+                                 f"(answerability={answerability}, false_premise={false_premise})"}
+        else:
+            return {"score": 0.0, "attempts": 0, "used_fallback": False,
+                    "reasoning": "[deterministic] Abstention on an ANSWERABLE question "
+                                 "(answerability=answerable, not false_premise) → system "
+                                 "failed to answer. Score 0.0 (anti-overfit guard)."}
 
     # Tentatives primary LLM avec backoff exponentiel
     backoffs = [0, 1, 3]  # 1ère tentative immédiate, puis 1s, puis 3s
@@ -280,10 +325,16 @@ def run_bench_50q(orch, gold_path: Path, limit: Optional[int]) -> List[Dict[str,
         logger.info("[50q %d/%d] type=%s id=%s", i, len(questions),
                     q.get("primary_type"), q.get("id"))
         run = run_question(orch, q["question"])
-        # LLM-judge C1 vs ground_truth.answer
-        gt_answer = q.get("ground_truth", {}).get("answer", "")
+        # LLM-judge C1 vs ground_truth.answer (+ métadonnées anti-overfit abstention)
+        gt = q.get("ground_truth", {})
+        gt_answer = gt.get("answer", "")
         if gt_answer and run.get("ok"):
-            judge = llm_judge(q["question"], run["answer_text"], gt_answer)
+            judge = llm_judge(
+                q["question"], run["answer_text"], gt_answer,
+                answerability=gt.get("answerability", "answerable"),
+                false_premise=gt.get("false_premise", False),
+                mode=run.get("mode"),
+            )
         else:
             judge = {"score": 0.0, "reasoning": "no_ground_truth_or_run_failed"}
         results.append({
