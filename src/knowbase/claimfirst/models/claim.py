@@ -100,6 +100,52 @@ class ClaimScope(BaseModel):
         }
 
 
+class QualifierType(str, Enum):
+    """Types de qualifiers structurés (Phase B, domain-agnostic).
+
+    Cf ADR_PHASE_B_HYPER_RELATIONAL_CLAIMS §3.1. Universels : applicables à
+    médical (posologie conditionnelle), légal (amendement temporel),
+    aerospace (condition d'altitude), pas seulement SAP.
+    """
+
+    TEMPORAL = "temporal"
+    """Borne temporelle : "depuis 2024", "jusqu'à v2.5", "à partir de SPS03"."""
+
+    SPATIAL = "spatial"
+    """Région/zone : "EU only", "China region", "on-premise"."""
+
+    VERSION = "version"
+    """Version/édition produit : "S/4HANA 2023", "edition Private Cloud"."""
+
+    CONDITION = "condition"
+    """Condition d'activation : "si MFA activé", "pour clients RISE"."""
+
+    SCOPE_LIMIT = "scope_limit"
+    """Limite de portée : "hors production", "développement uniquement"."""
+
+
+class ClaimQualifier(BaseModel):
+    """Qualifier structuré enrichissant un Claim (Phase B, 25/05/2026).
+
+    Capture une condition d'applicabilité dérivée du verbatim source. Permet au
+    retrieval + Synthesize de répondre aux questions conditionnelles/temporelles
+    (lifecycle) sans avoir à croiser plusieurs claims atomiques.
+
+    Cf ADR_PHASE_B_HYPER_RELATIONAL_CLAIMS §3.1.
+    """
+
+    qualifier_type: QualifierType = Field(
+        ..., description="Type universel de qualifier (cf QualifierType)"
+    )
+    value: str = Field(
+        ..., description="Valeur du qualifier dérivée du verbatim (ex: 'depuis 2024')"
+    )
+    confidence: float = Field(
+        default=1.0, ge=0.0, le=1.0,
+        description="Confiance LLM sur l'extraction de ce qualifier"
+    )
+
+
 class Claim(BaseModel):
     """
     Claim documentée - objet central du pipeline.
@@ -258,6 +304,27 @@ class Claim(BaseModel):
         description="A4.2: Confidence du LLM SubjectIndexer (0-1). None si subject vient de SF.subject ou pas encore traité."
     )
 
+    # --- Phase B (25/05/2026) : enrichissement hyper-relationnel ---
+    qualifiers: List["ClaimQualifier"] = Field(
+        default_factory=list,
+        description="Phase B: qualifiers structurés (temporal/spatial/version/condition/scope_limit) dérivés du verbatim. Enrichit le retrieval pour questions conditionnelles/lifecycle."
+    )
+
+    procedure_role: Optional[str] = Field(
+        default=None,
+        description="Phase B: rôle procédural si le claim est une étape ('PREREQUISITE'|'STEP'|'OUTCOME'). None si non-procédural."
+    )
+
+    procedure_id: Optional[str] = Field(
+        default=None,
+        description="Phase B: ID de la :Procedure à laquelle ce claim appartient (foreign key). None si non-procédural."
+    )
+
+    step_index: Optional[int] = Field(
+        default=None,
+        description="Phase B: ordre du claim dans la procédure (1-based). None si non-procédural."
+    )
+
     @field_validator("text")
     @classmethod
     def validate_text_not_too_long(cls, v: str) -> str:
@@ -369,6 +436,17 @@ class Claim(BaseModel):
             props["redundant"] = self.redundant
         if self.champion_claim_id:
             props["champion_claim_id"] = self.champion_claim_id
+        # Phase B (25/05/2026) : qualifiers + rôle procédural
+        if self.qualifiers:
+            props["qualifiers_json"] = json.dumps(
+                [q.model_dump() for q in self.qualifiers], ensure_ascii=False
+            )
+        if self.procedure_role:
+            props["procedure_role"] = self.procedure_role
+        if self.procedure_id:
+            props["procedure_id"] = self.procedure_id
+        if self.step_index is not None:
+            props["step_index"] = self.step_index
         return props
 
     @classmethod
@@ -397,6 +475,15 @@ class Claim(BaseModel):
             except (json.JSONDecodeError, TypeError):
                 pass
 
+        # Phase B (25/05/2026) : parse qualifiers from JSON
+        qualifiers: List[ClaimQualifier] = []
+        if record.get("qualifiers_json"):
+            try:
+                raw_quals = json.loads(record["qualifiers_json"])
+                qualifiers = [ClaimQualifier(**q) for q in raw_quals]
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+
         return cls(
             claim_id=record["claim_id"],
             tenant_id=record["tenant_id"],
@@ -421,6 +508,10 @@ class Claim(BaseModel):
             is_champion=record.get("is_champion"),
             redundant=record.get("redundant"),
             champion_claim_id=record.get("champion_claim_id"),
+            qualifiers=qualifiers,
+            procedure_role=record.get("procedure_role"),
+            procedure_id=record.get("procedure_id"),
+            step_index=record.get("step_index"),
         )
 
 
@@ -428,4 +519,6 @@ __all__ = [
     "Claim",
     "ClaimType",
     "ClaimScope",
+    "ClaimQualifier",
+    "QualifierType",
 ]

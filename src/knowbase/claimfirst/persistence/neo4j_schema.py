@@ -107,6 +107,7 @@ class ClaimFirstSchema:
         "ApplicabilityAxis",  # INV-12/14/25: Axe d'applicabilité
         "ComparableSubject",  # INV-25: Sujet stable comparable entre documents
         "Perspective",        # Couche Perspective: regroupement thematique par sujet
+        "Procedure",          # Phase B: séquence procédurale (constraint via v6/schema.py)
     ]
 
     # Types de relations
@@ -130,6 +131,10 @@ class ClaimFirstSchema:
         "INCLUDES_CLAIM",    # Perspective → Claim
         "SPANS_FACET",       # [V1 legacy] Perspective → Facet
         "TOUCHES_SUBJECT",   # [V2] Perspective → SubjectAnchor/ComparableSubject (theme-scoped)
+        # Phase B (25/05/2026) — relations procédurales (ADR_PHASE_B §3.3)
+        "STEP_OF",           # Claim → Procedure (porte order via rel property)
+        "PREREQUISITE_OF",   # Claim → Claim (dépendance ordonnée)
+        "HAS_OUTCOME",       # Procedure → Claim (état final attendu)
     ]
 
     # Contraintes (unicité)
@@ -464,6 +469,20 @@ class ClaimFirstSchema:
             name="doccontext_publication_date",
             label="DocumentContext",
             property_keys=["tenant_id", "publication_date"]
+        ),
+
+        # ==== Phase B (25/05/2026) — claims procéduraux ====
+        # Navigation des claims-étapes par procédure (tool procedure_chain Phase 3)
+        SchemaIndex(
+            name="claim_procedure",
+            label="Claim",
+            property_keys=["tenant_id", "procedure_id"]
+        ),
+        # Filtre par rôle procédural (PREREQUISITE / STEP / OUTCOME)
+        SchemaIndex(
+            name="claim_procedure_role",
+            label="Claim",
+            property_keys=["tenant_id", "procedure_role"]
         ),
     ])
 

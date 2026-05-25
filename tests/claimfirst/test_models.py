@@ -10,10 +10,18 @@ Tests:
 - ClaimCluster and ClaimRelation
 """
 
+import json
+
 import pytest
 from datetime import datetime
 
-from knowbase.claimfirst.models.claim import Claim, ClaimType, ClaimScope
+from knowbase.claimfirst.models.claim import (
+    Claim,
+    ClaimType,
+    ClaimScope,
+    ClaimQualifier,
+    QualifierType,
+)
 from knowbase.claimfirst.models.entity import (
     Entity,
     EntityType,
@@ -151,6 +159,147 @@ class TestClaim:
             ClaimType.PROCEDURAL,
         ]
         assert len(types) == 6
+
+
+class TestPhaseBClaimEnrichment:
+    """Phase B (25/05/2026) — qualifiers structurés + rôle procédural.
+
+    Cf ADR_PHASE_B_HYPER_RELATIONAL_CLAIMS §3.1-3.3. Domain-agnostic :
+    les types de qualifiers et procedures sont universels (testés ici sur
+    des exemples SAP, médical et juridique).
+    """
+
+    def _base_claim_kwargs(self, **overrides):
+        kwargs = dict(
+            claim_id="claim_pb_001",
+            tenant_id="default",
+            doc_id="doc_001",
+            text="MFA is enforced for all administrative access.",
+            claim_type=ClaimType.PRESCRIPTIVE,
+            verbatim_quote="MFA is enforced for all administrative access.",
+            passage_id="default:doc_001:item_001",
+        )
+        kwargs.update(overrides)
+        return kwargs
+
+    def test_qualifier_types_universal(self):
+        """Les 5 types de qualifiers existent (domain-agnostic)."""
+        types = [
+            QualifierType.TEMPORAL,
+            QualifierType.SPATIAL,
+            QualifierType.VERSION,
+            QualifierType.CONDITION,
+            QualifierType.SCOPE_LIMIT,
+        ]
+        assert len(types) == 5
+        assert QualifierType.TEMPORAL.value == "temporal"
+        assert QualifierType.SCOPE_LIMIT.value == "scope_limit"
+
+    def test_qualifier_creation_and_confidence_bounds(self):
+        """ClaimQualifier valide + confidence borné [0,1]."""
+        q = ClaimQualifier(
+            qualifier_type=QualifierType.TEMPORAL,
+            value="depuis 2024",
+            confidence=0.9,
+        )
+        assert q.qualifier_type == QualifierType.TEMPORAL
+        assert q.value == "depuis 2024"
+        assert q.confidence == 0.9
+
+        # confidence défaut = 1.0
+        q2 = ClaimQualifier(qualifier_type=QualifierType.CONDITION, value="si MFA activé")
+        assert q2.confidence == 1.0
+
+        # hors borne → rejet
+        with pytest.raises(ValueError):
+            ClaimQualifier(
+                qualifier_type=QualifierType.VERSION, value="S/4HANA 2023", confidence=1.5
+            )
+
+    def test_qualifiers_default_empty(self):
+        """Rétrocompat : un claim sans qualifiers a une liste vide + pas de clé Neo4j."""
+        claim = Claim(**self._base_claim_kwargs())
+        assert claim.qualifiers == []
+        assert claim.procedure_role is None
+        assert claim.procedure_id is None
+        assert claim.step_index is None
+
+        props = claim.to_neo4j_properties()
+        # Pas de pollution du payload Neo4j si vide
+        assert "qualifiers_json" not in props
+        assert "procedure_role" not in props
+        assert "procedure_id" not in props
+        assert "step_index" not in props
+
+    def test_qualifiers_to_neo4j_properties(self):
+        """qualifiers + champs procéduraux sérialisés dans le payload Neo4j."""
+        claim = Claim(**self._base_claim_kwargs(
+            claim_type=ClaimType.PROCEDURAL,
+            qualifiers=[
+                ClaimQualifier(qualifier_type=QualifierType.CONDITION, value="pour clients RISE", confidence=0.8),
+                ClaimQualifier(qualifier_type=QualifierType.VERSION, value="S/4HANA 2023"),
+            ],
+            procedure_role="STEP",
+            procedure_id="proc_abc",
+            step_index=2,
+        ))
+
+        props = claim.to_neo4j_properties()
+        assert "qualifiers_json" in props
+        assert props["procedure_role"] == "STEP"
+        assert props["procedure_id"] == "proc_abc"
+        assert props["step_index"] == 2
+
+        parsed = json.loads(props["qualifiers_json"])
+        assert len(parsed) == 2
+        assert parsed[0]["qualifier_type"] == "condition"
+        assert parsed[0]["value"] == "pour clients RISE"
+
+    def test_round_trip_neo4j(self):
+        """Round-trip to_neo4j_properties → from_neo4j_record préserve Phase B."""
+        original = Claim(**self._base_claim_kwargs(
+            text="La posologie est réduite chez l'adulte de plus de 65 ans.",
+            verbatim_quote="La posologie est réduite chez l'adulte de plus de 65 ans.",
+            claim_type=ClaimType.CONDITIONAL,
+            qualifiers=[
+                ClaimQualifier(qualifier_type=QualifierType.CONDITION, value="adulte >65 ans", confidence=0.95),
+                ClaimQualifier(qualifier_type=QualifierType.SCOPE_LIMIT, value="hors insuffisance rénale"),
+            ],
+            procedure_role="OUTCOME",
+            procedure_id="proc_xyz",
+            step_index=5,
+        ))
+
+        props = original.to_neo4j_properties()
+        # Neo4j renvoie created_at en ISO string ; on simule le record
+        record = dict(props)
+        restored = Claim.from_neo4j_record(record)
+
+        assert len(restored.qualifiers) == 2
+        assert restored.qualifiers[0].qualifier_type == QualifierType.CONDITION
+        assert restored.qualifiers[0].value == "adulte >65 ans"
+        assert restored.qualifiers[0].confidence == 0.95
+        assert restored.qualifiers[1].qualifier_type == QualifierType.SCOPE_LIMIT
+        assert restored.procedure_role == "OUTCOME"
+        assert restored.procedure_id == "proc_xyz"
+        assert restored.step_index == 5
+
+    def test_round_trip_no_qualifiers(self):
+        """Round-trip d'un claim legacy (sans Phase B) reste valide."""
+        original = Claim(**self._base_claim_kwargs())
+        record = dict(original.to_neo4j_properties())
+        restored = Claim.from_neo4j_record(record)
+        assert restored.qualifiers == []
+        assert restored.procedure_role is None
+        assert restored.step_index is None
+
+    def test_from_neo4j_record_corrupt_qualifiers_json(self):
+        """JSON qualifiers corrompu → liste vide (fail-safe, pas d'exception)."""
+        original = Claim(**self._base_claim_kwargs())
+        record = dict(original.to_neo4j_properties())
+        record["qualifiers_json"] = "{ not valid json"
+        restored = Claim.from_neo4j_record(record)
+        assert restored.qualifiers == []
 
 
 class TestEntity:

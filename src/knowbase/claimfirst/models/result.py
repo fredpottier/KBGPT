@@ -42,6 +42,16 @@ class RelationType(str, Enum):
     CHAINS_TO = "CHAINS_TO"
     """La claim A chaîne vers la claim B via un join S/P/O (object_A == subject_B)."""
 
+    # Phase B (25/05/2026) : relations procédurales (cf ADR_PHASE_B_HYPER_RELATIONAL_CLAIMS §3.3)
+    STEP_OF = "STEP_OF"
+    """La claim A est une étape de la :Procedure B (porte order via rel property)."""
+
+    PREREQUISITE_OF = "PREREQUISITE_OF"
+    """La claim A est un prérequis de la claim B (dépendance ordonnée)."""
+
+    HAS_OUTCOME = "HAS_OUTCOME"
+    """La :Procedure A a pour résultat la claim B (état final attendu)."""
+
 
 class ClaimRelation(BaseModel):
     """
