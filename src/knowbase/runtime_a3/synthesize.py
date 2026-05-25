@@ -486,6 +486,14 @@ class Synthesizer:
         # Fait UNE FOIS ici pour éviter de re-encoder dans les retries.
         filtered_claims = self._apply_claim_filter(inp)
 
+        # SufficiencyChecker (Phase B, 25/05/2026) — garde-fou anti-sur-confiance.
+        # Vérifie que les claims top-K répondent à la QUESTION posée (pas juste
+        # sémantiquement proches). Si INSUFFICIENT/FALSE_PREMISE → abstention motivée.
+        # Toggle V6_SUFFICIENCY_CHECK_ENABLED (défaut OFF). Fail-open (SUFFICIENT).
+        suff = self._maybe_sufficiency_abstention(inp, filtered_claims)
+        if suff is not None:
+            return suff
+
         # Tentative LLM
         try:
             out = self._call_llm_with_retry(inp, override_claims=filtered_claims)
@@ -605,6 +613,65 @@ class Synthesizer:
 
         out.synthesize_warnings = warnings
         return out
+
+    # ------------------------------------------------------------------
+    # SufficiencyChecker (anti-sur-confiance)
+    # ------------------------------------------------------------------
+
+    def _maybe_sufficiency_abstention(
+        self,
+        inp: SynthesizeInput,
+        filtered_claims: List[ClaimSummary],
+    ) -> Optional[SynthesizeOutput]:
+        """Si SufficiencyChecker activé et juge INSUFFICIENT/FALSE_PREMISE → abstention.
+
+        Retourne None si check désactivé, SUFFICIENT, ou erreur (fail-open).
+        """
+        from knowbase.runtime_a3.sufficiency_checker import SufficiencyChecker, is_enabled
+
+        if not is_enabled() or not filtered_claims:
+            return None
+
+        try:
+            if not hasattr(self, "_sufficiency_checker"):
+                self._sufficiency_checker = SufficiencyChecker()
+            question = inp.parse_output.raw_question
+            result = self._sufficiency_checker.check(question, filtered_claims)
+        except Exception:
+            logger.exception("[SUFFICIENCY] check raised, fail-open (continue synthesize)")
+            return None
+
+        if result.verdict == "SUFFICIENT":
+            return None
+
+        # INSUFFICIENT ou FALSE_PREMISE → abstention motivée
+        if result.verdict == "FALSE_PREMISE":
+            answer = (
+                "La question semble reposer sur une prémisse que les documents "
+                "indexés ne confirment pas. "
+                f"({result.reasoning})\n\n"
+                "Aucune réponse fiable ne peut être fournie sans risque d'erreur."
+            )
+            warning = "sufficiency_check: false_premise detected"
+        else:  # INSUFFICIENT
+            answer = (
+                "Les documents indexés contiennent des informations proches mais "
+                "ne couvrent pas précisément l'élément demandé dans la question. "
+                f"({result.reasoning})\n\n"
+                "Répondre avec les éléments disponibles risquerait d'être inexact."
+            )
+            warning = "sufficiency_check: insufficient evidence for the specific question"
+
+        return SynthesizeOutput(
+            answer_text=answer,
+            cited_claims=[],
+            uncovered_sub_goals_warning=warning,
+            conflict_pending_warning=None,
+            mode="ABSTENTION",
+            synthesize_warnings=[f"sufficiency_{result.verdict.lower()}"],
+            citation_coverage_rate=1.0,
+            schema_version="a3.0",
+        )
 
     # ------------------------------------------------------------------
     # Fallback template déterministe
