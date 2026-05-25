@@ -260,6 +260,38 @@ class BurstState:
         }
 
 
+# ============================================================================
+# Profils burst (Phase B, 25/05/2026) — presets sélectionnables via /admin/gpu
+# ============================================================================
+# Profil A = défaut historique (g6 + Qwen 14B + TEI embarqué sur le GPU EC2).
+# Profil B = g6e (L40S 48GB) + Qwen 72B + TEI sur GPU LOCAL (le 72B + TEI ne
+# tiennent pas ensemble sur 48GB → on sort les embeddings du GPU burst).
+BURST_PROFILES: Dict[str, Dict[str, Any]] = {
+    "profile_a": {
+        "label": "Qwen 14B + TEI embarqué (g6 · L4 24GB)",
+        "spot_instance_types": ["g6.2xlarge", "g6.xlarge"],
+        "vllm_model": "Qwen/Qwen2.5-14B-Instruct-AWQ",
+        "embeddings_on_ec2": True,
+        "vllm_gpu_memory_utilization": 0.85,
+        "vllm_max_num_seqs": 64,
+        "vllm_max_model_len": 16384,
+        "spot_max_price": 1.50,
+    },
+    "profile_b": {
+        "label": "Qwen 72B + TEI local (g6e · L40S 48GB)",
+        "spot_instance_types": ["g6e.2xlarge"],
+        "vllm_model": "Qwen/Qwen2.5-72B-Instruct-AWQ",
+        "embeddings_on_ec2": False,
+        "vllm_gpu_memory_utilization": 0.92,
+        "vllm_max_num_seqs": 8,
+        "vllm_max_model_len": 16384,
+        "spot_max_price": 2.00,  # g6e spot ~1.1-1.25/h, marge confortable
+    },
+}
+
+DEFAULT_BURST_PROFILE = "profile_a"
+
+
 @dataclass
 class BurstConfig:
     """
@@ -267,6 +299,11 @@ class BurstConfig:
 
     Optimisé pour Qwen 2.5 14B AWQ sur EC2 Spot g6/g6e.
     """
+
+    # Profil burst actif (cf BURST_PROFILES). profile_a = défaut inchangé.
+    burst_profile: str = DEFAULT_BURST_PROFILE
+    # Si False (profil B), TEI tourne sur le GPU local et non sur l'EC2.
+    embeddings_on_ec2: bool = True
 
     # AWS
     aws_region: str = "eu-central-1"
@@ -331,6 +368,8 @@ class BurstConfig:
     def to_dict(self) -> Dict[str, Any]:
         """Convertit en dictionnaire."""
         return {
+            "burst_profile": self.burst_profile,
+            "embeddings_on_ec2": self.embeddings_on_ec2,
             "aws_region": self.aws_region,
             "vpc_id": self.vpc_id,
             "subnet_id": self.subnet_id,
@@ -431,3 +470,25 @@ class BurstConfig:
             # Parallélisme (nombre de docs traités simultanément)
             max_concurrent_docs=int(os.getenv("BURST_MAX_CONCURRENT_DOCS", "2"))
         )
+
+    @classmethod
+    def for_profile(cls, profile_id: Optional[str]) -> "BurstConfig":
+        """Construit une config en appliquant un preset de profil burst.
+
+        Part de from_env() puis surcharge les champs pilotés par le profil
+        (instance types, modèle, embeddings_on_ec2, params vLLM). Un profil
+        inconnu ou None retombe sur le comportement from_env() (profil A).
+        """
+        config = cls.from_env()
+        preset = BURST_PROFILES.get(profile_id or DEFAULT_BURST_PROFILE)
+        if not preset:
+            return config
+        config.burst_profile = profile_id or DEFAULT_BURST_PROFILE
+        config.spot_instance_types = list(preset["spot_instance_types"])
+        config.vllm_model = preset["vllm_model"]
+        config.embeddings_on_ec2 = bool(preset["embeddings_on_ec2"])
+        config.vllm_gpu_memory_utilization = float(preset["vllm_gpu_memory_utilization"])
+        config.vllm_max_num_seqs = int(preset["vllm_max_num_seqs"])
+        config.vllm_max_model_len = int(preset["vllm_max_model_len"])
+        config.spot_max_price = float(preset["spot_max_price"])
+        return config

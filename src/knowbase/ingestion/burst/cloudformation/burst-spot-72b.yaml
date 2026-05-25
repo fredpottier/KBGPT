@@ -1,0 +1,467 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'OSMOSE Burst PROFIL B - EC2 Spot g6e (L40S 48GB) pour Qwen2.5-72B-AWQ (vLLM seul, TEI sur GPU local)'
+
+# ============================================================================
+# Profil B (Phase B, 25/05/2026) — template DEDIE, additif.
+# Le template profil A (burst-spot.yaml) reste INTACT.
+# Difference cle : g6e.2xlarge (L40S 48GB), Qwen 72B, et AUCUN TEI sur l'EC2
+# (les embeddings tournent sur le GPU local). Le 72B-AWQ (~41GB) + TEI ne
+# tiennent pas ensemble sur 48GB → on dedie tout le GPU a vLLM.
+# Le health endpoint ne verifie QUE vLLM (pas d'embeddings sur l'EC2).
+# ============================================================================
+
+Parameters:
+  BatchId:
+    Type: String
+    Description: Identifiant unique du batch (nom de stack)
+
+  VllmModel:
+    Type: String
+    Default: "Qwen/Qwen2.5-72B-Instruct-AWQ"
+    Description: Modele LLM principal (72B AWQ)
+
+  VllmQuantization:
+    Type: String
+    Default: "awq_marlin"
+    AllowedValues: ["awq", "awq_marlin", "gptq", "squeezellm", "none"]
+
+  VllmDtype:
+    Type: String
+    Default: "half"
+    AllowedValues: ["half", "float16", "bfloat16", "auto"]
+
+  VllmGpuMemoryUtilization:
+    Type: String
+    Default: "0.92"
+    Description: Fraction VRAM pour vLLM (TEI sorti → vLLM prend tout le L40S 48GB)
+
+  VllmMaxModelLen:
+    Type: Number
+    Default: 16384
+    Description: Context window (baisser a 12288 si OOM au chargement du 72B)
+
+  VllmMaxNumSeqs:
+    Type: Number
+    Default: 8
+    Description: Sequences paralleles (bas pour le 72B sur un seul GPU)
+
+  VllmEnablePrefixCaching:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+
+  VllmEnableChunkedPrefill:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+
+  VllmMaxNumBatchedTokens:
+    Type: Number
+    Default: 4096
+
+  VllmPort:
+    Type: Number
+    Default: 8000
+    Description: Port vLLM
+
+  SpotMaxPrice:
+    Type: String
+    Default: "2.00"
+    Description: Prix max Spot par heure (g6e.2xlarge spot ~1.1-1.25/h)
+
+  InstanceType:
+    Type: String
+    Default: "g6e.2xlarge"
+    Description: Type d'instance (g6e.2xlarge = 1x L40S 48GB)
+
+  VpcId:
+    Type: String
+    Default: ""
+
+  SubnetId:
+    Type: String
+    Default: ""
+
+  AmiId:
+    Type: String
+    Default: "ami-007f2d30360871e8a"
+    Description: AMI Golden v10 (drivers NVIDIA + Docker + patch AWQ). Le 72B sera telecharge depuis HuggingFace au boot (non present dans l'AMI).
+
+  KeyName:
+    Type: String
+    Default: "osmose-burst-key"
+
+Conditions:
+  UseDefaultVpc: !Equals [!Ref VpcId, ""]
+
+Resources:
+  # ============================================================================
+  # Security Group (vLLM + health + SSH ; pas de port embeddings sur l'EC2)
+  # ============================================================================
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "OSMOSE Burst 72B Security Group - ${BatchId}"
+      VpcId: !If [UseDefaultVpc, !Ref "AWS::NoValue", !Ref VpcId]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref VllmPort
+          ToPort: !Ref VllmPort
+          CidrIp: 0.0.0.0/0
+          Description: vLLM API (OpenAI compatible)
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+          Description: Health check endpoint
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access (debug)
+      Tags:
+        - Key: Name
+          Value: !Sub "knowwhere-burst72b-sg-${BatchId}"
+        - Key: Project
+          Value: KnowWhere
+        - Key: Component
+          Value: Burst
+
+  SpotFleetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "knowwhere-burst72b-fleet-${BatchId}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: spotfleet.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2SpotFleetTaggingRole
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "knowwhere-burst72b-instance-${BatchId}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "knowwhere-burst72b-profile-${BatchId}"
+      Roles:
+        - !Ref InstanceRole
+
+  # ============================================================================
+  # Spot Fleet - g6e (L40S 48GB) pour Qwen 72B AWQ (UNE LaunchSpec, pas de fallback)
+  # ============================================================================
+  SpotFleet:
+    Type: AWS::EC2::SpotFleet
+    Properties:
+      SpotFleetRequestConfigData:
+        IamFleetRole: !GetAtt SpotFleetRole.Arn
+        TargetCapacity: 1
+        AllocationStrategy: priceCapacityOptimized
+        Type: maintain
+        TerminateInstancesWithExpiration: true
+        SpotPrice: !Ref SpotMaxPrice
+        ReplaceUnhealthyInstances: true
+
+        LaunchSpecifications:
+          - InstanceType: !Ref InstanceType
+            ImageId: !Ref AmiId
+            KeyName: !Ref KeyName
+            # 72B telecharge depuis HF (~41GB) → volume genereux
+            BlockDeviceMappings:
+              - DeviceName: /dev/sda1
+                Ebs:
+                  VolumeSize: 250
+                  VolumeType: gp3
+                  DeleteOnTermination: true
+            NetworkInterfaces:
+              - DeviceIndex: 0
+                SubnetId: subnet-3320d458
+                Groups:
+                  - !GetAtt SecurityGroup.GroupId
+                AssociatePublicIpAddress: true
+                DeleteOnTermination: true
+            IamInstanceProfile:
+              Arn: !GetAtt InstanceProfile.Arn
+            TagSpecifications:
+              - ResourceType: instance
+                Tags:
+                  - Key: Name
+                    Value: !Sub "knowwhere-burst72b-${BatchId}"
+                  - Key: Project
+                    Value: KnowWhere
+                  - Key: Component
+                    Value: Burst
+                  - Key: BatchId
+                    Value: !Ref BatchId
+                  - Key: Model
+                    Value: !Ref VllmModel
+            UserData:
+              Fn::Base64: !Sub |
+                #!/bin/bash
+                set -ex
+
+                # ============================================
+                # OSMOSE Burst 72B Bootstrap (vLLM seul, sans TEI)
+                # Deep Learning AMI - Drivers deja installes
+                # ============================================
+                exec > >(tee /var/log/user-data.log) 2>&1
+                echo "=== OSMOSE Burst 72B Bootstrap ==="
+                echo "Starting at $(date)"
+                echo "Instance type: $(curl -s http://169.254.169.254/latest/meta-data/instance-type)"
+
+                # Variables
+                VLLM_MODEL="${VllmModel}"
+                VLLM_PORT="${VllmPort}"
+                VLLM_QUANTIZATION="${VllmQuantization}"
+                VLLM_DTYPE="${VllmDtype}"
+                VLLM_GPU_MEM="${VllmGpuMemoryUtilization}"
+                VLLM_MAX_MODEL_LEN="${VllmMaxModelLen}"
+                VLLM_MAX_NUM_SEQS="${VllmMaxNumSeqs}"
+                VLLM_ENABLE_PREFIX_CACHING="${VllmEnablePrefixCaching}"
+                VLLM_ENABLE_CHUNKED_PREFILL="${VllmEnableChunkedPrefill}"
+                VLLM_MAX_NUM_BATCHED_TOKENS="${VllmMaxNumBatchedTokens}"
+
+                # ============================================
+                # Docker Setup (DLAMI a Docker preinstalle)
+                # ============================================
+                echo "Setting up Docker..."
+                if ! command -v docker &> /dev/null; then
+                    apt-get update && apt-get install -y docker.io
+                fi
+                systemctl start docker
+                systemctl enable docker
+
+                if ! command -v nvidia-container-toolkit &> /dev/null; then
+                    echo "Installing NVIDIA Container Toolkit..."
+                    distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+                    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
+                    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
+                        tee /etc/apt/sources.list.d/nvidia-docker.list
+                    apt-get update && apt-get install -y nvidia-container-toolkit
+                    nvidia-ctk runtime configure --runtime=docker
+                    systemctl restart docker
+                fi
+
+                echo "Checking GPU..."
+                nvidia-smi
+
+                # ============================================
+                # Desactiver les services systemd de l'AMI Golden
+                # ============================================
+                echo "Disabling AMI Golden systemd services..."
+                for svc in burst-vllm burst-embeddings burst-healthcheck; do
+                    systemctl stop $svc.service 2>/dev/null || true
+                    systemctl disable $svc.service 2>/dev/null || true
+                done
+                docker rm -f vllm embeddings 2>/dev/null || true
+                echo "AMI services disabled, containers cleaned"
+
+                # ============================================
+                # Nettoyage disque agressif — l'AMI v10 (14B+TEI+caches) doit
+                # liberer de la place pour telecharger le 72B (~41GB).
+                # On garde uniquement le modele embeddings (au cas ou) + modules.
+                # ============================================
+                echo "[BURST] Disk cleanup — freeing space for 72B download..."
+                python3 << CLEANUP
+                import os, shutil
+                keep = {"intfloat--multilingual-e5-large", "modules"}
+                base = "/models"
+                if os.path.isdir(base):
+                    for d in os.listdir(base):
+                        if d in keep:
+                            print(f"[BURST]   KEEP: /models/{d}")
+                        elif os.path.isdir(f"{base}/{d}"):
+                            shutil.rmtree(f"{base}/{d}")
+                            print(f"[BURST]   DELETE: /models/{d}")
+                CLEANUP
+                docker image prune -af 2>/dev/null || true
+                echo "[BURST] Disk after cleanup:"
+                df -h / | tail -1
+
+                # ============================================
+                # Construire les arguments vLLM
+                # ============================================
+                echo "Starting vLLM server (72B)..."
+                echo "  Model: $VLLM_MODEL"
+                echo "  Quantization: $VLLM_QUANTIZATION"
+                echo "  GPU Memory: $VLLM_GPU_MEM"
+
+                # ============================================
+                # Patch AWQ Marlin pour vLLM v0.6.6 (idem profil A)
+                # ============================================
+                AWQ_PATCH_DIR="/opt/burst/patches"
+                mkdir -p $AWQ_PATCH_DIR
+                VLLM_IMAGE="vllm/vllm-openai:v0.6.6.post1"
+                AWQ_MARLIN_PATH="/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py"
+
+                docker create --name vllm-patch-temp $VLLM_IMAGE 2>/dev/null
+                docker cp vllm-patch-temp:$AWQ_MARLIN_PATH $AWQ_PATCH_DIR/awq_marlin.py
+                docker rm vllm-patch-temp
+
+                python3 << 'AWQ_PATCH'
+                path = "/opt/burst/patches/awq_marlin.py"
+                with open(path) as f:
+                    code = f.read()
+                old = 'or user_quant == "awq_marlin")'
+                new = 'or user_quant == "awq_marlin"\n                            or user_quant == "awq")'
+                if old in code and 'or user_quant == "awq")' not in code:
+                    with open(path, 'w') as f:
+                        f.write(code.replace(old, new))
+                    print("[BURST] Patched awq_marlin.py for Marlin kernel activation")
+                else:
+                    print("[BURST] awq_marlin.py already patched or not needed")
+                AWQ_PATCH
+
+                # Le 72B n'est pas dans l'AMI → download HuggingFace (cache /models)
+                VLLM_MODEL_PATH="/models/$(echo $VLLM_MODEL | sed 's|/|--|g')"
+                if [ -f "$VLLM_MODEL_PATH/config.json" ]; then
+                    echo "[BURST] Local model cache found at $VLLM_MODEL_PATH"
+                    VLLM_MODEL_ARG="/model"
+                    VLLM_MODEL_MOUNT="-v $VLLM_MODEL_PATH:/model:ro"
+                else
+                    echo "[BURST] No local cache — vLLM downloads from HuggingFace: $VLLM_MODEL (~41GB)"
+                    VLLM_MODEL_ARG="$VLLM_MODEL"
+                    VLLM_MODEL_MOUNT="-v /models:/root/.cache/huggingface"
+                fi
+
+                docker rm -f vllm 2>/dev/null || true
+
+                VLLM_EXTRA_ARGS=""
+                if [ "$VLLM_ENABLE_PREFIX_CACHING" = "true" ]; then
+                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-prefix-caching"
+                fi
+                if [ "$VLLM_ENABLE_CHUNKED_PREFILL" = "true" ]; then
+                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-chunked-prefill --max-num-batched-tokens $VLLM_MAX_NUM_BATCHED_TOKENS"
+                fi
+                TOOL_CALL_PARSER="${!VLLM_TOOL_CALL_PARSER:-hermes}"
+                VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-auto-tool-choice --tool-call-parser $TOOL_CALL_PARSER"
+
+                echo "Waiting for GPU memory cleanup..."
+                sleep 5
+
+                docker run -d --gpus all --restart unless-stopped \
+                    -p $VLLM_PORT:8000 --name vllm \
+                    $VLLM_MODEL_MOUNT \
+                    -v $AWQ_PATCH_DIR/awq_marlin.py:$AWQ_MARLIN_PATH:ro \
+                    $VLLM_IMAGE \
+                    --model $VLLM_MODEL_ARG \
+                    --quantization $VLLM_QUANTIZATION \
+                    --dtype $VLLM_DTYPE \
+                    --gpu-memory-utilization $VLLM_GPU_MEM \
+                    --max-model-len $VLLM_MAX_MODEL_LEN \
+                    --max-num-seqs $VLLM_MAX_NUM_SEQS \
+                    --trust-remote-code \
+                    $VLLM_EXTRA_ARGS
+
+                # ============================================
+                # Health Check Endpoint (vLLM SEUL — pas de TEI sur cet EC2)
+                # ============================================
+                echo "Creating health check endpoint (vLLM-only)..."
+                cat > /opt/health.py << 'HEALTHEOF'
+                #!/usr/bin/env python3
+                """Health endpoint OSMOSE Burst 72B — verifie vLLM uniquement."""
+                from http.server import HTTPServer, BaseHTTPRequestHandler
+                import json
+                import urllib.request
+                import urllib.error
+                import os
+
+                VLLM_PORT = int(os.environ.get("VLLM_PORT", 8000))
+                METADATA_URL = "http://169.254.169.254/latest/meta-data/spot/instance-action"
+
+                class HealthHandler(BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        vllm_ok = False
+                        vllm_msg = "not checked"
+                        spot_interruption = None
+                        try:
+                            resp = urllib.request.urlopen(
+                                f"http://localhost:{VLLM_PORT}/health", timeout=10
+                            )
+                            vllm_ok = resp.status == 200
+                            vllm_msg = "ready" if vllm_ok else f"status {resp.status}"
+                        except urllib.error.URLError as e:
+                            vllm_msg = f"connection error: {e.reason}"
+                        except Exception as e:
+                            vllm_msg = f"error: {str(e)}"
+
+                        try:
+                            resp = urllib.request.urlopen(METADATA_URL, timeout=2)
+                            if resp.status == 200:
+                                spot_interruption = json.loads(resp.read().decode())
+                        except urllib.error.HTTPError as e:
+                            if e.code != 404:
+                                print(f"Spot metadata error: {e.code}")
+                        except Exception:
+                            pass
+
+                        status = {
+                            "vllm": {"healthy": vllm_ok, "message": vllm_msg},
+                            "embeddings": {"healthy": True, "message": "disabled (local GPU)"},
+                            "healthy": vllm_ok,
+                            "spot_interruption": spot_interruption
+                        }
+                        self.send_response(200 if status["healthy"] else 503)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(json.dumps(status, indent=2).encode())
+
+                    def log_message(self, format, *args):
+                        print(f"Health check: {args[0]}")
+
+                if __name__ == "__main__":
+                    print(f"Health endpoint (vLLM-only) starting on port 8080...")
+                    server = HTTPServer(("", 8080), HealthHandler)
+                    server.serve_forever()
+                HEALTHEOF
+
+                chmod +x /opt/health.py
+                VLLM_PORT=$VLLM_PORT nohup python3 /opt/health.py > /var/log/health.log 2>&1 &
+
+                echo "Waiting for vLLM (72B download peut prendre 5-15 min)..."
+                sleep 30
+                docker ps -a
+                docker logs vllm --tail 20 || true
+
+                echo "=== Bootstrap 72B complete at $(date) ==="
+                echo "vLLM: http://localhost:$VLLM_PORT"
+                echo "Embeddings: GPU LOCAL (pas sur cet EC2)"
+                echo "Health: http://localhost:8080"
+
+# ============================================================================
+# Outputs
+# ============================================================================
+Outputs:
+  SpotFleetId:
+    Description: ID du Spot Fleet
+    Value: !Ref SpotFleet
+
+  StackName:
+    Description: Nom de la stack
+    Value: !Ref "AWS::StackName"
