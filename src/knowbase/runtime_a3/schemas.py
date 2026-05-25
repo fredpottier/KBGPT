@@ -307,6 +307,27 @@ class RelationSummary(BaseModel):
     detected_at: Optional[datetime] = None
 
 
+class ProcedureChainSummary(BaseModel):
+    """Vue compacte d'une :Procedure et sa séquence ordonnée (Phase B, P1.5).
+
+    Chargée en side-effect post-retrieval pour tout claim retrouvé portant un
+    procedure_id (cf ADR_PHASE_B §10). Donne à Synthesize la chaîne complète
+    (étapes ordonnées + prérequis + résultat) pour répondre aux questions
+    multi_hop/procédurales sans dépendre du retrieval de chaque étape isolée.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    procedure_id: str
+    name: Optional[str] = None
+    goal: Optional[str] = None
+    # Étapes ordonnées : [{"order": int, "action": str}]
+    ordered_steps: List[Dict[str, Any]] = Field(default_factory=list)
+    prerequisites: List[str] = Field(default_factory=list)
+    # claim_ids retrouvés qui appartiennent à cette procédure (points d'entrée)
+    entry_claim_ids: List[str] = Field(default_factory=list)
+
+
 class ToolResult(BaseModel):
     """Résultat d'un ToolCall (cf ADR §2.3)."""
 
@@ -318,6 +339,7 @@ class ToolResult(BaseModel):
     sections: List[SectionSummary] = Field(default_factory=list)
     conflict_pendings: List[ConflictPendingSummary] = Field(default_factory=list)
     relations_traced: List[RelationSummary] = Field(default_factory=list)
+    procedure_chains: List[ProcedureChainSummary] = Field(default_factory=list)
     coverage_signal: CoverageSignal = "empty"
     duration_s: float = Field(default=0.0, ge=0.0)
     error: Optional[str] = None

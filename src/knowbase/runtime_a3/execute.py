@@ -28,6 +28,7 @@ from knowbase.runtime_a3.schemas import (
     ParseOutput,
     PlanOutput,
     PredicateResolverResult,
+    ProcedureChainSummary,
     RelationSummary,
     ResolverResult,
     SectionSummary,
@@ -184,6 +185,24 @@ WHERE cp.resolution_status = 'unresolved'
   }
 MATCH (cp)-[:INVOLVES]->(involved:Claim)
 RETURN cp, collect(involved.claim_id) AS involved_claim_ids
+"""
+
+# Phase B (P1.5) — chaîne procédurale. Pour les claims retrouvés portant un
+# procedure_id, récupère la :Procedure + séquence ordonnée de :ProcedureStep
+# (autoritative) + prérequis. Les entry_claim_ids = claims retrouvés membres.
+CYPHER_PROCEDURE_CHAIN = """
+MATCH (c:Claim)
+WHERE c.claim_id IN $returned_claim_ids AND c.procedure_id IS NOT NULL
+WITH collect(DISTINCT c.procedure_id) AS proc_ids
+UNWIND proc_ids AS pid
+MATCH (p:Procedure {procedure_id: pid})
+OPTIONAL MATCH (p)-[hs:HAS_STEP]->(s:ProcedureStep)
+WITH p, pid, s ORDER BY coalesce(s.step_number, hs.order)
+WITH p, pid, collect(DISTINCT {order: coalesce(s.step_number, 0), action: s.action}) AS steps
+OPTIONAL MATCH (entry:Claim {procedure_id: pid})
+WHERE entry.claim_id IN $returned_claim_ids
+RETURN p, pid AS procedure_id, steps,
+       collect(DISTINCT entry.claim_id) AS entry_claim_ids
 """
 
 # Section embeddings collection (par défaut)
@@ -491,6 +510,11 @@ class Executor:
         # 2) Side-effect §2.6 : charger les :ConflictPending adjacents aux claims retournés
         self._attach_conflict_pendings(results, parse_input.tenant_id)
 
+        # 3) Side-effect Phase B (P1.5) : charger la chaîne procédurale complète
+        # pour les claims retrouvés membres d'une :Procedure (toggle, off défaut).
+        if os.getenv("V6_PROCEDURE_CHAIN", "0") == "1":
+            self._attach_procedure_chains(results, parse_input.tenant_id)
+
         return ExecuteOutput(
             results=results,
             total_duration_s=time.perf_counter() - t0,
@@ -705,7 +729,7 @@ class Executor:
 
         Pattern Direct Fact Retrieval (arxiv 2305.12416). Élimine 2 maillons fragiles
         (SubjectResolver + PredicateResolver). Domain-agnostic : embedding cosine
-        fonctionne identiquement sur médical, réglementaire, aerospace.
+        fonctionne identiquement quel que soit le domaine du corpus.
         """
         query_text = (params.get("query_text") or "").strip()
         if not query_text:
@@ -970,6 +994,84 @@ class Executor:
                         continue
                     seen_cp_ids.add(cp.conflict_id)
                     r.conflict_pendings.append(cp)
+
+    # ------------------------------------------------------------------
+    # Procedure chain side-effect (Phase B, P1.5)
+    # ------------------------------------------------------------------
+
+    def _attach_procedure_chains(
+        self,
+        results: List[ToolResult],
+        tenant_id: str,
+    ) -> None:
+        """Charge la chaîne procédurale des claims retrouvés membres d'une Procedure.
+
+        Pour tout claim retrouvé avec procedure_id, récupère la :Procedure +
+        sa séquence ordonnée de :ProcedureStep (autoritative) + prérequis, et
+        l'attache au ToolResult contenant un claim de cette procédure.
+        """
+        all_claim_ids = set()
+        for r in results:
+            for c in r.claims:
+                if c.claim_id:
+                    all_claim_ids.add(c.claim_id)
+        if not all_claim_ids:
+            return
+
+        try:
+            rows = self._get_neo4j().execute_query(
+                CYPHER_PROCEDURE_CHAIN,
+                returned_claim_ids=list(all_claim_ids),
+            )
+        except Exception:
+            logger.exception("execute: procedure_chain lookup failed (non-fatal)")
+            return
+
+        # Map: procedure_id → summary + son ensemble d'entry_claim_ids
+        chains: Dict[str, ProcedureChainSummary] = {}
+        for row in rows:
+            pid = row.get("procedure_id")
+            if not pid:
+                continue
+            p_node = row.get("p") or {}
+            p_get = p_node.get if hasattr(p_node, "get") else (lambda *_: None)
+            # Étapes ordonnées (filtre les steps vides)
+            ordered_steps = []
+            for s in row.get("steps", []) or []:
+                if not isinstance(s, dict):
+                    continue
+                action = s.get("action")
+                if not action:
+                    continue
+                ordered_steps.append({"order": int(s.get("order") or 0), "action": action})
+            ordered_steps.sort(key=lambda x: x["order"])
+            prereqs = p_get("prerequisites") or []
+            entry_ids = [str(x) for x in (row.get("entry_claim_ids", []) or []) if x]
+            chains[pid] = ProcedureChainSummary(
+                procedure_id=str(pid),
+                name=p_get("name"),
+                goal=p_get("goal"),
+                ordered_steps=ordered_steps,
+                prerequisites=[str(x) for x in prereqs if x],
+                entry_claim_ids=entry_ids,
+            )
+
+        if not chains:
+            return
+
+        # claim_id → procedure_id (pour attacher au bon ToolResult)
+        claim_to_proc: Dict[str, str] = {}
+        for pid, chain in chains.items():
+            for cid in chain.entry_claim_ids:
+                claim_to_proc[cid] = pid
+
+        for r in results:
+            seen_pids: set = set()
+            for c in r.claims:
+                pid = claim_to_proc.get(c.claim_id)
+                if pid and pid not in seen_pids:
+                    seen_pids.add(pid)
+                    r.procedure_chains.append(chains[pid])
 
     # ------------------------------------------------------------------
     # Parsing utilities

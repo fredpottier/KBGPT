@@ -443,6 +443,106 @@ class TestConflictPendingSideEffect:
 
 
 # ============================================================================
+# Procedure chain side-effect (Phase B, P1.5)
+# ============================================================================
+
+
+class TestProcedureChainSideEffect:
+    def _run(self, monkeypatch, claim_rows, proc_rows):
+        from knowbase.runtime_a3.execute import CYPHER_PROCEDURE_CHAIN  # noqa: F401
+        monkeypatch.setenv("V6_PROCEDURE_CHAIN", "1")
+        neo4j_mock = MagicMock()
+
+        def execute_query(query: str, **params):
+            if "p:Procedure" in query:
+                return proc_rows(params)
+            if "MATCH (c:Claim" in query:
+                return claim_rows
+            return []
+
+        neo4j_mock.execute_query.side_effect = execute_query
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False,
+                      predicate_resolver_enabled=False)
+        pi = _make_parse_input()
+        po = _make_parse_output(sub_goals=[SubGoal(kind="fact_lookup", subject_canonical="X")])
+        plan_out = plan(pi, po)
+        return execute(pi, po, plan_out, executor=ex)
+
+    def test_procedure_chain_attached(self, monkeypatch):
+        claim_rows = [
+            {"c": _claim_node("clm_001", procedure_id="proc_a"), "sections": []},
+            {"c": _claim_node("clm_002", procedure_id="proc_a"), "sections": []},
+        ]
+
+        def proc_rows(params):
+            ids = params.get("returned_claim_ids", [])
+            assert "clm_001" in ids
+            return [{
+                "p": {"name": "Enable SSO", "goal": "SSO active", "prerequisites": ["admin rights"]},
+                "procedure_id": "proc_a",
+                "steps": [
+                    {"order": 2, "action": "Activate SAML trust"},
+                    {"order": 1, "action": "Configure IdP"},
+                    {"order": 3, "action": ""},  # filtré (action vide)
+                ],
+                "entry_claim_ids": ["clm_001", "clm_002"],
+            }]
+
+        result = self._run(monkeypatch, claim_rows, proc_rows)
+        chains = result.results[0].procedure_chains
+        assert len(chains) == 1
+        pc = chains[0]
+        assert pc.procedure_id == "proc_a"
+        assert pc.name == "Enable SSO"
+        # steps triés par order, action vide filtrée
+        assert [s["action"] for s in pc.ordered_steps] == ["Configure IdP", "Activate SAML trust"]
+        assert pc.prerequisites == ["admin rights"]
+
+    def test_procedure_chain_toggle_off_by_default(self, monkeypatch):
+        monkeypatch.delenv("V6_PROCEDURE_CHAIN", raising=False)
+        neo4j_mock = MagicMock()
+        queried = {"proc": False}
+
+        def execute_query(query: str, **params):
+            if "p:Procedure" in query:
+                queried["proc"] = True
+            if "MATCH (c:Claim" in query:
+                return [{"c": _claim_node("clm_001", procedure_id="proc_a"), "sections": []}]
+            return []
+
+        neo4j_mock.execute_query.side_effect = execute_query
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False,
+                      predicate_resolver_enabled=False)
+        pi = _make_parse_input()
+        po = _make_parse_output(sub_goals=[SubGoal(kind="fact_lookup", subject_canonical="X")])
+        plan_out = plan(pi, po)
+        result = execute(pi, po, plan_out, executor=ex)
+        assert queried["proc"] is False  # pas de lookup si toggle off
+        assert result.results[0].procedure_chains == []
+
+    def test_procedure_chain_failure_non_fatal(self, monkeypatch):
+        monkeypatch.setenv("V6_PROCEDURE_CHAIN", "1")
+        neo4j_mock = MagicMock()
+
+        def execute_query(query: str, **params):
+            if "p:Procedure" in query:
+                raise Exception("Boom")
+            if "MATCH (c:Claim" in query:
+                return [{"c": _claim_node("clm_001", procedure_id="proc_a"), "sections": []}]
+            return []
+
+        neo4j_mock.execute_query.side_effect = execute_query
+        ex = Executor(neo4j_client=neo4j_mock, subject_resolver_enabled=False,
+                      predicate_resolver_enabled=False)
+        pi = _make_parse_input()
+        po = _make_parse_output(sub_goals=[SubGoal(kind="fact_lookup", subject_canonical="X")])
+        plan_out = plan(pi, po)
+        result = execute(pi, po, plan_out, executor=ex)
+        assert result.results[0].procedure_chains == []
+        assert result.results[0].error is None
+
+
+# ============================================================================
 # qdrant_sections (fallback)
 # ============================================================================
 

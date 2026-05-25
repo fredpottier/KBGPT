@@ -91,6 +91,12 @@ RULES (NON-NEGOTIABLE):
   covered".
 - If :ConflictPending exist on the topic, expose both/all versions in
   `conflict_pending_warning` AND in answer_text under "⚠ Conflicting sources".
+- If `procedure_chains` are present (a step-by-step sequence with a goal and
+  ordered steps), and the question asks HOW to do something, the next/previous
+  step, or prerequisites, use the ordered_steps + prerequisites to structure the
+  answer. The cited claims remain the evidence; the chain provides ordering and
+  completeness. Still cite the underlying claims; do not invent steps absent
+  from the chain.
 - For ABSTENTION mode: produce a short motivated message explaining why the
   corpus cannot answer. Empty cited_claims is expected.
 
@@ -187,6 +193,25 @@ def _aggregate_conflict_pending_summaries(execute_output: ExecuteOutput) -> List
     return out
 
 
+def _aggregate_procedure_chains(execute_output: ExecuteOutput) -> List[Dict[str, Any]]:
+    """Agrège les chaînes procédurales dédupliquées (par procedure_id, Phase B P1.5)."""
+    seen: Set[str] = set()
+    out: List[Dict[str, Any]] = []
+    for r in execute_output.results:
+        for pc in getattr(r, "procedure_chains", []) or []:
+            if pc.procedure_id in seen:
+                continue
+            seen.add(pc.procedure_id)
+            out.append({
+                "procedure_id": pc.procedure_id,
+                "name": pc.name,
+                "goal": pc.goal,
+                "ordered_steps": pc.ordered_steps,
+                "prerequisites": pc.prerequisites,
+            })
+    return out
+
+
 def _serialize_input(
     inp: SynthesizeInput,
     override_claims: Optional[List[ClaimSummary]] = None,
@@ -228,6 +253,7 @@ def _serialize_input(
         })
 
     cps = _aggregate_conflict_pending_summaries(inp.execute_output)
+    procedure_chains = _aggregate_procedure_chains(inp.execute_output)
 
     sub_goals_payload = []
     for idx, sg in enumerate(inp.parse_output.sub_goals):
@@ -249,6 +275,7 @@ def _serialize_input(
         "uncovered_sub_goals": inp.evaluate_output.uncovered_sub_goals,
         "claims": claims_payload,
         "conflict_pendings": cps,
+        "procedure_chains": procedure_chains,
     }
     return (
         "USER INPUT (JSON):\n"
