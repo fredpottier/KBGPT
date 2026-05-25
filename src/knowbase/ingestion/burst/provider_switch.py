@@ -926,6 +926,17 @@ def start_local_tei(
 
     hf_cache_host = os.getenv("HF_CACHE_HOST_PATH", "/c/Users/fredp/.cache/huggingface")
     docker_network = os.getenv("DOCKER_NETWORK", "knowbase_network")
+    image = "ghcr.io/huggingface/text-embeddings-inference:1.5"
+
+    # Pré-pull de l'image (le 1er pull ~2-3GB dépasse le timeout du run -d, qui
+    # bloque tant que l'image n'est pas locale). Idempotent + timeout généreux.
+    try:
+        logger.info(f"[BURST:LOCAL] Pulling TEI image {image} (1er lancement : quelques min)...")
+        pull = subprocess.run(["docker", "pull", image], capture_output=True, text=True, timeout=1200)
+        if pull.returncode != 0:
+            logger.warning(f"[BURST:LOCAL] docker pull TEI rc={pull.returncode}: {pull.stderr[:300]}")
+    except Exception as e:
+        logger.warning(f"[BURST:LOCAL] docker pull TEI timeout/exception (on tente le run): {e}")
 
     cmd = [
         "docker", "run", "-d",
@@ -934,14 +945,15 @@ def start_local_tei(
         "--network", docker_network,
         "-p", f"{port}:80",
         "-v", f"{hf_cache_host}:/data",
-        "ghcr.io/huggingface/text-embeddings-inference:1.5",
+        image,
         "--model-id", model,
         "--dtype", "float16",
         "--port", "80",
     ]
 
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        # Image désormais locale → le run -d détache vite ; marge quand même.
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if proc.returncode != 0:
             result["error"] = f"Docker run failed: {proc.stderr[:300]}"
             return result

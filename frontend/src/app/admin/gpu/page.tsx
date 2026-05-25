@@ -827,10 +827,14 @@ export default function GpuAdminPage() {
             value={selectedProfile}
             onChange={(e) => setSelectedProfile(e.target.value)}
             isDisabled={isActive && !isStarting}
-            maxW="240px"
-            bg="whiteAlpha.100"
-            borderColor="whiteAlpha.200"
-            color="white"
+            maxW="260px"
+            bg="white"
+            color="gray.800"
+            borderColor="#6366F1"
+            borderWidth="1px"
+            fontWeight="medium"
+            _hover={{ borderColor: '#818CF8' }}
+            sx={{ '& option': { color: '#1a202c', background: '#ffffff' } }}
           >
             {(burstProfiles?.profiles || [{ id: 'profile_a', label: 'g6 · 14B + TEI EC2' }]).map((p: any) => (
               <option key={p.id} value={p.id} style={{ color: '#000' }}>
