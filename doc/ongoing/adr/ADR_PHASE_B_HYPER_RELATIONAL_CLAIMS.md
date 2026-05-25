@@ -146,6 +146,25 @@ Mais les chaînes procédurales (STEP_OF) ne donneront leur plein effet multi_ho
 
 → **Recommandation** : après P1.5, enchaîner Phase 3 `procedure_chain` pour récolter le gain multi_hop. Ou intégrer un mini-tool dans P1.5.
 
+## 11. Mise en œuvre (25/05/2026) — décisions d'implémentation
+
+Statut : P1.1, P1.2, P1.3, P1.5-tool **livrés et testés** (branche `feat/phase-b-augmentee`). P1.4 (ré-ingestion) + P1.2-Qwen + P1.5-bench en attente EC2 Burst.
+
+### 11.1 P1.3 — pont claim-centric (raffinement vs §3.2)
+Le matching exact étape↔claim entre deux extractions LLM indépendantes est fragile. Décision retenue (robuste) :
+- **Séquence ordonnée autoritative** = nodes `:ProcedureStep` (réutilise ProcedurePersister v6 tel quel, aucun matching requis pour l'ordre).
+- **Points d'entrée retrievables** = claims PROCEDURAL existants reliés à la `:Procedure` par recouvrement lexical (token Jaccard, seuil lenient 0.18) → set `procedure_id`/`procedure_role`/`step_index` + relation `STEP_OF`.
+- `PREREQUISITE_OF` : chaîne entre claims-étapes consécutifs (par step_index).
+- `HAS_OUTCOME` : claim décrivant le goal (best-effort).
+Module : `claimfirst/v6/procedure_linker.py`. Orchestrator Phase 6.7 (toggle `V6_PROCEDURE_EXTRACTION`, off défaut) + Phase 7.6 (persistance).
+Smoke DeepSeek-V3.1 (3 sections multi-corpus) : 3 procédures, 11 STEP_OF, 8 PREREQUISITE_OF, 1 HAS_OUTCOME.
+
+### 11.2 P1.5-tool — procedure_chain en side-effect (pas un tool Plan)
+Plutôt qu'un nouveau tool nécessitant un routing Plan, le `procedure_chain` est un **side-effect post-retrieval** (pattern `_attach_conflict_pendings`) : pour tout claim retrouvé avec `procedure_id`, charge la `:Procedure` + séquence ordonnée + prérequis et l'expose à Synthesize. Activation automatique, zéro changement de routing. Toggle `V6_PROCEDURE_CHAIN` (off défaut). Fichiers : `runtime_a3/execute.py` (`CYPHER_PROCEDURE_CHAIN`, `_attach_procedure_chains`), `schemas.py` (`ProcedureChainSummary`), `synthesize.py` (payload + guidance prompt).
+
+### 11.3 Point ouvert — LLM d'extraction procédures vs EC2
+`ProcedureExtractor` appelle DeepInfra/Together en direct (pas le router burst). Pour la ré-ingestion EC2, le volume procédures (~1 appel/section procédurale) est marginal vs l'extraction de claims. **Option 1 recommandée** : laisser les procédures sur DeepInfra. Voir `doc/ongoing/P1_4_REINGESTION_RUNBOOK.md` §3.
+
 ---
 
-*ADR produit le 2026-05-25. Audit pipeline via agent Explore. En attente validation Fred avant P1.2 (code).*
+*ADR produit le 2026-05-25. Audit pipeline via agent Explore. Validé par Fred. §11 ajouté post-implémentation P1.1-P1.5-tool.*
