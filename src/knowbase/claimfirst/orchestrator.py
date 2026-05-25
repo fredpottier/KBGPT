@@ -157,8 +157,12 @@ class ClaimFirstOrchestrator:
         )
 
         # Composants Phase 1
+        # batch_size configurable : à réduire (ex. 5) pour un LLM à petit contexte
+        # comme le 72B-AWQ sur L40S (max_model_len 4096) afin que prompt+sortie tiennent.
+        _claim_batch_size = int(os.getenv("CLAIMFIRST_BATCH_SIZE", "10"))
         self.claim_extractor = ClaimExtractor(
             llm_client,
+            batch_size=_claim_batch_size,
             canonical_predicates=self._effective_predicates,
             predicate_descriptions=self._effective_predicate_descriptions,
             predicate_normalization_map=self._effective_predicate_norm_map,
