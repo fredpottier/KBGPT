@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import uuid
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, Any
@@ -295,7 +296,11 @@ def build_claim_extraction_prompt(
 
 
 # Nombre max d'appels LLM en parallèle (évite de surcharger vLLM/OpenAI)
-MAX_CONCURRENT_LLM_CALLS = 180  # DeepInfra supporte ~200, marge de securite 10%
+# Concurrence des appels LLM d'extraction. Défaut 180 (calibré DeepInfra ~200).
+# CRITIQUE pour un LLM self-hosted à faible concurrence : le 72B-AWQ sur L40S
+# tourne à max_num_seqs=2 → 180 appels concurrents saturent la queue (timeouts).
+# Mettre CLAIMFIRST_MAX_CONCURRENT_LLM=2-4 pour la ré-ingestion 72B.
+MAX_CONCURRENT_LLM_CALLS = int(os.getenv("CLAIMFIRST_MAX_CONCURRENT_LLM", "180"))
 
 
 @dataclass
