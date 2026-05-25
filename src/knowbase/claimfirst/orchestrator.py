@@ -750,6 +750,36 @@ class ClaimFirstOrchestrator:
         question_signatures = self._extract_question_signatures(claims, doc_id, tenant_id)
         logger.info(f"  → {len(question_signatures)} QuestionSignatures extracted (Level A)")
 
+        # Phase 6.7: Extraction de procédures hyper-relationnelles (Phase B, P1.3)
+        # Désactivé par défaut — activé pour la ré-ingestion Phase B via
+        # V6_PROCEDURE_EXTRACTION=1. Coûteux (1 appel LLM par section procédurale).
+        procedures: List[Tuple[str, Any]] = []
+        step_of_links: List[Tuple[str, str, int]] = []
+        procedure_outcome_links: List[Tuple[str, str]] = []
+        if os.getenv("V6_PROCEDURE_EXTRACTION", "0") == "1":
+            logger.info("[OSMOSE:ClaimFirst] Phase 6.7: Extracting procedures (Phase B)...")
+            try:
+                from knowbase.claimfirst.v6.procedure_extractor import ProcedureExtractor
+                from knowbase.claimfirst.v6.procedure_linker import ProcedureLinker
+
+                linker = ProcedureLinker(
+                    extractor=ProcedureExtractor(),
+                    tenant_id=tenant_id,
+                )
+                link_res = linker.link(claims=claims, passages=passages, doc_id=doc_id)
+                procedures = link_res.procedures
+                step_of_links = link_res.step_of_links
+                procedure_outcome_links = link_res.outcome_links
+                relations.extend(link_res.prerequisite_relations)
+                logger.info(
+                    f"  → {len(procedures)} procedures, "
+                    f"{link_res.stats.get('step_of_links', 0)} STEP_OF, "
+                    f"{link_res.stats.get('prerequisite_of', 0)} PREREQUISITE_OF, "
+                    f"{link_res.stats.get('outcome_links', 0)} HAS_OUTCOME"
+                )
+            except Exception as exc:
+                logger.error(f"[OSMOSE:ClaimFirst] Phase 6.7 procedure extraction failed: {exc}")
+
         # Construire le résultat
         processing_time_ms = int((time.time() - start_time) * 1000)
         extractor_stats = self.claim_extractor.get_stats()
@@ -774,6 +804,9 @@ class ClaimFirstOrchestrator:
             claim_facet_links=claim_facet_links,
             claim_cluster_links=claim_cluster_links,
             claim_entity_link_methods=pack_link_methods,
+            procedures=procedures,
+            step_of_links=step_of_links,
+            procedure_outcome_links=procedure_outcome_links,
             processing_time_ms=processing_time_ms,
             llm_calls=extractor_stats.get("llm_calls", 0),
             llm_tokens_used=extractor_stats.get("tokens_used", 0),
@@ -907,6 +940,34 @@ class ClaimFirstOrchestrator:
                         f"[OSMOSE:ClaimFirst] Tension classification failed "
                         f"(non-blocking): {e}"
                     )
+
+        # Phase 7.6: Persist procédures hyper-relationnelles (Phase B, P1.3)
+        # Crée :Procedure + :ProcedureStep + STEP_OF + HAS_OUTCOME.
+        # PREREQUISITE_OF (Claim→Claim) déjà persisté via le flux relations Phase 7.
+        if self.persist_enabled and self.neo4j_driver and result.procedures:
+            try:
+                from knowbase.claimfirst.v6.procedure_persister import ProcedurePersister
+
+                logger.info("[OSMOSE:ClaimFirst] Phase 7.6: Persisting procedures...")
+                proc_persister = ProcedurePersister(
+                    self.neo4j_driver, tenant_id=result.tenant_id
+                )
+                proc_persister.persist_batch(doc_id, result.procedures)
+                link_counts = proc_persister.persist_claim_links(
+                    step_of_links=result.step_of_links,
+                    outcome_links=result.procedure_outcome_links,
+                )
+                logger.info(
+                    f"  → {proc_persister.stats.get('procedures_persisted', 0)} procedures, "
+                    f"{proc_persister.stats.get('steps_persisted', 0)} steps, "
+                    f"{link_counts.get('step_of', 0)} STEP_OF, "
+                    f"{link_counts.get('has_outcome', 0)} HAS_OUTCOME"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[OSMOSE:ClaimFirst] Phase 7.6 procedure persist failed "
+                    f"(non-blocking): {e}"
+                )
 
         # Phase 8: Persist chunks to Qdrant Layer R
         # ADR: Unite de preuve vs Unite de lecture.

@@ -348,6 +348,22 @@ class ClaimFirstResult(BaseModel):
         description="Méthode de création des liens ABOUT: {(claim_id, entity_id): method}"
     )
 
+    # Phase B (P1.3) — procédures hyper-relationnelles
+    procedures: List[Tuple[str, Any]] = Field(
+        default_factory=list,
+        description="Procédures extraites: liste de (section_id, Procedure runtime_v6)"
+    )
+
+    step_of_links: List[Tuple[str, str, int]] = Field(
+        default_factory=list,
+        description="Liens Claim → Procedure (STEP_OF): (claim_id, procedure_id, order)"
+    )
+
+    procedure_outcome_links: List[Tuple[str, str]] = Field(
+        default_factory=list,
+        description="Liens Procedure → Claim (HAS_OUTCOME): (procedure_id, claim_id)"
+    )
+
     # Statistiques
     processing_time_ms: int = Field(
         default=0,

@@ -166,6 +166,72 @@ class ProcedurePersister:
         for section_id, proc in items:
             self.persist_one(doc_id, section_id, proc, v5_section_label=v5_section_label)
 
+    # ── Phase B (P1.3) — liens Claim ↔ Procedure ────────────────────────────────
+
+    def persist_claim_links(
+        self,
+        step_of_links: list[tuple[str, str, int]],
+        outcome_links: list[tuple[str, str]],
+    ) -> dict[str, int]:
+        """Persiste les relations claim-centric Phase B (ADR §3.3).
+
+        Args:
+            step_of_links : (claim_id, procedure_id, order) — (:Claim)-[:STEP_OF]->(:Procedure)
+            outcome_links : (procedure_id, claim_id) — (:Procedure)-[:HAS_OUTCOME]->(:Claim)
+
+        Les relations PREREQUISITE_OF (Claim→Claim) sont persistées par le flux
+        relations ClaimFirst standard (générique), pas ici.
+        """
+        counts = {"step_of": 0, "has_outcome": 0, "errors": 0}
+        try:
+            with self.driver.session() as session:
+                if step_of_links:
+                    payload = [
+                        {"claim_id": cid, "procedure_id": pid, "order": order}
+                        for cid, pid, order in step_of_links
+                    ]
+                    res = session.run(
+                        """
+                        UNWIND $links AS link
+                        MATCH (c:Claim {claim_id: link.claim_id})
+                        MATCH (p:Procedure {procedure_id: link.procedure_id})
+                        MERGE (c)-[r:STEP_OF]->(p)
+                        SET r.order = link.order
+                        RETURN count(r) AS n
+                        """,
+                        links=payload,
+                    )
+                    rec = res.single()
+                    counts["step_of"] = int(rec["n"]) if rec else 0
+
+                if outcome_links:
+                    payload = [
+                        {"procedure_id": pid, "claim_id": cid}
+                        for pid, cid in outcome_links
+                    ]
+                    res = session.run(
+                        """
+                        UNWIND $links AS link
+                        MATCH (p:Procedure {procedure_id: link.procedure_id})
+                        MATCH (c:Claim {claim_id: link.claim_id})
+                        MERGE (p)-[r:HAS_OUTCOME]->(c)
+                        RETURN count(r) AS n
+                        """,
+                        links=payload,
+                    )
+                    rec = res.single()
+                    counts["has_outcome"] = int(rec["n"]) if rec else 0
+        except Exception as exc:
+            logger.error("[V6-J1] persist_claim_links failed: %s", exc)
+            counts["errors"] += 1
+            self.stats["errors"] += 1
+
+        self.stats.setdefault("step_of_links", 0)
+        self.stats.setdefault("outcome_links", 0)
+        self.stats["step_of_links"] += counts["step_of"]
+        self.stats["outcome_links"] += counts["has_outcome"]
+        return counts
+
     # ── Maintenance utilities ────────────────────────────────────────────────
 
     def delete_procedures_for_doc(
