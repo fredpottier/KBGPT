@@ -282,12 +282,14 @@ BURST_PROFILES: Dict[str, Dict[str, Any]] = {
         "spot_instance_types": ["g6e.2xlarge"],
         "vllm_model": "Qwen/Qwen2.5-72B-Instruct-AWQ",
         "embeddings_on_ec2": False,
-        # 72B-AWQ ~40GB de poids sur 48GB → KV cache résiduel étroit.
-        # Params conservateurs (enforce-eager + no chunked prefill côté template
-        # burst-spot-72b.yaml) pour éviter l'OOM au profiling/capture.
-        "vllm_gpu_memory_utilization": 0.95,
-        "vllm_max_num_seqs": 4,
-        "vllm_max_model_len": 8192,
+        # 72B-AWQ = 38.77GB de poids sur L40S (~44GB utilisable) → il ne reste
+        # que ~1.7GB de KV cache à gpu_mem 0.97 (~5500 tokens). VALIDÉ EN PROD
+        # (25/05) : gpu_mem 0.97 + max_model_len 4096 + enforce-eager + no chunked
+        # prefill → vLLM démarre et sert (9 claims vs 10 DeepSeek, 3 procedural).
+        # max_model_len 8192 échoue (KV < 8192 → ValueError au démarrage).
+        "vllm_gpu_memory_utilization": 0.97,
+        "vllm_max_num_seqs": 2,
+        "vllm_max_model_len": 4096,
         "vllm_enable_chunked_prefill": False,
         "spot_max_price": 2.00,  # g6e spot ~1.1-1.25/h, marge confortable
     },
