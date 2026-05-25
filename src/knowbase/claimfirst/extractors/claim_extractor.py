@@ -27,7 +27,13 @@ import uuid
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, Any
 
-from knowbase.claimfirst.models.claim import Claim, ClaimType, ClaimScope
+from knowbase.claimfirst.models.claim import (
+    Claim,
+    ClaimType,
+    ClaimScope,
+    ClaimQualifier,
+    QualifierType,
+)
 from knowbase.claimfirst.models.entity import is_valid_entity_name
 from knowbase.claimfirst.models.passage import Passage
 from knowbase.stratified.pass1.assertion_unit_indexer import (
@@ -147,6 +153,9 @@ Not all claims have the same value. Prioritize in this order:
     "unit_id": "U1",
     "confidence": 0.95,
     "scope": {{"version": null, "region": null, "edition": null, "conditions": []}},
+    "qualifiers": [
+      {{"qualifier_type": "condition", "value": "for enterprise customers", "confidence": 0.9}}
+    ],
     "structured_form": {{
       "subject": "Name of the subject entity",
       "predicate": "USES",
@@ -154,6 +163,25 @@ Not all claims have the same value. Prioritize in this order:
     }}
   }}
 ]
+
+## Qualifiers — conditions of applicability (IMPORTANT)
+
+A claim is often true only under certain conditions. Capture them as
+structured `qualifiers`. Each qualifier MUST be grounded in the source unit
+(appear verbatim or as a direct paraphrase) — NEVER infer one.
+
+Qualifier types (universal, valid across all domains):
+- "temporal": time bound — e.g. "since 2024", "until v2.5", "effective from the 2021 amendment"
+- "spatial": geographic/zone scope — e.g. "EU only", "on-premise deployments", "above FL250"
+- "version": product/edition/release — e.g. "release 2023", "Private Cloud edition"
+- "condition": activation condition — e.g. "if MFA is enabled", "for premium subscribers", "in adults over 65"
+- "scope_limit": scope restriction — e.g. "non-production only", "excluding renal insufficiency"
+
+Rules:
+- Add a qualifier ONLY if its value is stated in the source unit. If unsure, omit it.
+- `qualifiers` defaults to [] (empty list) when the claim is unconditional.
+- `confidence` in [0,1] reflects how explicitly the qualifier is stated.
+- Do not duplicate the same condition in both `scope` and `qualifiers`; prefer `qualifiers`.
 
 ## STRICT CONSTRAINT — structured_form predicates
 
@@ -1146,6 +1174,9 @@ Reply ONLY with a JSON array, one entry per claim:
                     "object": obj,
                 }
 
+        # Phase B (25/05/2026) : parser les qualifiers (domain-agnostic)
+        qualifiers = self._parse_qualifiers(raw.get("qualifiers"))
+
         # Générer l'ID unique
         claim_id = f"claim_{uuid.uuid4().hex[:12]}"
 
@@ -1162,7 +1193,40 @@ Reply ONLY with a JSON array, one entry per claim:
             unit_ids=[unit.unit_global_id],
             confidence=confidence,
             structured_form=structured_form,
+            qualifiers=qualifiers,
         )
+
+    @staticmethod
+    def _parse_qualifiers(quals_raw: Any) -> List[ClaimQualifier]:
+        """Parse la liste de qualifiers de la sortie LLM (Phase B, tolérant).
+
+        Filtre les entrées mal formées ou de type inconnu plutôt que d'échouer.
+        Domain-agnostic : les 5 types sont universels (cf QualifierType).
+        """
+        if not isinstance(quals_raw, list):
+            return []
+        result: List[ClaimQualifier] = []
+        for q in quals_raw:
+            if not isinstance(q, dict):
+                continue
+            qtype = str(q.get("qualifier_type", "")).strip().lower()
+            value = str(q.get("value", "")).strip()
+            if not qtype or not value:
+                continue
+            try:
+                qtype_enum = QualifierType(qtype)
+            except ValueError:
+                # Type hors whitelist → on ignore (pas d'invention de type)
+                continue
+            try:
+                conf = float(q.get("confidence", 1.0))
+            except (TypeError, ValueError):
+                conf = 1.0
+            conf = max(0.0, min(1.0, conf))
+            result.append(
+                ClaimQualifier(qualifier_type=qtype_enum, value=value, confidence=conf)
+            )
+        return result
 
     def get_stats(self) -> dict:
         """Retourne les statistiques d'extraction."""

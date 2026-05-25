@@ -40,6 +40,52 @@ class TestClaimExtractor:
         assert "FACTUAL" in prompt
         assert "PRESCRIPTIVE" in prompt
 
+    def test_prompt_includes_qualifiers_section(self):
+        """Phase B: le prompt demande les qualifiers (domain-agnostic)."""
+        prompt = build_claim_extraction_prompt(
+            units_text="U1: Since 2024, MFA is required for RISE customers.",
+            doc_title="Security Guide",
+            doc_type="technical",
+        )
+        assert "qualifiers" in prompt.lower()
+        # 5 types universels présents
+        for qtype in ("temporal", "spatial", "version", "condition", "scope_limit"):
+            assert qtype in prompt
+        # Domain-agnostic : exemples médical/légal dans le prompt
+        assert "over 65" in prompt or "renal" in prompt or "amendment" in prompt
+
+    def test_parse_qualifiers_valid(self):
+        """Parsing tolérant des qualifiers LLM bien formés."""
+        from knowbase.claimfirst.models.claim import QualifierType
+        quals = ClaimExtractor._parse_qualifiers([
+            {"qualifier_type": "temporal", "value": "since 2024", "confidence": 0.9},
+            {"qualifier_type": "CONDITION", "value": "for RISE customers"},  # casse + défaut conf
+        ])
+        assert len(quals) == 2
+        assert quals[0].qualifier_type == QualifierType.TEMPORAL
+        assert quals[0].confidence == 0.9
+        assert quals[1].qualifier_type == QualifierType.CONDITION
+        assert quals[1].confidence == 1.0
+
+    def test_parse_qualifiers_filters_malformed(self):
+        """Entrées mal formées / type inconnu filtrées sans exception."""
+        quals = ClaimExtractor._parse_qualifiers([
+            {"qualifier_type": "temporal", "value": ""},        # value vide
+            {"qualifier_type": "unknown_type", "value": "x"},   # type hors whitelist
+            {"value": "no type"},                               # type manquant
+            "not a dict",                                        # mauvais format
+            {"qualifier_type": "version", "value": "v2.5", "confidence": 9.0},  # conf hors borne
+        ])
+        assert len(quals) == 1
+        assert quals[0].value == "v2.5"
+        assert quals[0].confidence == 1.0  # clampé
+
+    def test_parse_qualifiers_non_list(self):
+        """qualifiers absent ou non-liste → liste vide."""
+        assert ClaimExtractor._parse_qualifiers(None) == []
+        assert ClaimExtractor._parse_qualifiers("foo") == []
+        assert ClaimExtractor._parse_qualifiers({}) == []
+
     def test_extractor_initialization(self):
         """Test extractor initialization."""
         mock_llm = MockLLMClient()
