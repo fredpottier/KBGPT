@@ -278,13 +278,17 @@ BURST_PROFILES: Dict[str, Dict[str, Any]] = {
         "spot_max_price": 1.50,
     },
     "profile_b": {
-        "label": "Qwen 72B + TEI local (g6e · L40S 48GB)",
+        "label": "Qwen 72B + embeddings local (g6e · L40S 48GB)",
         "spot_instance_types": ["g6e.2xlarge"],
         "vllm_model": "Qwen/Qwen2.5-72B-Instruct-AWQ",
         "embeddings_on_ec2": False,
-        "vllm_gpu_memory_utilization": 0.92,
-        "vllm_max_num_seqs": 8,
-        "vllm_max_model_len": 16384,
+        # 72B-AWQ ~40GB de poids sur 48GB → KV cache résiduel étroit.
+        # Params conservateurs (enforce-eager + no chunked prefill côté template
+        # burst-spot-72b.yaml) pour éviter l'OOM au profiling/capture.
+        "vllm_gpu_memory_utilization": 0.95,
+        "vllm_max_num_seqs": 4,
+        "vllm_max_model_len": 8192,
+        "vllm_enable_chunked_prefill": False,
         "spot_max_price": 2.00,  # g6e spot ~1.1-1.25/h, marge confortable
     },
 }
@@ -491,4 +495,6 @@ class BurstConfig:
         config.vllm_max_num_seqs = int(preset["vllm_max_num_seqs"])
         config.vllm_max_model_len = int(preset["vllm_max_model_len"])
         config.spot_max_price = float(preset["spot_max_price"])
+        if "vllm_enable_chunked_prefill" in preset:
+            config.vllm_enable_chunked_prefill = bool(preset["vllm_enable_chunked_prefill"])
         return config

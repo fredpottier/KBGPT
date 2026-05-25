@@ -377,6 +377,7 @@ Resources:
                     --max-model-len $VLLM_MAX_MODEL_LEN \
                     --max-num-seqs $VLLM_MAX_NUM_SEQS \
                     --trust-remote-code \
+                    --enforce-eager \
                     $VLLM_EXTRA_ARGS
 
                 # ============================================
