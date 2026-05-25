@@ -121,7 +121,7 @@ Resources:
           Description: SSH access (debug)
       Tags:
         - Key: Name
-          Value: !Sub "knowwhere-burst72b-sg-${BatchId}"
+          Value: !Sub "knowwhere-burst-sg-${BatchId}"
         - Key: Project
           Value: KnowWhere
         - Key: Component
@@ -130,7 +130,7 @@ Resources:
   SpotFleetRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "knowwhere-burst72b-fleet-${BatchId}"
+      RoleName: !Sub "knowwhere-burst-fleet-${BatchId}"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -144,7 +144,7 @@ Resources:
   InstanceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "knowwhere-burst72b-instance-${BatchId}"
+      RoleName: !Sub "knowwhere-burst-instance-${BatchId}"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -169,7 +169,7 @@ Resources:
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      InstanceProfileName: !Sub "knowwhere-burst72b-profile-${BatchId}"
+      InstanceProfileName: !Sub "knowwhere-burst-profile-${BatchId}"
       Roles:
         - !Ref InstanceRole
 
@@ -212,7 +212,7 @@ Resources:
               - ResourceType: instance
                 Tags:
                   - Key: Name
-                    Value: !Sub "knowwhere-burst72b-${BatchId}"
+                    Value: !Sub "knowwhere-burst-${BatchId}"
                   - Key: Project
                     Value: KnowWhere
                   - Key: Component

@@ -27,6 +27,7 @@ import {
   MenuItem,
   Collapse,
   useDisclosure,
+  Select,
 } from '@chakra-ui/react'
 import { ChevronDownIcon, ChevronUpIcon } from '@chakra-ui/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -494,13 +495,25 @@ export default function GpuAdminPage() {
   // Uptime temps réel
   const realUptimeSeconds = useInstanceUptime(instanceDetails?.launch_time || null)
 
+  // Phase B : sélecteur de profil burst (A=g6+14B+TEI EC2 / B=g6e+72B+TEI local)
+  const [selectedProfile, setSelectedProfile] = useState<string>('profile_a')
+  const { data: burstProfiles } = useQuery({
+    queryKey: ['burst-profiles'],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/api/burst/profiles`, { headers: getAuthHeaders() })
+      if (!res.ok) return { profiles: [], default: 'profile_a' }
+      return res.json()
+    },
+    staleTime: 300000,
+  })
+
   // Mutations
   const startMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch(`${API_BASE_URL}/api/burst/start-standalone`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({}),
+        body: JSON.stringify({ profile: selectedProfile }),
       })
       if (!res.ok) throw new Error((await res.json()).detail || 'Failed')
       return res.json()
@@ -802,6 +815,31 @@ export default function GpuAdminPage() {
         bg="whiteAlpha.50" rounded="lg" p={2}
         border="1px solid" borderColor="whiteAlpha.100"
       >
+        <Tooltip
+          label={
+            (burstProfiles?.profiles || []).find((p: any) => p.id === selectedProfile)?.label
+            || 'Profil burst'
+          }
+          placement="top"
+        >
+          <Select
+            size="sm"
+            value={selectedProfile}
+            onChange={(e) => setSelectedProfile(e.target.value)}
+            isDisabled={isActive && !isStarting}
+            maxW="240px"
+            bg="whiteAlpha.100"
+            borderColor="whiteAlpha.200"
+            color="white"
+          >
+            {(burstProfiles?.profiles || [{ id: 'profile_a', label: 'g6 · 14B + TEI EC2' }]).map((p: any) => (
+              <option key={p.id} value={p.id} style={{ color: '#000' }}>
+                {p.id === 'profile_a' ? 'A' : 'B'} — {p.label}
+              </option>
+            ))}
+          </Select>
+        </Tooltip>
+
         <Button
           size="sm"
           leftIcon={isStarting ? undefined : <FiPlay />}
