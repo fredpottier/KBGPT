@@ -192,6 +192,19 @@ Les 3 pré-requis go/no-go (recommandés par la revue externe) sont validés emp
 
 → Aucune surprise bloquante. La brique la plus risquée (grounding) est dérisquée. Go technique pour l'implémentation.
 
+### P1.4b-0 — Validation fondation sur le modèle EXACT (Qwen2.5-14B-AWQ, burst g6) — ✅ CONFIRMÉ (26/05)
+
+Sur exigence de Fred (tester le LLM exact, pas un proxy), burst g6.2xlarge relancé (stack `knowwhere-burst-cc-20260526-134626`, instance i-006054f2fe8cc1f06, IP 3.75.171.132). Script `app/scripts/p1_4b0_schema_granularity.py`, A/B schéma plat vs `objects[]`, **guided decoding `json_schema` (XGrammar) réel** :
+
+| Passage | PLAT | `objects[]` |
+|---|---|---|
+| Énumération (MDG 5 domaines) | **5 claims** (sur-décompo) | **1 claim, objects=5** ✅ |
+| Énumération (vaccin 3 maladies) | 3 claims | **1 claim, objects=3** ✅ |
+| Multi-prédicats (poids/carburant/poussée) | 3 claims | **3 claims** ✅ (pas de sur-fusion) |
+| Sujets coordonnés (pilot+copilot) | **4 claims** (+1 hallucinée) | **1 claim** ✅ |
+
+**Le pari central est validé sur le modèle de ré-ingestion exact** : le schéma `objects[]` façonne la granularité (énumération → 1 claim-liste), sans sur-fusionner prédicats distincts ni sujets coordonnés. Guided decoding `json_schema` **fiable** (100% JSON valide). Le schéma plat reproduit la sur-extraction ET une hallucination → confirme que l'approche atomique est la cause. **P1.4b-0b (Qwen3+thinking comparaison) non nécessaire** : Qwen2.5-14B suffit et est le modèle de prod ré-ingestion.
+
 ## 8. Plan d'implémentation (incrémental, smoke-first)
 
 0. **P1.4b-0 — Pré-flight modèle/guided decoding** : valider guided decoding (XGrammar) sur le modèle de ré-ingestion **Qwen2.5-14B** ; smoke **Qwen3+thinking vs Qwen2.5-14B** sur 2-3 docs (bug #18819 + dégradation thinking). Choisir le modèle d'extraction.
