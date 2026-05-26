@@ -139,3 +139,54 @@ Volet 1 nous a fait optimiser le **rappel** (« extract EVERY genuine claim » +
 - CheckThat! 2025 ensembling https://ceur-ws.org/Vol-4038/paper_62.pdf
 - Microsoft GraphRAG dataflow (2024) https://microsoft.github.io/graphrag/index/default_dataflow/
 - Event KG for LLM generation (ACL 2025) https://aclanthology.org/2025.acl-long.830.pdf
+
+---
+
+# VOLET 3 — Fiabilité de la granularité avec LLM open-source (Qwen) : conception du #1/#4
+
+> Déclencheur (26/05/2026) : avant de coder #1/#4 (prompt), se référer à la littérature car les LLM open-source suivent mal les consignes fines de granularité, **notamment Qwen** (ré-ingestion Qwen2.5-14B, extraction prod Qwen3-235B). But : maximiser la fiabilité.
+
+## Le problème, nommé par la littérature
+- **IFEval & dérivés** : les LLM échouent surtout sur les contraintes de **COMPTAGE / LONGUEUR / multi-contraintes** simultanées (« at most 600 »→« at most 610 » fait échouer des cas). **Implication directe : une cible « ~300 claims/doc » est le MAUVAIS levier** — Qwen ne tiendra pas un nombre.
+- **Open-source + multi-contraintes simultanées = dégradation marquée.** Le prompt P1.3.5 actuel entasse **5 consignes dans 1 appel** (décontextualisation + question-guided + open-predicate + qualifiers + « extract EVERY claim ») → exactement le profil d'échec décrit. C'est la cause mécanique de la sur-extraction, pas un réglage à ajuster.
+
+## Le remède SOTA : restructurer la TÂCHE, pas empiler les consignes
+Principe transversal (**Claimify, DPPM, DeCRIM, ACONIC**) : **décomposer la tâche d'extraction en sous-tâches focalisées** réduit la charge sur le LLM faible et fait bondir la fiabilité (+10-40 pp selon ACONIC/DPPM).
+
+1. **Pipeline multi-étapes séquentiel (Claimify), 1 prompt focalisé/étape — PAS un méga-prompt** :
+   - **A. Sélection / check-worthiness** : par phrase/passage, « contenu vérifiable substantiel ? sinon DROP (opinion/boilerplate/méta) ». = notre **#3 déplacé À l'extraction** (validé par le smoke utilité Volet 4 de CLAIM_ANALYSIS).
+   - **B. Décomposition à minimalité** : contenu retenu → claims autonomes, **PRINCIPE explicite** « garder le contexte critique ensemble ; ne PAS éclater une énumération en N claims ; une liste = UN claim » (Claimify : « inflation caused hardship » reste 1 claim). = **#1**.
+   - **C. Décontextualisation** : résoudre anaphores via contexte passage ; si irrésoluble, **flaguer plutôt que deviner** (cohérent « NULL > faux »). `passage_context` déjà en place → garder.
+   - (Fusion possible B+C ; mais la **Sélection en GATE séparée** = le plus gros gain de fiabilité.)
+
+2. **Contrôler la granularité par RÈGLE + STRUCTURE de sortie, jamais par un nombre** :
+   - Règle déterministe : 1 claim = 1 assertion (sujet, prédicat, objet) ; **énumération d'items partageant le même prédicat → 1 claim dont l'objet est la LISTE**.
+   - **Structured/guided decoding (XGrammar via vLLM**, défaut vLLM/SGLang 2026, garantit le schéma à 100%). **CLÉ** : concevoir le schéma pour que l'énumération soit un **CHAMP** (`{"subject","predicate","objects":[...]}`) → « 1 claim avec liste » devient le **chemin de moindre résistance**, pas N claims. Le schéma **façonne** le comportement, plus fiable qu'une consigne en prose.
+
+3. **Few-shot démonstratif** (2-3 exemples cross-domaines, domain-agnostic) : montrer une énumération gardée en 1 claim + une opinion DROP. Les démonstrations battent les consignes abstraites pour les modèles faibles (Molecular Facts = prompting 2 étapes ; AFEV = démonstrations dynamiques).
+
+4. **Granularité adaptative par type de doc (#4)** — forme **fiable** = **ROUTAGE déterministe en amont** (catalogue/feature-scope vs guide procédural vs narratif) → instruction/schéma spécifique au type. Catalogue → biais coarse (1 feature = 1 claim, listes restent listes). **NE PAS** demander au LLM de s'auto-adapter en cours de route (peu fiable). (AFEV montre l'auto-adaptation possible mais dépend d'un reranker fine-tuné + demos dynamiques — trop lourd ; le routage déterministe est l'équivalent robuste.)
+
+5. **Auto-correction (DeCRIM) = filet optionnel** (« as-tu sur-éclaté une liste ? fusionne »). Coûte un appel LLM ; notre **dédup déterministe (#2) attrape déjà beaucoup**. Préférer le post-traitement déterministe (moins cher, zéro variance) à l'auto-critique LLM.
+
+## Spécificités Qwen (fiabilité)
+- **Qwen2.5-14B** (ré-ingestion) : `guided_json` via vLLM propre, pas de toggle thinking → **utiliser XGrammar**.
+- **Qwen3-235B** (extraction prod) : **BUG vLLM connu** — `guided_json` + `enable_thinking=False` → JSON malformé. Garder `enable_thinking=True` OU valider/réparer (vLLM issue #18819).
+- Température basse (0.0-0.2) ; prompts **COURTS et mono-focus** par étape.
+
+## Conséquence pour la refonte extraction (P1.4-bis)
+Remplacer le méga-prompt P1.3.5 par : **routeur type-doc → [Sélection] → [Décomposition-minimalité + Décontextualisation] sous guided decoding à schéma « liste-comme-champ »**. Garder décontextualisation (96%) + qualifiers (peu coûteux quand présents). **Valider smoke 2-3 docs avec les 2 probes** (volume + dédup + utilité) AVANT ré-ingestion complète. Le post-traitement #2/#3 reste le filet de sécurité.
+
+## Sources Volet 3 (datées)
+- Claimify / « Towards Effective Extraction and Evaluation of Factual Claims » (Microsoft, ACL 2025) — pipeline Selection/Disambiguation/Decomposition, multi-prompts séquentiels https://www.microsoft.com/en-us/research/blog/claimify-extracting-high-quality-claims-from-language-model-outputs/ — papier https://aclanthology.org/2025.acl-long.348.pdf
+- AFEV « Fact in Fragments » (juin 2025) — granularité adaptative itérative + STOP + claim original comme ancrage https://arxiv.org/html/2506.07446v1
+- DeCRIM (Decompose-Critique-Refine, EMNLP 2024) — auto-correction multi-contraintes, gains même avec feedback faible https://arxiv.org/pdf/2410.06458
+- DPPM Decompose-Plan-Merge multi-contraintes (2025) https://arxiv.org/html/2506.02683
+- ACONIC systematic decomposition by complexity, +10-40pp (oct 2025) https://arxiv.org/html/2510.07772v1
+- IFEval (Google) — multi-contraintes, échecs comptage/longueur https://www.envisioning.com/vocab/ifeval-instruction-following-eval
+- AGENTIF instruction-following benchmark (2025) https://arxiv.org/pdf/2505.16944
+- « The Instruction Gap: LLMs get lost in following instruction » (2026) https://arxiv.org/html/2601.03269
+- vLLM Structured Outputs / XGrammar (défaut vLLM 2026) https://docs.vllm.ai/en/latest/features/structured_outputs/
+- JSONSchemaBench (jan 2025) — XGrammar > Outlines en compliance/latence https://arxiv.org/html/2501.10868v1
+- vLLM bug Qwen3 `guided_json` + `enable_thinking=False` (issue #18819) https://github.com/vllm-project/vllm/issues/18819
+- Document-level Claim Extraction = extractive summarization (salience) + décontextualisation (2024) https://arxiv.org/html/2406.03239v1
