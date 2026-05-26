@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, Any
 
@@ -399,17 +400,24 @@ class ClaimExtractor:
             use_staged_pipeline = os.getenv("CLAIMFIRST_STAGED_PIPELINE", "0") == "1"
         self.use_staged_pipeline = bool(use_staged_pipeline)
 
-        # Indexer pour segmentation (anti-fragmentation énumération si pipeline staged)
+        # Indexer pour segmentation. En staged : segmentation plus GROSSIÈRE (1 claim ≈ 1
+        # phrase) — anti-fragmentation énumération + on ne découpe PAS les phrases sur :/;
+        # (la granularité interne est gérée par Stage B + le schéma objects[]). On NE fusionne
+        # PAS de phrases (éviter les claims multi-faits) : c'est un coarsening sûr, pas mécanique.
+        _coarse = self.use_staged_pipeline
         self.unit_indexer = AssertionUnitIndexer(
             min_unit_length=min_unit_length,
             max_unit_length=max_unit_length,
             keep_enumeration_as_unit=self.use_staged_pipeline,
+            split_on_semicolon=not _coarse,
+            split_on_colon=not _coarse,
         )
 
         # Stages (LLM async injecté via self._staged_llm_async)
         self._selection_gate = None
         self._decomposition_stage = None
         self._grounding_gate = None
+        self._grounding_executor = None  # thread dédié : grounding NLI hors event loop
         if self.use_staged_pipeline:
             from knowbase.claimfirst.extractors.selection_gate import SelectionGate
             from knowbase.claimfirst.extractors.decomposition_stage import DecompositionStage
@@ -420,6 +428,12 @@ class ClaimExtractor:
             # paresseusement au 1er check. Désactivable via CLAIMFIRST_GROUNDING_GATE=0.
             grounding_on = os.getenv("CLAIMFIRST_GROUNDING_GATE", "1") == "1"
             self._grounding_gate = GroundingGate(enabled=grounding_on)
+            if grounding_on:
+                # 1 seul worker : ne bloque pas l'event loop (concurrence LLM préservée),
+                # et sérialise les appels NLI entre eux (accès modèle thread-safe).
+                self._grounding_executor = ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="grounding"
+                )
             logger.info(
                 "[OSMOSE:ClaimExtractor] Pipeline STAGED activé "
                 "(Sélection -> Décomposition%s)",
@@ -676,7 +690,15 @@ class ClaimExtractor:
         if self._grounding_gate is not None and self._grounding_gate.enabled and claims:
             src = task.passage.text if task.passage else ""
             try:
-                grs = self._grounding_gate.check_batch([(c.text, src) for c in claims])
+                items = [(c.text, src) for c in claims]
+                # Grounding NLI hors event loop (thread dédié) → ne sérialise pas la
+                # concurrence LLM des autres batches. Fallback sync si pas d'executor.
+                if self._grounding_executor is not None:
+                    grs = await asyncio.get_event_loop().run_in_executor(
+                        self._grounding_executor, self._grounding_gate.check_batch, items
+                    )
+                else:
+                    grs = self._grounding_gate.check_batch(items)
                 for c, gr in zip(claims, grs):
                     qs = dict(c.quality_scores or {})
                     if gr.entail_score is not None:
