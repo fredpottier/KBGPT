@@ -330,6 +330,18 @@ class Claim(BaseModel):
         description="P1.3.5 (open-then-canonicalize): True si structured_form.predicate est un prédicat libre (hors whitelist) conservé pour le rappel au lieu d'être droppé. None/False si prédicat canonique."
     )
 
+    # --- Q17 (P1.4b-4) : citation source granulaire (auditabilité AI Act) ---
+    # Renseignés par le persister depuis le Passage ; lus au runtime via from_neo4j_record.
+    page_no: Optional[int] = Field(
+        default=None, description="Q17: page source du claim (citation auditable)."
+    )
+    passage_char_start: Optional[int] = Field(
+        default=None, description="Q17: offset début du passage source dans le document."
+    )
+    passage_char_end: Optional[int] = Field(
+        default=None, description="Q17: offset fin du passage source dans le document."
+    )
+
     @field_validator("text")
     @classmethod
     def validate_text_not_too_long(cls, v: str) -> str:
@@ -455,7 +467,33 @@ class Claim(BaseModel):
         # P1.3.5 : prédicat ouvert (hors whitelist) conservé
         if self.open_predicate is not None:
             props["open_predicate"] = self.open_predicate
+        # Q17 (P1.4b-4) : citation granulaire (additif ; le persister peut aussi les
+        # écrire depuis le Passage — valeurs cohérentes).
+        if self.page_no is not None:
+            props["page_no"] = self.page_no
+        if self.passage_char_start is not None:
+            props["passage_char_start"] = self.passage_char_start
+        if self.passage_char_end is not None:
+            props["passage_char_end"] = self.passage_char_end
         return props
+
+    def get_source_citation(self) -> dict:
+        """Q17 — citation source auditable (AI Act), reconstructible depuis le claim.
+
+        Le verbatim est localisable dans le passage (verbatim ∈ passage_text garanti par
+        le mode pointer). Retourne le document, la page, la plage de caractères du passage
+        source et le verbatim exact — utilisable par le Reading Agent pour citer la source.
+        """
+        char_range = None
+        if self.passage_char_start is not None and self.passage_char_end is not None:
+            char_range = [self.passage_char_start, self.passage_char_end]
+        return {
+            "doc_id": self.doc_id,
+            "passage_id": self.passage_id,
+            "page": self.page_no,
+            "passage_char_range": char_range,
+            "verbatim": self.verbatim_quote,
+        }
 
     @classmethod
     def from_neo4j_record(cls, record: dict) -> "Claim":
@@ -521,6 +559,9 @@ class Claim(BaseModel):
             procedure_id=record.get("procedure_id"),
             step_index=record.get("step_index"),
             open_predicate=record.get("open_predicate"),
+            page_no=record.get("page_no"),
+            passage_char_start=record.get("passage_char_start"),
+            passage_char_end=record.get("passage_char_end"),
         )
 
 
