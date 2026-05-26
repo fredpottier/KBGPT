@@ -36,6 +36,21 @@ def main():
     for d in doc_ids:
         print(f"  - {d}")
 
+    # Activer le burst DANS ce process (flag interne router/embeddings) AVANT l'init de
+    # l'extracteur, sinon is_burst_mode_active()=False → concurrence bridée à 5 (bug observé).
+    try:
+        from knowbase.ingestion.burst.provider_switch import (
+            get_burst_state_from_redis, activate_burst_providers, is_burst_mode_active,
+        )
+        st = get_burst_state_from_redis()
+        if st and st.get("active"):
+            activate_burst_providers(st["vllm_url"], st.get("embeddings_url"), st.get("vllm_model"))
+            print(f"[REINGEST] burst activé dans le process : is_burst_mode_active={is_burst_mode_active()}")
+        else:
+            print("[REINGEST] AUCUN état burst actif dans Redis — extraction risque d'aller sur DeepInfra")
+    except Exception as e:
+        print(f"[REINGEST] activation burst échec: {e}")
+
     from knowbase.claimfirst.worker_job import claimfirst_process_job
 
     t0 = time.time()

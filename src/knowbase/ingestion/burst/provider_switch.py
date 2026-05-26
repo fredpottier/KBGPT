@@ -391,10 +391,11 @@ def deactivate_burst_providers() -> Dict[str, Any]:
 # 2024-12-31: batch_size=1 pour éviter 413 intermittent sur AMI Golden TEI
 # 2026-02-01: Limites relevées (TEI recréé avec --max-input-length 512 --max-client-batch-size 32)
 BURST_CONCURRENCY_CONFIG = {
-    "max_concurrent_llm": 15,        # Appels LLM simultanés (réduit de 20 pour stabilité)
+    "max_concurrent_llm": 32,        # 26/05: 15→32. GPU L4 prouvé inactif (5 req/3% KV cache)
+                                     # alors que vLLM max_num_seqs=64 → on sature mieux.
     "max_parallel_segments": 8,      # Segments traités en parallèle (réduit de 10)
     "max_concurrent_embeddings": 6,  # Workers embeddings parallèles
-    "max_concurrent_batches": 10,    # Batches gatekeeper (réduit de 15)
+    "max_concurrent_batches": 16,    # 26/05: 10→16 (cohérent avec max_concurrent_llm)
     "embedding_batch_size": 8,       # 8 textes par requête (TEI max-client-batch-size=32)
     "embedding_batch_chars": 12000,  # Max chars par requête (~8 × 1500)
     "embedding_max_text_chars": 1500,  # Max chars par texte (512 tokens e5-large ≈ 1500 chars)
