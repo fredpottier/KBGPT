@@ -409,12 +409,22 @@ class ClaimExtractor:
         # Stages (LLM async injecté via self._staged_llm_async)
         self._selection_gate = None
         self._decomposition_stage = None
+        self._grounding_gate = None
         if self.use_staged_pipeline:
             from knowbase.claimfirst.extractors.selection_gate import SelectionGate
             from knowbase.claimfirst.extractors.decomposition_stage import DecompositionStage
+            from knowbase.claimfirst.quality.grounding_gate import GroundingGate
             self._selection_gate = SelectionGate(self._staged_llm_async, enabled=True)
             self._decomposition_stage = DecompositionStage(self._staged_llm_async, enabled=True)
-            logger.info("[OSMOSE:ClaimExtractor] Pipeline STAGED activé (Sélection -> Décomposition)")
+            # Grounding gate (P1.4b-4) : flag marginal, ne rejette pas. Modèle NLI chargé
+            # paresseusement au 1er check. Désactivable via CLAIMFIRST_GROUNDING_GATE=0.
+            grounding_on = os.getenv("CLAIMFIRST_GROUNDING_GATE", "1") == "1"
+            self._grounding_gate = GroundingGate(enabled=grounding_on)
+            logger.info(
+                "[OSMOSE:ClaimExtractor] Pipeline STAGED activé "
+                "(Sélection -> Décomposition%s)",
+                " -> Grounding" if grounding_on else "",
+            )
 
         # Stats
         self.stats = {
@@ -660,6 +670,25 @@ class ClaimExtractor:
                 self.stats["claims_extracted"] += 1
             else:
                 self.stats["claims_rejected"] += 1
+
+        # P1.4b-4 — grounding gate : flag marginal (ne supprime PAS), record quality_scores.
+        # Prémisse = passage (la décontextualisation puise le sujet dans le contexte).
+        if self._grounding_gate is not None and self._grounding_gate.enabled and claims:
+            src = task.passage.text if task.passage else ""
+            try:
+                grs = self._grounding_gate.check_batch([(c.text, src) for c in claims])
+                for c, gr in zip(claims, grs):
+                    qs = dict(c.quality_scores or {})
+                    if gr.entail_score is not None:
+                        qs["grounding_entail"] = round(gr.entail_score, 4)
+                    qs["grounding_id_anchored"] = 1.0 if gr.identifier_anchored else 0.0
+                    qs["grounding_marginal"] = 1.0 if gr.marginal else 0.0
+                    c.quality_scores = qs
+                    if gr.marginal:
+                        self.stats["grounding_marginal"] = self.stats.get("grounding_marginal", 0) + 1
+            except Exception as exc:
+                logger.warning("[OSMOSE:ClaimExtractor] grounding gate échec: %s", exc)
+
         return claims
 
     _MODALITY_TO_CLAIM_TYPE = {

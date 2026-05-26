@@ -17,6 +17,7 @@ from knowbase.claimfirst.extractors.decomposition_stage import (
     DecompositionResult,
 )
 from knowbase.claimfirst.extractors.selection_gate import SelectionResult
+from knowbase.claimfirst.quality.grounding_gate import GroundingResult
 from knowbase.stratified.pass1.assertion_unit_indexer import AssertionUnitIndexer
 
 
@@ -107,3 +108,39 @@ def test_flag_off_no_stages_instantiated():
     assert ext.use_staged_pipeline is False
     assert ext._selection_gate is None
     assert ext._decomposition_stage is None
+    assert ext._grounding_gate is None
+
+
+def test_staged_wiring_grounding_records_marginal_in_quality_scores():
+    ext = ClaimExtractor(llm_client=None, use_staged_pipeline=True)
+    task, first_uid = _make_task()
+
+    async def keep_all(unit_pairs):
+        return SelectionResult(kept_ids=[uid for uid, _ in unit_pairs])
+
+    async def one_claim(kept, passage_context=""):
+        return DecompositionResult(claims=[ClaimCandidate(
+            subject="SAP HANA", predicate="supports", objects=["in-memory processing"],
+            modality="assertive", polarity="affirmative",
+            self_contained_text="SAP HANA supports in-memory processing for analytics workloads.",
+            source_unit_ids=[first_uid],
+        )])
+
+    # stub grounding gate (évite de charger le modèle NLI dans le test)
+    class _StubGate:
+        enabled = True
+        def check_batch(self, items):
+            return [GroundingResult(marginal=True, identifier_anchored=False,
+                                    missing_identifiers=["zzz"], entailed=False,
+                                    entail_score=0.12) for _ in items]
+
+    ext._selection_gate.aclassify = keep_all
+    ext._decomposition_stage.adecompose = one_claim
+    ext._grounding_gate = _StubGate()
+
+    claims = asyncio.run(ext._extract_claims_staged_async(task))
+    assert claims and len(claims) == 1
+    qs = claims[0].quality_scores or {}
+    assert qs.get("grounding_marginal") == 1.0
+    assert qs.get("grounding_entail") == 0.12
+    assert qs.get("grounding_id_anchored") == 0.0
