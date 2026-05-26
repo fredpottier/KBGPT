@@ -148,21 +148,40 @@ class SelectionGate:
         self.enabled = enabled
 
     def classify(self, units: List[Tuple[str, str]]) -> SelectionResult:
+        """Variante synchrone (llm_call sync). Utilisée en test/standalone."""
         result = SelectionResult()
         if not units:
             return result
         if not self.enabled:
             result.kept_ids = [uid for uid, _ in units]
             return result
-
-        text_by_id = {uid: txt for uid, txt in units}
-
         try:
             raw = self.llm_call(SYSTEM_PROMPT, build_user_prompt(units))
             parsed = _parse_verdicts(raw)
         except Exception as exc:
             logger.warning("[SelectionGate] LLM/parse échec: %s — tout KEEP (sûr)", exc)
             parsed = None
+        return self._result_from_parsed(parsed, units)
+
+    async def aclassify(self, units: List[Tuple[str, str]]) -> SelectionResult:
+        """Variante async (llm_call awaitable). Utilisée par le pipeline d'extraction."""
+        result = SelectionResult()
+        if not units:
+            return result
+        if not self.enabled:
+            result.kept_ids = [uid for uid, _ in units]
+            return result
+        try:
+            raw = await self.llm_call(SYSTEM_PROMPT, build_user_prompt(units))
+            parsed = _parse_verdicts(raw)
+        except Exception as exc:
+            logger.warning("[SelectionGate] LLM/parse échec (async): %s — tout KEEP", exc)
+            parsed = None
+        return self._result_from_parsed(parsed, units)
+
+    def _result_from_parsed(self, parsed, units: List[Tuple[str, str]]) -> SelectionResult:
+        result = SelectionResult()
+        text_by_id = {uid: txt for uid, txt in units}
 
         if not parsed or "verdicts" not in parsed:
             # défaillance → tout KEEP (ne jamais perdre par erreur technique)

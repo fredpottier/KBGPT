@@ -179,21 +179,39 @@ class DecompositionStage:
     def decompose(
         self, units: List[Tuple[str, str]], passage_context: str = ""
     ) -> DecompositionResult:
-        result = DecompositionResult()
+        """Variante synchrone (llm_call sync). Utilisée en test/standalone."""
         if not units or not self.enabled:
-            return result
-        valid_ids = {uid for uid, _ in units}
+            return DecompositionResult()
         try:
             raw = self.llm_call(SYSTEM_PROMPT, build_user_prompt(units, passage_context))
             parsed = _parse(raw)
         except Exception as exc:
             logger.warning("[DecompositionStage] LLM/parse échec: %s", exc)
             parsed = None
+        return self._result_from_parsed(parsed, units)
 
+    async def adecompose(
+        self, units: List[Tuple[str, str]], passage_context: str = ""
+    ) -> DecompositionResult:
+        """Variante async (llm_call awaitable). Utilisée par le pipeline d'extraction."""
+        if not units or not self.enabled:
+            return DecompositionResult()
+        try:
+            raw = await self.llm_call(SYSTEM_PROMPT, build_user_prompt(units, passage_context))
+            parsed = _parse(raw)
+        except Exception as exc:
+            logger.warning("[DecompositionStage] LLM/parse échec (async): %s", exc)
+            parsed = None
+        return self._result_from_parsed(parsed, units)
+
+    def _result_from_parsed(
+        self, parsed, units: List[Tuple[str, str]]
+    ) -> DecompositionResult:
+        result = DecompositionResult()
+        valid_ids = {uid for uid, _ in units}
         if not parsed or "claims" not in parsed:
             result.judge_failed = True
             return result  # caller peut retomber sur l'ancien chemin
-
         for item in parsed.get("claims", []):
             if not isinstance(item, dict):
                 continue

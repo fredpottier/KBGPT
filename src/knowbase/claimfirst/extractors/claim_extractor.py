@@ -342,6 +342,7 @@ class ClaimExtractor:
         canonical_predicates: Optional[frozenset] = None,
         predicate_descriptions: Optional[Dict[str, str]] = None,
         predicate_normalization_map: Optional[Dict[str, str]] = None,
+        use_staged_pipeline: Optional[bool] = None,
     ):
         """
         Initialise l'extracteur.
@@ -392,11 +393,28 @@ class ClaimExtractor:
             f"{len(self.predicate_normalization_map)} normalization aliases"
         )
 
-        # Indexer pour segmentation
+        # P1.4b — pipeline d'extraction multi-étapes (Sélection -> Décomposition).
+        # Opt-in (défaut OFF via env), pour ne pas altérer le chemin legacy.
+        if use_staged_pipeline is None:
+            use_staged_pipeline = os.getenv("CLAIMFIRST_STAGED_PIPELINE", "0") == "1"
+        self.use_staged_pipeline = bool(use_staged_pipeline)
+
+        # Indexer pour segmentation (anti-fragmentation énumération si pipeline staged)
         self.unit_indexer = AssertionUnitIndexer(
             min_unit_length=min_unit_length,
             max_unit_length=max_unit_length,
+            keep_enumeration_as_unit=self.use_staged_pipeline,
         )
+
+        # Stages (LLM async injecté via self._staged_llm_async)
+        self._selection_gate = None
+        self._decomposition_stage = None
+        if self.use_staged_pipeline:
+            from knowbase.claimfirst.extractors.selection_gate import SelectionGate
+            from knowbase.claimfirst.extractors.decomposition_stage import DecompositionStage
+            self._selection_gate = SelectionGate(self._staged_llm_async, enabled=True)
+            self._decomposition_stage = DecompositionStage(self._staged_llm_async, enabled=True)
+            logger.info("[OSMOSE:ClaimExtractor] Pipeline STAGED activé (Sélection -> Décomposition)")
 
         # Stats
         self.stats = {
@@ -584,6 +602,97 @@ class ClaimExtractor:
 
         return all_claims
 
+    # ── P1.4b — pipeline multi-étapes (Sélection -> Décomposition) ──────────────
+    async def _staged_llm_async(self, system: str, user: str) -> str:
+        """LLM async pour les stages. Router = burst (vLLM) / DeepInfra automatique."""
+        from knowbase.common.llm_router import get_llm_router, TaskType
+
+        router = get_llm_router()
+        return await router.acomplete(
+            task_type=TaskType.KNOWLEDGE_EXTRACTION,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.0,
+            max_tokens=2000,
+            response_format={"type": "json_object"},
+        )
+
+    async def _extract_claims_staged_async(self, task: "BatchTask") -> Optional[List[Claim]]:
+        """Stage A (sélection check-worthiness) -> Stage B (décomposition minimalité).
+
+        Retourne la liste de Claims, ou None pour demander le fallback legacy (si Stage B
+        échoue techniquement, on ne perd pas le batch).
+        """
+        unit_pairs = [(u.unit_local_id, u.text) for u in task.units]
+
+        # Stage A — sélection
+        sel = await self._selection_gate.aclassify(unit_pairs)
+        self.stats["llm_calls"] += 1
+        kept_set = set(sel.kept_ids)
+        kept = [(uid, txt) for uid, txt in unit_pairs if uid in kept_set]
+        self.stats["claims_rejected"] += sel.n_dropped
+        if not kept:
+            return []
+
+        # Stage B — décomposition minimalité + décontextualisation
+        decomp = await self._decomposition_stage.adecompose(
+            kept, task.passage.text if task.passage else ""
+        )
+        self.stats["llm_calls"] += 1
+        if decomp.judge_failed:
+            logger.warning(
+                "[OSMOSE:ClaimExtractor] Stage B échec batch %s — fallback legacy",
+                task.batch_id,
+            )
+            return None  # fallback méga-prompt
+
+        claims: List[Claim] = []
+        for cand in decomp.claims:
+            try:
+                claim = self._claim_from_candidate(cand, task)
+            except Exception as exc:
+                logger.warning("[OSMOSE:ClaimExtractor] mapping candidate échec: %s", exc)
+                claim = None
+            if claim:
+                claims.append(claim)
+                self.stats["claims_extracted"] += 1
+            else:
+                self.stats["claims_rejected"] += 1
+        return claims
+
+    _MODALITY_TO_CLAIM_TYPE = {
+        "assertive": "FACTUAL", "prescriptive": "PRESCRIPTIVE",
+        "permissive": "PERMISSIVE", "recommended": "PRESCRIPTIVE",
+        "conditional": "CONDITIONAL",
+    }
+
+    def _claim_from_candidate(self, cand, task: "BatchTask") -> Optional[Claim]:
+        """Mappe un ClaimCandidate (Stage B) -> Claim en RÉUTILISANT _build_claim
+        (verbatim GARANTI reconstruit depuis l'unité source). L'énumération `objects[]`
+        est jointe dans l'objet du structured_form ; open_predicate=True (canonicalisé en aval)."""
+        valid_ids = {u.unit_local_id for u in task.units}
+        src_id = next((s for s in cand.source_unit_ids if s in valid_ids), None)
+        if src_id is None:
+            src_id = task.units[0].unit_local_id if task.units else ""
+        raw = {
+            "claim_text": cand.self_contained_text,
+            "unit_id": src_id,
+            "claim_type": self._MODALITY_TO_CLAIM_TYPE.get(cand.modality, "FACTUAL"),
+            "confidence": 0.8,
+            "structured_form": {
+                "subject": cand.subject,
+                "predicate": cand.predicate,
+                "object": ", ".join(cand.objects) if cand.objects else "",
+                "open_predicate": True,
+            },
+        }
+        return self._build_claim(
+            raw=raw, units=task.units, unit_result=task.unit_result,
+            passage=task.passage, tenant_id=task.tenant_id, doc_id=task.doc_id,
+        )
+
     async def _extract_claims_from_units_async(
         self,
         task: BatchTask,
@@ -595,6 +704,13 @@ class ClaimExtractor:
         """
         if not task.units:
             return []
+
+        # P1.4b — chemin STAGED (Sélection -> Décomposition). Retourne None pour
+        # demander le fallback sur le chemin legacy (méga-prompt) ci-dessous.
+        if self.use_staged_pipeline and self._decomposition_stage is not None:
+            staged = await self._extract_claims_staged_async(task)
+            if staged is not None:
+                return staged
 
         # Formatter les unités pour le LLM
         units_text = format_units_for_llm(task.units)
