@@ -205,6 +205,18 @@ Sur exigence de Fred (tester le LLM exact, pas un proxy), burst g6.2xlarge relan
 
 **Le pari central est validé sur le modèle de ré-ingestion exact** : le schéma `objects[]` façonne la granularité (énumération → 1 claim-liste), sans sur-fusionner prédicats distincts ni sujets coordonnés. Guided decoding `json_schema` **fiable** (100% JSON valide). Le schéma plat reproduit la sur-extraction ET une hallucination → confirme que l'approche atomique est la cause. **P1.4b-0b (Qwen3+thinking comparaison) non nécessaire** : Qwen2.5-14B suffit et est le modèle de prod ré-ingestion.
 
+### P1.4b-smoke — Pipeline staged END-TO-END vs legacy (LLM réel) — ✅ (26/05)
+
+Script `app/scripts/p1_4b_staged_smoke.py` : `ClaimExtractor.extract()` staged vs legacy sur 3 passages (énumération catalogue / boilerplate juridique / faits+identifiants), LLM réel via router (DeepInfra). Résultat :
+
+| Passage | LEGACY (méga-prompt) | STAGED (A→B→grounding) |
+|---|---|---|
+| Énumération MDG (5 domaines) | réponse **dégénérative** (sur-décompo ×N) → skippée → **0 claim (info perdue)** | **1 claim** avec liste complète, grounding entail **0.97** ✅ |
+| Boilerplate « SAP shall not be liable… » | gardé / `{"claims":[]}` | **jeté par Stage A** ✅ |
+| Faits + identifiants (CG5Z, S_TABU_DIS) | 3 claims | 3 claims, identifiants préservés, grounded 0.99+ ✅ |
+
+**Le pipeline staged fonctionne de bout en bout** : moins de volume MAIS info préservée et de meilleure qualité (là où le legacy sur-décompose puis PERD l'énumération via la détection dégénérative). Boilerplate filtré, faits grounded, identifiants intacts. Tous les modules (segmenteur, Stage A, Stage B, grounding, mapping verbatim) opèrent ensemble.
+
 ## 8. Plan d'implémentation (incrémental, smoke-first)
 
 0. **P1.4b-0 — Pré-flight modèle/guided decoding** : valider guided decoding (XGrammar) sur le modèle de ré-ingestion **Qwen2.5-14B** ; smoke **Qwen3+thinking vs Qwen2.5-14B** sur 2-3 docs (bug #18819 + dégradation thinking). Choisir le modèle d'extraction.
