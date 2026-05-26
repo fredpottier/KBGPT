@@ -61,9 +61,9 @@ Les mesures déterministes du jour cadrent l'ampleur :
 | Q13 | **Déduplication** | Doublons polluent le ranking | ❌ | **#2 dédup tiered** en post-ingestion |
 | Q14 | **Couverture / rappel** | Ne PAS perdre les faits importants (crainte Volet 1) | ✅ (sur-couvre) | Sélection ne coupe QUE le non-checkworthy ; **smoke vérifie le rappel** |
 | Q15 | **Fluence du texte du claim** | Qualité d'embedding + de synthèse | ✅ médiane 99c | Conserver |
-| Q16 | **Confiance calibrée (composite)** | Pondération runtime + abstention honnête ([[project-judge-abstention-overfit]]) | champ `confidence` brut (overconfident) | **Signal composite** = raw LLM × grounding_score × structured_completeness × subject_canonical_present. Calibration post-hoc (temp scaling/isotonic) **différée** (besoin gold-set annoté). |
-| **Q17** | **Citation span-level (auditabilité)** | AI Act : « ce claim vient de cette phrase, page X » — pointer le Passage ne suffit pas | `unit_ids` ✅, `char_start/end` existent sur `AssertionUnit` | **Propager `source_char_spans`/`source_sentence_ids` au Claim** ; gate : ancrage dans un span **contigu** de la source (pas juste « sémantiquement proche »). Peu coûteux (données déjà là). |
-| **Q19** | **Normatif vs descriptif (poids déontique)** | Réglementaire/dual-use : « SHALL verify » (obligation) ≠ « typically verifies » (pratique) | partiel via `claim_type` (PRESCRIPTIVE) | **Extraction déterministe des marqueurs déontiques** (shall/must/should/may/required/prohibited/permitted + équiv. FR) → affine `claim_type` {normative/descriptive/definitional}. Domain-agnostic (déontique universel). Recouvre/renforce Q6. |
+| Q16 | **Confiance calibrée (composite)** | Pondération runtime + abstention honnête ([[project-judge-abstention-overfit]]) | champ `confidence` brut (overconfident) | **Signal composite** mais **dé-pondérer les composants corrélés** (structured_completeness ~ subject_canonical_present) : ex. `0.4·raw + 0.35·grounding + 0.25·max(structured, subject_canonical)`. Calibration post-hoc (temp scaling/isotonic) **différée** (besoin gold-set annoté). |
+| **Q17** | **Citation span-level (auditabilité)** | AI Act : « ce claim vient de cette phrase, page X, car 1234-1567 » | `unit_ids` ✅ + `char_start/end` sur `AssertionUnit` — MAIS Passages **non persistés en Neo4j** | **Stocker les `source_char_spans` SUR le Claim à l'extraction** (pas seulement les unit_ids, vu que les passages sont transients) + méthode **`Claim.get_source_citation()`** reconstruisant file/page/chars pour le Reading Agent. Données présentes → câblage. |
+| **Q19** | **Normatif vs descriptif (poids déontique)** | Réglementaire/dual-use : « SHALL verify » (obligation) ≠ « typically verifies » (pratique) | `claim_type` **rempli 100%** (FACTUAL/DEFINITIONAL/PRESCRIPTIVE/PROCEDURAL/PERMISSIVE/CONDITIONAL) — mais **pas de DESCRIPTIVE explicite (=FACTUAL) ni PROHIBITIVE** | **Extraction DÉTERMINISTE des marqueurs déontiques en Stage B (pré-LLM)** : shall/must/should/may/required/prohibited/permitted (+FR) → compléter la taxonomie (ajouter PROHIBITIVE ; DESCRIPTIVE↔FACTUAL) et **rendre la classe normative fiable**. Domain-agnostic. Renforce Q6. |
 
 **Apports NOUVEAUX de la refonte au-delà du volume** : **Q4 grounding gate**, **Q5 exactitude identifiants**, **Q6 modalité/négation**, **Q8 structured_form natif**, **Q3 subject_canonical quasi-obligatoire**, **Q16 confiance composite**, **Q17 citation span-level**, **Q19 normatif/descriptif**. Ce sont les dimensions QA-critiques (et compliance-critiques) qui n'étaient pas explicitement garanties.
 
@@ -101,11 +101,15 @@ Les mesures déterministes du jour cadrent l'ampleur :
         │
 [DÉTERMINISTE GATES + POST]
    ├─ Grounding gate (Q4/Q5/Q17) : (a) identifiants du claim ∈ source (substring, déterministe,
-   │   gratuit) ; (b) ancrage span CONTIGU dans la source (Q17 citation) ; (c) NLI léger
-   │   conditionnel sur claims sans identifiant : self_contained_text ⊨ passage.
-   │   NLI = MiniCheck-770M SI il charge proprement (sinon bge-reranker déjà chargé, prouvé
-   │   au probe dédup — HHEM écarté car remote code cassé). Seuil conservateur → **flag
-   │   `marginal=true`, PAS reject dur** (cohérent « NULL > faux » + préserver le rappel Q14).
+   │   gratuit) ; (b) ancrage span CONTIGU dans la source (Q17 citation) ; (c) NLI :
+   │   **`self_contained_text ⊨ verbatim_quote`** (pas juste « verbatim ∈ source » — la
+   │   décontextualisation Stage C peut dériver, on vérifie le texte DÉCONTEXTUALISÉ).
+   │   Modèle NLI = **`cross-encoder/nli-deberta-v3-base`** — DÉCIDÉ par spike empirique
+   │   `p1_grounding_nli_spike.py` (séparation fidèle/hallu parfaite, marge +0.992, seuil ~0.5).
+   │   **bge-reranker ÉCARTÉ** (reranker ≠ NLI : note 0.999 une hallucination « +X.509 » ;
+   │   marge −0.041). mDeBERTa-xnli écarté (rate les paraphrases). HHEM cassé (remote code).
+   │   Seuil ~0.5 → **flag `marginal=true`, PAS reject dur** (« NULL > faux » + rappel Q14).
+   │   ⚠️ Modèle EN-fort : re-tester sur claims FR avant de s'y fier (corpus majoritairement EN).
    ├─ Garde-fou longueur (Q3 vacuous résiduel) : claim < ~5 mots → `marginal=true` (flag),
    │   SAUF s'il porte un identifiant protégé (ne jamais pénaliser un fait court mais précis).
    ├─ Marqueurs déontiques (Q19) : extraction déterministe shall/must/should/may/required/
@@ -182,7 +186,8 @@ Guided decoding **XGrammar (vLLM)** avec un schéma où **l'énumération est un
 1. **P1.4b-1 — Segmenter** : option anti-fragmentation énumération + propagation item_type/unit_type. Tests unitaires **incluant les faux positifs** (sujets coordonnés « pilot AND copilot », alternative « A or B ») → ne pas décomposer.
 2. **P1.4b-2 — Stage A Sélection** : `selection_gate.py` + guided-JSON. Smoke 2-3 docs, mesurer % drop (réutiliser méthode probe utilité).
 3. **P1.4b-3 — Stage B Décompo+décontextualisation** : schéma liste-comme-champ + guided decoding + modalité/identifiants. Smoke.
-4. **P1.4b-4 — Grounding gate** : ancrage déterministe + option reranker. Smoke (mesurer claims rejetés/flaggés).
+4. **P1.4b-4 — Grounding gate** : ancrage identifiants déterministe + NLI `cross-encoder/nli-deberta-v3-base` (✅ **modèle décidé par spike `p1_grounding_nli_spike.py`**) vérifiant `self_contained_text ⊨ verbatim_quote`, en flag `marginal`. Smoke (claims flaggés) + re-test FR.
+4b. **P1.4b-4b — Citation Q17** : stocker `source_char_spans` sur le Claim + `Claim.get_source_citation()` (file/page/chars). Test bout-en-bout `unit_ids → char spans → page`.
 5. **P1.4b-5 — Industrialiser #2 dédup + #3 hard-junk** en post-ingestion.
 6. **P1.4b-6 — Smoke intégré 2-3 docs** : re-mesurer **volume + dédup + utilité + grounding + recall** avec les probes. Cible : volume ÷ (3-5), décontextualisation maintenue (~96%), **rappel non dégradé** (vérifier qu'on ne perd pas de faits clés), subject_canonical ≥92%.
 7. **P1.4b-7 — Ré-ingestion propre** (g6 PAS g6e, [[reference-ec2-burst-instance-g6-not-g6e]]) + **bench P1.5** (gate multi_hop ≥0.25 ET global ≥0.45, judge corrigé).
@@ -196,8 +201,11 @@ Guided decoding **XGrammar (vLLM)** avec un schéma où **l'énumération est un
 - ✅ Décontextualisation ≥ 95% (ne pas régresser le gain Q2).
 - ✅ **Rappel préservé** : sur un échantillon annoté, aucun fait clé perdu par la Sélection (Q14).
 - ✅ subject_canonical ≥ 92% (Q3).
-- ✅ Grounding : 0 identifiant inventé sur l'échantillon (Q4/Q5).
+- ✅ Grounding : 0 identifiant inventé sur l'échantillon (Q4/Q5) ; NLI `marginal` cohérent.
 - ✅ Dédup résiduelle < 5% (le schéma liste-comme-champ doit déjà réduire les doublons d'énumération).
+- ✅ `claim_type` rempli ≥ 90% + classe normative/descriptive fiable (Q19).
+- ✅ Détecteur énumération : **0 faux positif** (sujets coordonnés / alternative) sur smoke 15-20 phrases cross-domain avant P1.4b-2 (Q1).
+- ✅ Citation Q17 : chaîne `claim → char spans → page` reconstructible bout-en-bout.
 
 ---
 
@@ -216,7 +224,7 @@ Guided decoding **XGrammar (vLLM)** avec un schéma où **l'énumération est un
 ## 11. Décisions sur questions ouvertes (post-revue externe 26/05/2026)
 
 1. **Coût 2 appels LLM (A+B) → GARDER SÉPARÉ.** Fusionner = recréer le méga-prompt défaillant. Coût mitigé par l'élagage Stage A (net ≈ 1.3-1.5× pas 2×). Calibrations incompatibles (A = haute précision/rappel, B = granularité). Option modèle léger/lourd en réserve (§4.5).
-2. **Grounding → déterministe + NLI léger en FLAG (pas reject).** (a) identifiants ∈ source + span contigu (déterministe, gratuit) ; (b) NLI conditionnel = MiniCheck-770M **si charge propre**, sinon **bge-reranker** (déjà chargé, prouvé ; HHEM écarté). Toujours `marginal=true`, jamais reject dur (préserve le rappel).
+2. **Grounding → déterministe + NLI en FLAG (pas reject). MODÈLE DÉCIDÉ par spike empirique** (`p1_grounding_nli_spike.py`, 26/05) : **`cross-encoder/nli-deberta-v3-base`** (vrai NLI, déjà cache, chargement propre, séparation fidèle/hallu **marge +0.992**, seuil ~0.5). **bge-reranker ÉCARTÉ empiriquement** (reranker ≠ NLI, marge −0.041, note 0.999 une hallucination). mDeBERTa-xnli écarté (rate paraphrases). MiniCheck pas installé/inutile. NLI vérifie `self_contained_text ⊨ verbatim_quote`. Toujours `marginal=true`, jamais reject dur. Caveat : EN-fort, re-tester FR.
 3. **Vacuous → prompt Stage A** (subjectif/domain-dépendant, pas de règle hard-codée) **+ garde-fou longueur en flag** (respecte le garde-fou identifiants).
 4. **Dimensions ajoutées** : Q17 citation span-level (AI Act), Q19 normatif/descriptif (déontique), Q16 renforcé en confiance composite. Q20 (interdépendance) → Phase C.
 
