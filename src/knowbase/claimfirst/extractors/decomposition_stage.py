@@ -64,10 +64,17 @@ Each claim has: subject, predicate, objects (array), modality, polarity, self_co
 source_unit_ids (array of the given unit ids it came from).
 
 RULES:
-1. MINIMALITY: one assertion = one claim. When several items share the SAME subject and \
-predicate (an enumeration), emit ONE claim whose `objects` lists all items — never one claim \
-per item. When facts have DIFFERENT predicates, emit SEPARATE claims. A single fact uses a \
-one-element `objects` array. Never place coordinated SUBJECTS into `objects`.
+1. MOLECULAR GRANULARITY (most important): each claim is ONE self-contained, SALIENT fact that \
+COMBINES the closely-related details belonging to it (its condition, qualifier, named objects, \
+outcome). Do NOT over-split: prose describing a single fact must stay ONE claim — never fragment \
+a sentence into multiple sub-claims, one per clause or detail. Produce FEWER, richer claims. \
+Emit a SEPARATE claim ONLY for a genuinely DISTINCT fact (different subject, or an independent \
+assertion that a user would ask about on its own). Rule of thumb: usually ≤1 claim per sentence; \
+emit several from one sentence only when it truly states multiple independent facts.
+   - An enumeration of items sharing the SAME subject and predicate → ONE claim whose `objects` \
+lists all items (never one claim per item). Never place coordinated SUBJECTS into `objects`.
+   - A single fact uses a one-element `objects` array. Keep a condition/qualifier inside the \
+claim's text rather than spawning a separate claim for it.
 2. DECONTEXTUALIZE: resolve pronouns/anaphora using the passage context; NAME the subject \
 explicitly (never leave "it" / "the system" / "this"). If the referent is genuinely unknown, \
 keep the best literal subject — do NOT invent one.
@@ -77,19 +84,24 @@ recommended (should/recommended), conditional (if/when…), else assertive. PRES
 else affirmative. NEVER drop a negation.
 5. IDENTIFIERS: copy codes, identifiers and numeric values VERBATIM from the source — never \
 paraphrase or alter them.
-6. self_contained_text = one fluent standalone sentence capturing the claim.
+6. self_contained_text = one fluent standalone sentence capturing the whole molecular fact.
 
 Be domain-neutral (software, medical, legal, engineering…). Do not add facts absent from the source.
 
-Examples:
+Examples (note: related details stay in ONE claim, not split):
 - Units: "[u1] The kit includes a cable, a charger, and a manual." ->
   {"subject":"The kit","predicate":"includes","objects":["a cable","a charger","a manual"],
    "modality":"assertive","polarity":"affirmative",
    "self_contained_text":"The kit includes a cable, a charger, and a manual.","source_unit_ids":["u1"]}
-- Units: "[u2] It must not be used in production." (context: the experimental API) ->
+- Units: "[u2] The deletion requires the authorization object S_TABU_DIS and cannot be undone." ->
+  ONE claim (the deletion's requirement + irreversibility are facets of the same fact), NOT two:
+  {"subject":"The deletion","predicate":"requires","objects":["the authorization object S_TABU_DIS"],
+   "modality":"prescriptive","polarity":"affirmative",
+   "self_contained_text":"The deletion requires the authorization object S_TABU_DIS and cannot be undone.","source_unit_ids":["u2"]}
+- Units: "[u3] It must not be used in production." (context: the experimental API) ->
   {"subject":"The experimental API","predicate":"must be used in","objects":["production"],
    "modality":"prescriptive","polarity":"negative",
-   "self_contained_text":"The experimental API must not be used in production.","source_unit_ids":["u2"]}
+   "self_contained_text":"The experimental API must not be used in production.","source_unit_ids":["u3"]}
 """
 
 
