@@ -215,13 +215,42 @@ quel** (nom porteur, concept central de l'agnosticité multi-domaines AX-11).
 Qualité ~7/10, socle propre (`lib/` axios typé). Nettoyage :
 - Supprimer : `app/rfp-excel/page-original.tsx` (doublon), `components/common/LanguageSelector.tsx`
   et `components/layout/ContextualSidebar.tsx` (orphelins).
-- Corriger : lien mort `app/admin/layout.tsx:101` → `/admin/runtime-calibration` (404).
-- Décider : `/chat/runtime-v2` + `app/api/runtime_v2/*` + `components/runtime/` (suit le sort du
-  runtime v2 backend → à retirer), pages hors-nav `/documents/upload`, `/documents/rfp`,
-  `/admin/markers`, `/wiki` (legacy → garder `/wiki/articles` + `/atlas`).
+- Pages hors-nav à décider : `/documents/upload`, `/documents/rfp` (doublons import/rfp-excel),
+  `/wiki` (legacy → garder `/wiki/articles` + `/atlas`).
 - Réactiver dans `next.config.js` : retirer `ignoreBuildErrors:true` + `ignoreDuringBuilds:true`
   (dette TS/ESLint cachée). Repasser `tsconfig` target `es5` → `es2020+`.
 - API helper `documentTypes` marqué DEPRECATED dans `lib/api.ts` → retirer.
+
+#### 5.9.1 Ménage de la navigation admin (`app/admin/layout.tsx`)
+La nav admin (sections Infrastructure / Import / Knowledge Graph / Analyse / Atlas) mélange du
+produit et des dashboards R&D, et contient des entrées mortes.
+
+**Supprimer (mort / 404) :**
+- `Runtime V2 (chat)` → `/chat/runtime-v2` : suit le runtime_v2 backend jeté (cf §5.3). Retirer
+  l'item nav + `app/chat/runtime-v2/` + `app/api/runtime_v2/*` + `components/runtime/`.
+- `Runtime Calibration` → `/admin/runtime-calibration` (`layout.tsx:101`) : **lien mort, la page
+  n'existe pas (404)**. Retirer l'item.
+- `/admin/living-ontology` (page hors-nav, liée depuis le dashboard) : backend `living_ontology`
+  **désactivé** dans `api/main.py`. Retirer la page + la carte du dashboard.
+- `/admin/markers` (page hors-nav orpheline) : à retirer sauf usage réel de la feature markers.
+
+**Renommer (suffixe de version) :**
+- `Relations V3.3` → **`Relations`** (route `/admin/relations` inchangée).
+
+**Déporter hors de l'admin produit (vers `osmosis-cockpit` / `osmosis-bench`, cf §2) :**
+La sous-section *Analyse* empile des surfaces d'**observabilité/R&D** qui correspondent à la mission
+du cockpit (« métriques et feedback sur l'état du système ») et du harnais bench :
+- `Benchmarks` (`/admin/benchmarks`, 1335 l.) → `osmosis-bench`.
+- `Golden Set (annotation)` (`/admin/relations/golden-set`) → outil d'annotation/éval → `osmosis-bench`.
+- `Audit Corpus` (`/admin/corpus-audit`) → diagnostic → `osmosis-cockpit`.
+- `Corpus Intelligence` (`/admin/corpus-intelligence`) → dashboard → cockpit (ou garder si jugé produit).
+
+**Garder dans l'admin produit osmosis :** GPU & Compute, Backup & Restore, Configuration
+(découper, 1315 l.), Apparence ; Claim-First Pipeline, Mode Burst ; Domain Context (découper,
+2309 l.), Post-Import, KG Hygiene, Domain Packs ; Contradictions, Relations ; Générateur Atlas.
+
+**Cible :** une nav admin resserrée sur l'exploitation quotidienne ; l'observabilité et la R&D
+vivent dans des surfaces indépendantes.
 
 ### 5.10 Infra & config (GARDER l'actif, élaguer les doublons)
 - **GARDER** : `docker-compose.infra.yml` (Qdrant v1.15.1, Redis 7.2, Neo4j 5.26, Postgres/pgvector)
