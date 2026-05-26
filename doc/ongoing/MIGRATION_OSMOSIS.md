@@ -70,7 +70,6 @@ suppression de ~440 markdown d'archive et ~160 scripts jetables.
 | `runtime_a3/` + router `runtime_v6.py` + infra de `runtime_v5/` + `runtime_v3/nli_judge` | **`runtime/`** | Q/A KG-first : Parse → Plan → Execute → Evaluate → Synthesize | Terme aligné sur VISION §4.4 |
 | `semantic/inference/` | **`inference/`** | InferenceEngine (alimente le router `insights`) | Le reste de `semantic/` est dissous |
 | `semantic/utils/` (langue, embeddings) | **`common/nlp/`** | Détection de langue + embeddings utilitaires | Fusion dans le socle commun |
-| `domain_packs/` | **`domains/`** | Domain Packs pluggables (JSON) | Nom plus porteur |
 | `neo4j_custom/` | **`kg/neo4j/`** | Utilitaires Neo4j | Regroupement KG (§4, optionnel) |
 | `relations/` | **`kg/relations/`** | Relations claim-vs-claim, enrichissement KG | Regroupement KG (optionnel) |
 | `ontology/` | **`kg/ontology/`** | Catalogues d'entités/types | Regroupement KG (optionnel) |
@@ -79,7 +78,8 @@ suppression de ~440 markdown d'archive et ~160 scripts jetables.
 
 ### 3.3 Noms conservés (déjà porteurs)
 `api/`, `ingestion/`, `common/`, `config/`, `retrieval/`, `memory/`, `navigation/`, `wiki/`,
-`atlas/`, `verification/`, `logging/`.
+`atlas/`, `verification/`, `logging/`, **`domain_packs/`** (nom déjà porteur : packs domain-centric
+pluggables — concept central, à conserver tel quel).
 
 ---
 
@@ -99,7 +99,7 @@ osmosis/
 │   ├── inference/            # ex-semantic/inference (InferenceEngine → insights)
 │   ├── kg/                   # [regroupement proposé]
 │   │   ├── relations/  ontology/  hygiene/  entity_resolution/  neo4j/
-│   ├── domains/              # ex-domain_packs : Domain Packs pluggables
+│   ├── domain_packs/         # Domain Packs pluggables (ajout de packs domain-centric)
 │   ├── memory/               # sessions
 │   ├── navigation/  wiki/  atlas/  verification/
 │   ├── common/               # clients (Qdrant/Neo4j/Redis/PG), llm_router, nlp/, utils
@@ -193,7 +193,8 @@ réellement utilisés par l'orchestrator/worker : `models/`, `extractors/`, `lin
 ### 5.6 Features secondaires actives (GARDER)
 `memory/` (sessions), `navigation/`, `wiki/` (router monté), `atlas/` (router monté),
 `verification/` (router `/verify` monté), `inference/` (ex-semantic/inference → router `insights`),
-`domains/` (ex-domain_packs, router + reprocess).
+`domain_packs/` (router + reprocess) — mécanisme d'ajout de packs domain-centric, **conservé tel
+quel** (nom porteur, concept central de l'agnosticité multi-domaines AX-11).
 
 ### 5.7 Socle transverse (GARDER)
 `common/**` (+ absorbe `semantic/utils` → `common/nlp/`), `config/**`, `logging/`.
