@@ -101,11 +101,17 @@ class AssertionUnitIndexer:
         max_unit_length: int = 500,
         split_on_semicolon: bool = True,
         split_on_colon: bool = True,
+        keep_enumeration_as_unit: bool = False,
     ):
         self.min_unit_length = min_unit_length
         self.max_unit_length = max_unit_length
         self.split_on_semicolon = split_on_semicolon
         self.split_on_colon = split_on_colon
+        # P1.4b-1 : si True, une phrase détectée comme énumération d'objets n'est PAS
+        # fragmentée (clauses/virgules) → restera 1 claim-liste côté LLM. Opt-in pour
+        # ne pas altérer le comportement des autres pipelines (défaut OFF).
+        self.keep_enumeration_as_unit = keep_enumeration_as_unit
+        self._enum_detector = None
 
         # Pattern pour détecter les valeurs courtes après ':'
         # Couvre: versions, tailles, protocoles, standards (AES-256, SHA-256, SOC 2)
@@ -118,6 +124,14 @@ class AssertionUnitIndexer:
             "must", "shall", "required", "mandatory", "obligatory",
             "doit", "obligatoire", "nécessaire", "impératif"
         ]
+
+    def _get_enum_detector(self):
+        if self._enum_detector is None:
+            from knowbase.stratified.pass1.enumeration_detector import (
+                get_enumeration_detector,
+            )
+            self._enum_detector = get_enumeration_detector(enabled=True)
+        return self._enum_detector
 
     def index_docitem(
         self,
@@ -162,7 +176,10 @@ class AssertionUnitIndexer:
             return result
 
         # Cas 2: Segmentation intelligente
-        segments = self._segment_text(text)
+        lang = None
+        if self.keep_enumeration_as_unit:
+            lang = self._get_enum_detector().detect_language(text)
+        segments = self._segment_text(text, lang=lang)
 
         unit_index = 1
         for seg_text, start, end, seg_type in segments:
@@ -170,8 +187,9 @@ class AssertionUnitIndexer:
             if len(seg_text.strip()) < self.min_unit_length:
                 continue
 
-            # Re-découper si trop long
-            if len(seg_text) > self.max_unit_length:
+            # Re-découper si trop long — SAUF énumération (P1.4b-1 : ne jamais
+            # comma-fragmenter une énumération détectée, elle reste 1 unité).
+            if len(seg_text) > self.max_unit_length and seg_type != "enumeration":
                 sub_segments = self._split_long_segment(seg_text, start)
                 result.stats["redecoupes"] += len(sub_segments) - 1
 
@@ -296,7 +314,7 @@ class AssertionUnitIndexer:
     # SEGMENTATION INTELLIGENTE
     # =========================================================================
 
-    def _segment_text(self, text: str) -> List[Tuple[str, int, int, str]]:
+    def _segment_text(self, text: str, lang: Optional[str] = None) -> List[Tuple[str, int, int, str]]:
         """
         Segmente le texte en unités d'assertion.
 
@@ -316,6 +334,12 @@ class AssertionUnitIndexer:
 
         # Phase 2: Découper les clauses si nécessaire
         for sent_text, sent_start, sent_end in sentences:
+            # P1.4b-1 : une énumération d'objets reste 1 unité (pas de fragmentation) ;
+            # le LLM la rendra en 1 claim avec liste `objects[]`.
+            if self.keep_enumeration_as_unit and self._get_enum_detector().is_object_enumeration(sent_text, lang):
+                segments.append((sent_text, sent_start, sent_end, "enumeration"))
+                continue
+
             # Vérifier si contexte prescriptif
             is_prescriptive = self._has_prescriptive_marker(sent_text)
 
