@@ -180,6 +180,18 @@ Guided decoding **XGrammar (vLLM)** avec un schéma où **l'énumération est un
 
 ---
 
+## 7.bis — Spikes pré-implémentation : TOUS VERTS (26/05/2026)
+
+Les 3 pré-requis go/no-go (recommandés par la revue externe) sont validés empiriquement :
+
+| Spike | Script | Résultat |
+|---|---|---|
+| **NLI grounding** | `p1_grounding_nli_spike.py` | `cross-encoder/nli-deberta-v3-base` sépare fidèle/hallu **+0.992** ✅ ; bge-reranker écarté (−0.041). |
+| **Détecteur énumération** | `p1_enum_detector_spike.py` | spaCy syntaxe, **0 faux positif** sur 8 pièges (sujets coordonnés / alternative / séquence verbes), EN+FR ✅. |
+| **Chaîne citation Q17** | Cypher sur 8530 claims | **100%** ont page_no + passage_char_start/end + verbatim_quote ; **100% verbatim ∈ passage_text** ✅. Reste : exposer `get_source_citation()` (+ option filename sur Document). |
+
+→ Aucune surprise bloquante. La brique la plus risquée (grounding) est dérisquée. Go technique pour l'implémentation.
+
 ## 8. Plan d'implémentation (incrémental, smoke-first)
 
 0. **P1.4b-0 — Pré-flight modèle/guided decoding** : valider guided decoding (XGrammar) sur le modèle de ré-ingestion **Qwen2.5-14B** ; smoke **Qwen3+thinking vs Qwen2.5-14B** sur 2-3 docs (bug #18819 + dégradation thinking). Choisir le modèle d'extraction.
