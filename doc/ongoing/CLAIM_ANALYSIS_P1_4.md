@@ -113,3 +113,32 @@
 3. **#1 + #4 prompt** (anti-énumération + granularité adaptative catalogue) : valider smoke 2-3 docs avant ré-ingestion complète.
 
 *Rapports horodatés : `data/benchmark/dedup/dedup_probe_*.{json,md}`. Embeddings cachés : `data/benchmark/dedup/embeddings_default.npz`.*
+
+---
+
+# Volet 4 — Smoke filtre utilité #3 (check-worthiness) — 2026-05-26
+
+> Lever #3 du Volet 2 SOTA. Hypothèse (issue du Volet 3) : le gros du sur-volume n'est PAS de la redondance mais du **boilerplate** + énoncés vacants. Script : `app/scripts/p1_utility_filter_smoke.py` (read-only). Échantillon **aléatoire 150 claims** (seed 42), juge **DeepSeek-V3.1** (DeepInfra, open-source), prompt **domain-agnostic** (exemples neutres, aucune règle SAP). Garde-fou **spécificité-aware** : un claim portant un identifiant rare/précis n'est jamais jeté.
+
+## Mesure (après calibration)
+
+- **DROP (jetable) = 25/150 = 16.7%** → extrapolation ~1425/8530.
+- Décomposition : **hard-junk = 7 ≈ 5%** (legal_boilerplate 3, marketing_filler 3, cross_reference 1) — **sans ambiguïté, sûr à jeter** ; **vacuous = 18 ≈ 12%** — **frontière floue**.
+- KEEP = 125 (capability 80, procedure 22, factual 11, rule 5, definition 3, relationship 2…). 0 erreur LLM.
+
+## Calibration — 2 enseignements (le smoke a fait son travail)
+
+1. **Le garde-fou identifiants doit être SPÉCIFICITÉ-aware** (différent du dédup). Version large (probe dédup) protège via acronymes ubiquitaires (`SAP`, `HR`, `TM`) → en filtre utilité elle **sauve à tort le boilerplate** (« SAP shall not be liable… » rescapé par `sap`). En dédup c'était sûr (au pire un near-dup gardé) ; en filtre utilité c'est contre-productif. Fix `specific_identifiers()` : protéger seulement digit / underscore / chemin / ALL_CAPS≥4 ; PAS les acronymes alpha ≤3 ni le nom produit. **Validé** : « SAP shall not be liable » → maintenant DROP legal_boilerplate 0.95 ; overrides 10→1.
+2. **« Vacuous » est une frontière subjective** (instable selon la formulation du prompt, même à T=0). Ces « X enables key features / improves efficiency » creux sont la **prose du catalogue Feature Scope** — il vaut mieux les **empêcher à la source (levier #1/#4 prompt)** que les filtrer a posteriori. Le hard-junk (legal/marketing/meta), lui, est stable et sûr.
+
+## Image consolidée des leviers post-traitement (read-only, sans ré-ingestion)
+
+| Levier | Réduction mesurée | Nature |
+|---|---|---|
+| #2 dédup tiered | ~13% | sûr, déterministe |
+| #3 hard-junk (legal/marketing/meta) | ~5% | sûr, stable |
+| #3 vacuous | ~12% (flou) | frontière subjective, recouvre #1/#4 |
+
+→ Post-traitement déterministe « sûr » (#2 + #3 hard-junk, recouvrement partiel) ≈ **15-20%**. **Insuffisant à lui seul pour défaire le ×23.** Le moteur structurel du sur-volume reste le **catalogue Feature Scope (6934/8530 = 81%)** sur-décomposé en énumérations fines + prose vacante → **seul le recalibrage du prompt (#1 anti-énumération + #4 granularité adaptative par type de doc) traite la masse**. Conclusion : post-traitement = filet de sécurité utile et sûr, MAIS le prompt reste le levier principal pour le volume — à recalibrer puis valider smoke 2-3 docs avant ré-ingestion complète.
+
+*Rapports : `data/benchmark/dedup/utility_smoke_*.{json,md}`.*
