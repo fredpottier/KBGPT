@@ -1,334 +1,381 @@
 # Migration vers OSMOSIS — Plan de reconstruction propre
 
 > **Statut :** Proposition de travail (à valider) — document de migration.
-> **Objet :** Spécifier précisément quel code reprendre, comment le renommer et l'organiser,
-> pour créer un nouveau dépôt `osmosis` débarrassé du legacy accumulé par 9 mois de pivots.
-> **Source :** audit complet de l'existant KBGPT (mai 2026) — graphe d'imports depuis les
-> points d'entrée réels (worker d'ingestion + API `/search`).
+> **Objet :** Spécifier quel code reprendre, renommer ou abandonner pour créer un dépôt `osmosis`
+> sain, débarrassé du legacy, avec une **arborescence repensée** lisible.
+> **Méthode :** audit du graphe d'imports depuis les points d'entrée réels (worker d'ingestion,
+> API `/search`, routers montés), réalisé sur l'état courant du code (869 fichiers `.py` dans
+> `src/knowbase`).
+> **Cadre :** analyse organisée autour des **6 blocs fonctionnels** du système.
 
 ---
 
-## 0. Pourquoi ce document
+## 0. Constat
 
-Le projet actuel n'a pas un problème d'architecture : la vision (`VISION.md`) et la doc
-d'architecture sont saines et récentes (refonte 18/05/2026). Le problème est l'**accumulation
-de code mort qui cohabite avec le code vivant sans séparation** — d'où les « mauvais
-branchements » qui ramènent vers du legacy (`stratified`, `runtime_v2`, `agents`…).
+Le système se décompose en 6 blocs : **(1) ingestion de documents**, **(2) post-processing
+KG**, **(3) runtime de questionnement**, **(4) frontend + admin**, **(5) cockpit déporté**,
+**(6) orchestration AWS**. La vision et la doc d'architecture sont saines et récentes ; le
+**code** porte 9 mois de pivots non nettoyés (7 lignées de runtime, 5 approches d'extraction,
+pipelines pass2/3/4 manuels, modules orphelins).
 
-Plutôt que forker + élaguer (qui traîne l'historique et les couplages cachés), on **repart d'un
-dépôt neuf `osmosis`** où l'on importe sélectivement le **cœur actif uniquement**, avec un
-**nommage propre** et une **séparation des outils annexes**.
+Le problème n'est pas l'architecture mais la **cohabitation code mort / code vivant sans
+séparation**, d'où les « mauvais branchements » vers du legacy. On repart d'un dépôt neuf
+`osmosis` (pas un fork git), avec import sélectif du cœur vivant, nommage propre et arborescence
+réorganisée par bloc.
 
-Ordre de grandeur de la cure : `src/knowbase` passe de **869 → ~470 fichiers `.py` (-45 %)**,
-suppression de ~440 markdown d'archive et ~160 scripts jetables.
-
----
-
-## 1. Principes directeurs
-
-1. **Plus aucun nom de version ni de pivot dans le code.** `extraction_v2`, `runtime_v3`,
-   `claimfirst`, `stratified`, `facts_first`, `runtime_a3` → noms porteurs et stables.
-2. **`knowbase` n'existe plus.** Le package racine devient `osmosis`. Ancien naming
-   (`KnowBase`, `KnowWhere`, `SAP KB`) banni du code, des logs et de la doc.
-3. **Un seul chemin par responsabilité.** Une seule lignée d'extraction, un seul runtime Q/A.
-   Le code mort n'est pas importé : il n'existe pas dans le dépôt.
-4. **Les outils annexes sont des dépôts indépendants** (cockpit, bench) — pas livrés en prod
-   sur chaque déploiement.
-5. **Domain-agnostic par construction** (axiome AX-11 de VISION.md) : aucun couplage SAP en dur.
-6. **La doc de référence est reprise telle quelle** (VISION, ROADMAP, ARCH_*, ADR) — c'est la
-   boussole, elle est déjà propre.
+Ordre de grandeur : `src/knowbase` **869 → ~430 fichiers `.py`** ; suppression de ~440 markdown
+d'archive et ~160 scripts jetables ; sortie de 2 sous-projets en dépôts indépendants.
 
 ---
 
-## 2. Stratégie multi-dépôts
+## 1. BLOC 1 — Pipeline d'ingestion de documents
 
-| Dépôt | Contenu | Justification |
-|---|---|---|
-| **`osmosis`** | Produit : backend (FastAPI + worker), frontend, infra de déploiement, doc, config, tests | Le livrable |
-| **`osmosis-cockpit`** | Service de supervision autonome (actuel `cockpit/`) | **Demande explicite** : système indépendant qui se *branche* sur une instance pour remonter métriques/feedback ; ne doit pas être déployé en prod sur chaque système. WebSocket + UI statique + collectors (docker, burst, llm_budget, ragas, pipeline). |
-| **`osmosis-bench`** *(proposé)* | Harnais d'évaluation (`benchmark/` code + gold sets) | 29 Mo dont l'essentiel = datasets et résultats. C'est un outil de R&D, pas du runtime produit. Le **code d'éval + gold sets** y vivent ; les **runs datés** (`runs/`, 5.4 Mo) sont jetés. |
+### Flux réel (confirmé)
+```
+folder_watcher / dispatcher
+  → RQ jobs_v2.ingest_document_v2_job
+      ├─ extraction_v2 (Docling + Vision) ──> cache data/extraction_cache (versioned_cache.py, v5)
+      ├─ [Stratified V2 / osmose_agentique : SKIPPÉ par défaut — INGESTION_SKIP_STRATIFIED_V2=true]
+      ├─ auto_deduplicate_entities (dédup Cypher par nom)
+      ├─ move docs_in → docs_done
+      └─ enqueue ClaimFirst (queue "reprocess")
+          → claimfirst.orchestrator.process_and_persist  (extraction claims + qualité)
+```
 
-> **Couplage cockpit ↔ osmosis :** le cockpit consomme l'API/les logs/Redis/Neo4j d'une instance
-> osmosis. Définir un **contrat d'interface stable** (endpoints de métriques + format logs) plutôt
-> qu'un import de code. Si du code est partagé (ex. modèles de métriques), en faire un petit
-> package publié, pas une dépendance de chemin.
+### GARDER
+| Module actuel | Rôle |
+|---|---|
+| `ingestion/queue/` (`worker.py`, `dispatcher.py`, `jobs_v2.py`, `connection.py`, `__main__.py`) | Worker RQ (écoute `default`+`reprocess`+`benchmark`) + enqueue |
+| `ingestion/folder_watcher.py` | Surveillance dossier d'entrée |
+| `ingestion/resilience/` | Recovery / checkpoints |
+| `extraction_v2/` (52 fichiers) | Parsing documents : Docling + Vision + gating + merge |
+| `extraction_v2/cache/versioned_cache.py` | **Gestionnaire du cache précieux** (format v5) |
+| `claimfirst/` (105 fichiers) | Extraction de claims atomiques + pipelines qualité (cœur) |
+| `stratified/pass0/{cache_loader,adapter}.py`, `pass1/assertion_unit_indexer.py`, `stratified/models/`, `structural/models.py` | Utilitaires relus par ClaimFirst (cache → DocItems) |
 
----
+### JETER
+`ingestion/osmose_agentique.py`, `ingestion/osmose_*`, `pass2_orchestrator.py`,
+`ingestion/processors/` (vide), `ingestion/extraction_cache.py` (ancien `.knowcache.json`, remplacé
+par `versioned_cache.py` ; vérifier d'abord les call-sites admin/backup/purge).
 
-## 3. Convention de nommage
-
-### 3.1 Package racine
-`src/knowbase/` → **`src/osmosis/`** (et tous les `from knowbase.…` → `from osmosis.…`).
-
-### 3.2 Table de renommage des modules
-
-| Ancien | Nouveau | Rôle | Note |
-|---|---|---|---|
-| `extraction_v2/` | **`extraction/`** | Parsing documents (Docling + Vision) + cache versionné | Absorbe `stratified/pass0` (cache_loader) + `structural/models` |
-| `claimfirst/` | **`claims/`** | Pipeline d'extraction de claims atomiques (cœur épistémique) | Renommer aussi `ARCH_CLAIMFIRST.md` → `ARCH_CLAIMS.md` |
-| `claimfirst/v6/` + module `runtime_v6/` | **`claims/procedures/`** | Extraction procédures/références (feature gardée derrière flag) | Voir décision §8 |
-| `runtime_a3/` + router `runtime_v6.py` + infra de `runtime_v5/` + `runtime_v3/nli_judge` | **`runtime/`** | Q/A KG-first : Parse → Plan → Execute → Evaluate → Synthesize | Terme aligné sur VISION §4.4 |
-| `semantic/inference/` | **`inference/`** | InferenceEngine (alimente le router `insights`) | Le reste de `semantic/` est dissous |
-| `semantic/utils/` (langue, embeddings) | **`common/nlp/`** | Détection de langue + embeddings utilitaires | Fusion dans le socle commun |
-| `neo4j_custom/` | **`kg/neo4j/`** | Utilitaires Neo4j | Regroupement KG (§4, optionnel) |
-| `relations/` | **`kg/relations/`** | Relations claim-vs-claim, enrichissement KG | Regroupement KG (optionnel) |
-| `ontology/` | **`kg/ontology/`** | Catalogues d'entités/types | Regroupement KG (optionnel) |
-| `hygiene/` | **`kg/hygiene/`** | Règles de qualité KG | Regroupement KG (optionnel) |
-| `entity_resolution/` | **`kg/entity_resolution/`** | Résolution/fusion d'entités | Regroupement KG (optionnel) |
-
-### 3.3 Noms conservés (déjà porteurs)
-`api/`, `ingestion/`, `common/`, `config/`, `retrieval/`, `memory/`, `navigation/`, `wiki/`,
-`atlas/`, `verification/`, `logging/`, **`domain_packs/`** (nom déjà porteur : packs domain-centric
-pluggables — concept central, à conserver tel quel).
+### Décision
+`claimfirst/v6/` (extraction de procédures, derrière flag `V6_PROCEDURE_EXTRACTION` **off**) +
+module `runtime_v6/` (schémas Procedure/Reference, **pas** un runtime Q/A) → à reclasser ensemble
+en feature d'extraction optionnelle (cf §10 D3).
 
 ---
 
-## 4. Architecture cible du dépôt `osmosis`
+## 2. BLOC 2 — Post-processing après ingestion
+
+**Découverte clé :** le vrai post-processing KG n'est **pas** dans les fichiers `pass*_jobs.py`
+(qui sont **manuels** via l'admin, et legacy). Il est **inline dans `claimfirst/worker_job.py`** :
+```
+après extraction des claims (≥1-2 docs + Neo4j) :
+  ├─ détection chaînes cross-doc   (claimfirst/composition/chain_detector)
+  ├─ canonicalisation entités       (claimfirst/extractors/merge_arbiter)
+  ├─ clustering cross-doc           (union-find inline)
+  ├─ comparaison signatures Q       (claimfirst/comparisons/qs_comparator)
+  └─ KG Hygiene L1                  (hygiene/engine.HygieneEngine, scope DOCUMENT_SET)
+```
+La déduplication d'entités est faite par `api/services/knowledge_graph_service.py`
+(`deduplicate_entities_by_name`, Cypher), **pas** par le module `entity_resolution/`.
+
+### GARDER
+- `hygiene/` (14) — appelé par le worker ClaimFirst (Phase 13) → cœur du post-processing live.
+- `ontology/` (16) — domain-context injector/store + extractors ClaimFirst.
+- La logique de post-processing inline → **à extraire** du worker dans un module dédié
+  `enrichment/` (cf arborescence §8).
+- La dédup Cypher (`knowledge_graph_service`) → conserver (rattacher au domaine KG).
+
+### JETER (pipeline pass2/3/4 manuel + modules legacy)
+- `ingestion/queue/pass2_jobs.py`, `pass3_jobs.py`, `pass4_jobs.py` — déclenchés manuellement
+  depuis `api/routers/admin.py`, non chaînés en prod.
+- `ingestion/queue/pass35_jobs.py` — **aucun caller** (mort).
+- `ingestion/queue/reprocess_job.py` — reprocess du pipeline Stratified V2 (désactivé).
+- `consolidation/` (12) — lié au pass2 manuel.
+- `entity_resolution/` (13) — atteint seulement via `consolidation` (pass4 manuel) + chemin osmose
+  legacy ; la dédup live ne passe pas par lui.
+- `facets/` (11), `lifecycle/` (5), `audit/` (3) — **0 importeur** (orphelins totaux).
+
+### PARTIEL
+- `relations/` (56) — **pas** dans la chaîne d'ingestion. Les *writers* sont le pass2 manuel
+  (à jeter). Un sous-ensemble *lecture* sert la recherche graphe (`graph_first_search`,
+  `tier_filter`, router `claims`). → Garder uniquement le sous-ensemble lecture, à préciser au
+  moment du retrait (cf §10 D5). NB : `graph_first_search` est actuellement désactivé.
+
+---
+
+## 3. BLOC 3 — Runtime de questionnement
+
+Il existe **8 variantes de runtime** + un endpoint `/search` indépendant. `runtime_a3` est la
+lignée vivante (la plus récente) et est quasi autonome (ne dépend que de `common/`).
+
+### Consolider en un seul `runtime/`
+| Source | Action |
+|---|---|
+| `runtime_a3/` (14) | **Cœur** → `runtime/answering/` (orchestrator, parse, plan, execute, evaluate, synthesize, resolvers, reranker, grounding) |
+| router `api/routers/runtime_v6.py` | **Façade** → `api/routers/runtime.py` (instancie a3) |
+| `runtime_v3/nli_judge.py` | **Porter** (seul fichier requis par a3 + verifier) |
+| Infra de `runtime_v5/` : `api/` (admission, idempotency, job_store, sse), `tools/` (registry, sanitizer), `verifier/` (claim_segmenter, backends, grounding_verifier, thresholds, failure, answer_checks), `observability/` (metrics, tracer, pii), `agent/{budgets,cancellation,redlock,tenant_guard,two_phase_publish}` | **Porter** (réutilisable, sinon perte sèche — personne d'autre ne l'importe) |
+| `/search` : `api/routers/search.py`, `api/services/search.py`, `synthesis.py`, `retriever.py`, `signal_policy.py`, `query_decomposer.py` | **GARDER** → `runtime/search/` ; **indépendant** des runtime_v* |
+| `retrieval/` (Layer R, rechunker) | **GARDER** → `runtime/retrieval/` |
+| `anchor/` (4), `perspectives/` (9) | **GARDER** (utilisés côté search) |
+| `semantic/inference/` | **GARDER** → `inference/` (router `insights`) |
+
+### JETER
+`runtime_v2/` (après découplage : encore importé par `anchor/anchor_extractor`, `atlas/generator`,
+`api/services/query_decomposer`), `runtime_v3/` (sauf `nli_judge`), router `runtime_v4.py`,
+`runtime_v4_poc/`, `runtime_v4_2/`, `facts_first/` (20, consommé uniquement par v4* + verifier v5),
+et l'**orchestration agentique de v5** (`reasoning_agent*.py`, `agent/{execution_plan,loop_signature}`,
+`query_reformulator.py`, `doc_topics_loader.py`, `*_llm_caller.py`, `reading_tools*.py`).
+
+### Dissoudre `semantic/`
+Le package `semantic/` (31) a son `__init__` **DEPRECATED**. Seuls deux îlots vivants :
+`semantic/inference/` → `inference/` ; `semantic/utils/` (détection langue, embeddings) →
+`platform/common/nlp/`. Tout le reste sert le chemin `osmose_agentique` mort → JETER.
+
+---
+
+## 4. BLOC 4 — Frontend + admin
+
+Qualité ~7/10, socle propre (`lib/` axios typé). **GARDER** le frontend, nettoyage ciblé.
+
+### Nettoyage général
+- Supprimer : `app/rfp-excel/page-original.tsx` (doublon), `components/common/LanguageSelector.tsx`,
+  `components/layout/ContextualSidebar.tsx` (orphelins).
+- `next.config.js` : retirer `ignoreBuildErrors:true` + `ignoreDuringBuilds:true` (dette TS/ESLint
+  cachée) ; `tsconfig` target `es5` → `es2020+`.
+- API helper `documentTypes` (DEPRECATED dans `lib/api.ts`) → retirer.
+- Pages hors-nav à décider : `/documents/upload`, `/documents/rfp` (doublons), `/wiki` (legacy →
+  garder `/wiki/articles` + `/atlas`).
+
+### Ménage de la nav admin (`app/admin/layout.tsx`)
+**Supprimer (mort / 404) :**
+- `Runtime V2 (chat)` → `/chat/runtime-v2` (+ `app/api/runtime_v2/*` + `components/runtime/`) :
+  suit le runtime_v2 backend jeté.
+- `Runtime Calibration` → `/admin/runtime-calibration` : **lien mort, page inexistante (404)**.
+- `/admin/living-ontology` : backend `living_ontology` **désactivé** dans `api/main.py`.
+- `/admin/markers` (hors-nav) : sauf usage réel de la feature.
+
+**Renommer :** `Relations V3.3` → **`Relations`**.
+
+**Déporter vers les dépôts indépendants (cf §6) :** la sous-section *Analyse* mélange produit et
+observabilité/R&D :
+- `Benchmarks` (`/admin/benchmarks`), `Golden Set` (`/admin/relations/golden-set`) → `osmosis-bench`.
+- `Audit Corpus` (`/admin/corpus-audit`), `Corpus Intelligence` (`/admin/corpus-intelligence`) →
+  `osmosis-cockpit` (ou garder Corpus Intelligence si jugé produit).
+
+**Garder (admin produit) :** GPU & Compute, Backup & Restore, Configuration (découper, 1315 l.),
+Apparence ; Claim-First Pipeline, Mode Burst ; Domain Context (découper, 2309 l.), Post-Import,
+KG Hygiene, Domain Packs ; Contradictions, Relations ; Générateur Atlas.
+
+---
+
+## 5. BLOC 5 — Cockpit (déporté)
+
+`cockpit/` (service FastAPI autonome : WebSocket + UI statique + collectors docker/burst/
+llm_budget/ragas/pipeline) → **dépôt indépendant `osmosis-cockpit`**. C'est un système de
+supervision qui se *branche* sur une instance osmosis pour remonter métriques/feedback ; il ne
+doit pas être livré en prod sur chaque déploiement. Définir un **contrat d'interface stable**
+(endpoints métriques + format logs) plutôt qu'un import de code partagé.
+
+---
+
+## 6. BLOC 6 — Orchestration AWS
+
+Deux mécanismes distincts à ne pas confondre :
+
+### (a) Burst GPU éphémère — VIVANT, cœur métier (GARDER)
+Loue une instance **Spot GPU** à la demande pour absorber l'extraction LLM/embeddings lourde,
+piloté depuis l'UI admin (`api/routers/burst.py` → `BurstOrchestrator`).
+Flux : `create_stack(knowwhere-burst-{batch})` sur AMI Golden (vLLM + TEI via UserData) → bascule
+des providers LLM/embeddings (`provider_switch`, état en Redis `osmose:burst:*` + fichier partagé) →
+résilience Spot (`resilient_client`, `aws_truth_service` détecte le changement d'IP, `resync_subscriber`
+réactive) → teardown (`TargetCapacity=0` par défaut, ou `delete_stack`).
+Deux templates : `burst-spot.yaml` (Profil A : Qwen2.5-**14B**-AWQ + TEI sur L4/A10G 24 Go) ;
+`burst-spot-72b.yaml` (Profil B : **72B**-AWQ seul sur L40S 48 Go, embeddings sur GPU worker).
+
+**GARDER :** `ingestion/burst/` (orchestrator, provider_switch, resilient_client, aws_truth_service,
+resync_subscriber, types), `ingestion/burst/cloudformation/burst-spot{,-72b}.yaml`,
+`scripts/golden-ami/install-burst.sh`, `api/routers/burst.py`.
+**INCERTAIN :** `ingestion/burst/artifact_{exporter,importer}.py` (mode hybride S3 — vérifier usage).
+
+### (b) Déploiement EC2 monolithe — LEGACY/redondant (JETER ou isoler)
+`cloudformation/knowbase-stack.yaml` (instance unique toute la stack Docker depuis ECR +
+auto-destruction Lambda) + `scripts/aws/deploy-*`. Redondant avec le burst → garder un seul chemin.
+- **JETER** : `scripts/aws/deploy-ec2.ps1` (SSH manuel, doublon), `repair-deployment.ps1`,
+  `convert-utf8-bom.ps1` (hors sujet).
+- **INCERTAIN** (si on garde un déploiement EC2) : `knowbase-stack.yaml`, `deploy-cloudformation.ps1`,
+  `destroy-cloudformation.ps1`, `deploy-on-ec2.sh`, `aws-{start,stop,terminate}-instance.ps1`.
+
+### CI/CD images (GARDER, renommer)
+`buildspec.yml` (CodeBuild → ECR) + `docker-compose.ecr.yml` + `scripts/aws/build-and-push-ecr.ps1`
++ `setup-iam-permissions.ps1`. Incohérence à corriger : `build-and-push-ecr.ps1` gère loki/promtail/
+grafana mais pas `buildspec.yml` (désync CI).
+
+### Doublons à résoudre
+- **Backup/restore** : deux paires (`backup-to-s3`/`restore-from-s3` vs `backup-knowbase`/
+  `restore-knowbase`) → en garder **une**.
+- README `scripts/aws/README.md` référence `delete-stack.ps1` (inexistant) → corriger.
+
+### Renommage AWS (knowbase/SAP en dur)
+ECR repos `sap-kb-{app,worker,frontend,ui,...}` → `osmosis-*` (buildspec, build-and-push-ecr,
+docker-compose.ecr) ; IAM `sap-kb-codebuild-user` ; buckets `knowbase-backups-*`,
+`knowbase-cloudformation-templates-temp` ; containers/volumes/réseau `knowbase-*` ; chemins
+`/home/ubuntu/knowbase`, `C:\Project\SAP_KB`. **Externaliser** `AWS_ACCOUNT_ID=715927975014` et
+`eu-west-1` (hardcodés partout). Le code burst utilise déjà des préfixes propres (`osmose:`,
+`knowwhere-burst-`) — à aligner sur `osmosis`.
+
+---
+
+## 7. Socle transverse (toutes briques)
+
+- `common/` (30) → éclater : `platform/storage/` (clients Qdrant/Neo4j/Redis/Postgres),
+  `platform/llm/` (llm_router, embeddings, providers), `platform/common/` (utils, nlp ex-semantic/utils).
+- `config/` (7) + `config/**.yaml` (métier) → `config/` (conserver tel quel).
+- `db/` (5, SQLAlchemy app : users/auth) → `platform/db/`.
+- `logging/` (2) → `platform/logging/`.
+
+---
+
+## 8. Arborescence repensée (proposition)
+
+Réorganisation **par bloc fonctionnel** plutôt que par pile horizontale. L'`api/` redevient une
+couche HTTP fine ; la logique métier vit dans les packages de bloc.
 
 ```
 osmosis/
 ├── src/osmosis/
-│   ├── api/                  # FastAPI : create_app, routers (élagués), services, schemas
-│   ├── ingestion/            # worker RQ, dispatcher, jobs, folder_watcher, burst, resilience
-│   │   └── extraction/       # ex-extraction_v2 : Docling + Vision + cache versionné
-│   ├── claims/               # ex-claimfirst : pipeline claims atomiques (cœur)
-│   │   └── procedures/       # ex-claimfirst/v6 + ex-module runtime_v6 (gated)  [cf §8]
-│   ├── runtime/              # Q/A KG-first consolidé (ex-a3 + infra v5 + nli_judge v3)
-│   │   ├── verifier/  api/  tools/  observability/
-│   ├── retrieval/            # Layer R, rechunker, services de recherche
-│   ├── inference/            # ex-semantic/inference (InferenceEngine → insights)
-│   ├── kg/                   # [regroupement proposé]
-│   │   ├── relations/  ontology/  hygiene/  entity_resolution/  neo4j/
-│   ├── domain_packs/         # Domain Packs pluggables (ajout de packs domain-centric)
-│   ├── memory/               # sessions
-│   ├── navigation/  wiki/  atlas/  verification/
-│   ├── common/               # clients (Qdrant/Neo4j/Redis/PG), llm_router, nlp/, utils
-│   ├── config/               # settings + chargement YAML
-│   └── logging/
-├── frontend/                 # repris ~tel quel (nettoyage mineur, cf §5.9)
-├── config/                   # YAML métier (llm_models, prompts, domains…)
-├── doc/                      # VISION + ROADMAP + ARCH_* + OPS + DEV_GUIDE + ongoing/adr
-├── tests/                    # tests alignés au code repris
-├── migrations/               # *.cypher versionnés
+│   ├── kg/                       # Modèle Knowledge Graph (domaine partagé écrit par l'ingestion, lu par le runtime)
+│   │   ├── schema/               # Document/Claim, bitemporel, persistence Neo4j
+│   │   ├── ontology/             # ex-ontology (catalogues entités/types)
+│   │   ├── hygiene/              # ex-hygiene (règles qualité KG)
+│   │   ├── relations/            # ex-relations — SOUS-ENSEMBLE lecture (cf §10 D5)
+│   │   └── dedup.py              # ex-knowledge_graph_service.deduplicate_*
+│   │
+│   ├── ingestion/                # BLOC 1+2 — faire entrer les docs dans le KG
+│   │   ├── extraction/           # ex-extraction_v2 : parse (Docling+Vision) + cache versionné
+│   │   ├── claims/               # ex-claimfirst : extraction de claims atomiques
+│   │   │   └── procedures/       # ex-claimfirst/v6 + ex-module runtime_v6 (gated, cf D3)
+│   │   ├── enrichment/           # BLOC 2 : post-processing extrait du worker (cross_doc, canonicalization, clustering, comparison, hygiene_l1)
+│   │   ├── domain_packs/         # packs domain-centric (NER sidecar à l'ingestion)
+│   │   ├── burst/                # BLOC 6 (applicatif) : burst GPU + cloudformation/burst-spot*.yaml
+│   │   ├── queue/                # worker RQ, dispatcher, jobs
+│   │   └── watcher.py            # ex-folder_watcher
+│   │
+│   ├── runtime/                  # BLOC 3 — questionner le système
+│   │   ├── answering/            # ex-runtime_a3 (Parse→Plan→Execute→Evaluate→Synthesize)
+│   │   ├── search/               # ex-/search (api/services/search, synthesis, retriever, signal_policy, query_decomposer, perspectives, anchor)
+│   │   ├── retrieval/            # ex-retrieval (Layer R, rechunker)
+│   │   ├── verifier/             # porté de runtime_v5
+│   │   ├── tools/                # porté de runtime_v5 (ToolRegistry)
+│   │   ├── observability/        # porté de runtime_v5 (OTel, metrics, pii)
+│   │   └── jobs.py               # porté de runtime_v5 (admission, idempotency, job_store, sse)
+│   │
+│   ├── inference/                # ex-semantic/inference (router insights)
+│   ├── features/                 # surfaces secondaires : wiki, atlas, navigation, memory, verification
+│   │
+│   ├── platform/                 # socle technique
+│   │   ├── storage/              # clients Qdrant/Neo4j/Redis/Postgres (ex-common/clients)
+│   │   ├── llm/                  # llm_router, embeddings, providers (ex-common)
+│   │   ├── common/               # utils + nlp (ex-common/utils + ex-semantic/utils)
+│   │   ├── db/                   # SQLAlchemy app (users/auth)
+│   │   └── logging/
+│   │
+│   ├── api/                      # couche HTTP fine : routers regroupés par bloc (ingestion/, runtime/, kg/, admin/, features/)
+│   └── config/
+│
+├── frontend/                     # repris ~tel quel (nettoyage §4)
+├── config/                       # YAML métier (llm_models, prompts, domains…)
+├── doc/                          # VISION + ROADMAP + ARCH_* + OPS + DEV_GUIDE + ongoing/adr
+├── tests/                        # tests alignés au code repris
+├── migrations/                   # *.cypher versionnés
 ├── schemas/
-├── scripts/                  # ~40 outils durables (setup/reset/migrate/import-export)
-├── docker-compose.infra.yml
-├── docker-compose.yml
-├── docker-compose.monitoring.yml
-├── app/Dockerfile  frontend/Dockerfile
-└── README.md  CLAUDE.md (réécrits)
+├── deploy/                       # BLOC 6 (infra) — IaC & scripts dédoublonnés
+│   ├── ci/                       # buildspec.yml + docker-compose.ecr.yml (source unique repos ECR)
+│   ├── golden-ami/               # install-burst.sh
+│   ├── scripts/                  # backup-s3/restore-s3, setup-iam (1 seule paire backup)
+│   ├── compose/                  # docker-compose.{infra,app,monitoring}.yml
+│   └── ec2-monolith/             # OPTIONNEL (mécanisme b) : osmosis-stack.yaml + deploy/destroy — sinon supprimer
+└── README.md  CLAUDE.md          # réécrits (naming osmosis, structure réelle)
 ```
 
-> Le regroupement `kg/` est **optionnel** : il clarifie mais représente un déplacement de plus.
-> Si on veut minimiser les déplacements au premier jet, garder `relations/`, `ontology/`,
-> `hygiene/`, `entity_resolution/`, `neo4j_custom/` à plat et regrouper plus tard.
+Dépôts séparés : **`osmosis-cockpit`** (supervision), **`osmosis-bench`** (harnais d'éval +
+`benchmark/` code + gold sets + `scripts/router/` entraînement DeBERTa).
+
+> Le regroupement `kg/` et l'éclatement de `common/` en `platform/` sont les déplacements les
+> plus structurants : ils peuvent être faits en 2e passe si l'on veut un premier import rapide.
 
 ---
 
-## 5. Inventaire détaillé : GARDER / RENOMMER / JETER
+## 9. Convention de nommage
 
-### 5.1 Ingestion (cœur, GARDER)
-Flux réel confirmé :
-```
-folder_watcher / dispatcher → RQ jobs_v2.ingest_document_v2_job
-  → extraction (Docling + Vision) ──> cache data/extraction_cache (versioned_cache.py, v5)
-  → [Stratified V2 / osmose_agentique : SKIPPÉ par défaut — à supprimer]
-  → enqueue ClaimFirst → claims.orchestrator  (cœur productif)
-```
-- **GARDER** : `ingestion/queue/` (`worker.py`, `dispatcher.py`, `jobs_v2.py`, `connection.py`,
-  `__main__.py`), `ingestion/folder_watcher.py`, `ingestion/resilience/`, `ingestion/burst/`.
-- **GARDER → `extraction/`** : tout `extraction_v2/**` (52 fichiers), dont
-  `extraction_v2/cache/versioned_cache.py` = **le vrai gestionnaire du cache précieux** (format v5).
-- **GARDER (utilitaires relus par claims)** puis fondre dans `extraction/` :
-  `stratified/pass0/cache_loader.py`, `stratified/pass0/adapter.py`,
-  `stratified/pass1/assertion_unit_indexer.py`, `stratified/models/`, `structural/models.py`.
-- **JETER** : `ingestion/osmose_agentique.py`, `ingestion/osmose_*`, `pass2_orchestrator.py`,
-  `ingestion/processors/` (vide), `ingestion/extraction_cache.py` (ancien `.knowcache.json`,
-  remplacé par `versioned_cache.py` ; vérifier d'abord les call-sites admin/backup/purge).
-- **À vérifier** : jobs auxiliaires `pass2_jobs.py / pass3 / pass35 / pass4 / reprocess_job.py`
-  (sont-ils enqueués en prod ? sinon jeter).
-
-### 5.2 Claims (cœur, GARDER → `claims/`)
-`claimfirst/` (105 fichiers, 40k LOC) repris intégralement et renommé `claims/`. Sous-modules
-réellement utilisés par l'orchestrator/worker : `models/`, `extractors/`, `linkers/`,
-`clustering/`, `composition/`, `axes/`, `applicability/`, `resolution/`,
-`persistence/claim_persister.py`, `quality/` + `quality_filters.py`,
-`comparisons/qs_comparator.py`, `subject_indexer.py`, `constants.py`.
-- `claimfirst/v6/` → `claims/procedures/` (gardé derrière flag `V6_PROCEDURE_EXTRACTION`, **off**
-  par défaut). Décision §8.
-
-### 5.3 Runtime Q/A (consolider → `runtime/`)
-`runtime_a3` est quasi autonome (ne dépend que de `common/`). Plan de consolidation :
-- **GARDER (cœur)** : tout `runtime_a3/` → `runtime/` (`orchestrator, parse, plan, execute,
-  evaluate, synthesize, schemas, predicate_resolver, subject_resolver, claim_filter, reranker,
-  sufficiency_checker, grounding_verifier`).
-- **GARDER (façade)** : `api/routers/runtime_v6.py` → `api/routers/runtime.py`.
-- **PORTER depuis `runtime_v3/`** : `nli_judge.py` (seul fichier requis — par a3 + verifier).
-- **PORTER depuis `runtime_v5/` (infra réutilisable, sinon perte sèche)** :
-  - `api/` : `models, admission, idempotency, job_store, sse, router`
-  - `tools/` : `registry, sanitizer`
-  - `verifier/` : `claim_segmenter, backends, grounding_verifier, thresholds, failure, answer_checks`
-  - `observability/` : `metrics, tracer, pii`
-  - `agent/` : `budgets, cancellation, redlock, tenant_guard, two_phase_publish`
-- **JETER** : `runtime_v2/` (après découplage, cf note), `runtime_v3/` (sauf `nli_judge`),
-  router `runtime_v4.py`, `runtime_v4_poc/`, `runtime_v4_2/`, `facts_first/` (20 fichiers ;
-  consommé uniquement par v4* + verifier v5), et l'**orchestration agentique de v5**
-  (`reasoning_agent*.py`, `agent/execution_plan.py`, `loop_signature.py`, `query_reformulator.py`,
-  `doc_topics_loader.py`, `*_llm_caller.py`, `reading_tools*.py`).
-- **Découplage requis avant suppression de `runtime_v2`** : encore importé par
-  `anchor/anchor_extractor.py`, `atlas/generator.py`, `api/services/query_decomposer.py`.
-
-### 5.4 Recherche & retrieval (GARDER)
-`/search` est **totalement indépendant** des `runtime_v*` (confirmé).
-- **GARDER** : `api/routers/search.py`, `api/services/search.py`, `synthesis.py`, `retriever.py`,
-  `signal_policy.py`, `query_decomposer.py` (après découplage runtime_v2), `perspectives/`.
-- **GARDER** : `retrieval/` (`qdrant_layer_r.py`, `rechunker.py`).
-- **Mort/désactivé** : `graph_first_search.py`, `graph_guided_search.py` (présents mais OFF) —
-  jeter sauf si réactivation prévue ; dans ce cas ils retiennent `semantic/inference`.
-
-### 5.5 Knowledge Graph (GARDER → `kg/`)
-`relations/` (56 fichiers, très référencé), `ontology/` (16), `hygiene/` (14, router monté),
-`entity_resolution/` (13, router monté), `neo4j_custom/` (5). Regrouper sous `kg/` (optionnel).
-
-### 5.6 Features secondaires actives (GARDER)
-`memory/` (sessions), `navigation/`, `wiki/` (router monté), `atlas/` (router monté),
-`verification/` (router `/verify` monté), `inference/` (ex-semantic/inference → router `insights`),
-`domain_packs/` (router + reprocess) — mécanisme d'ajout de packs domain-centric, **conservé tel
-quel** (nom porteur, concept central de l'agnosticité multi-domaines AX-11).
-
-### 5.7 Socle transverse (GARDER)
-`common/**` (+ absorbe `semantic/utils` → `common/nlp/`), `config/**`, `logging/`.
-
-### 5.8 À SUPPRIMER (mort confirmé)
-- **Zéro référence entrante, non montés** : `facets/`, `audit/`, `lifecycle/`, `rules/`, `ui/`,
-  `current/` (~27 fichiers).
-- **Pivot d'extraction abandonné** : `stratified/` (57, sauf utilitaires §5.1), `structural/`
-  (sauf `models.py`), `agents/` (20, `__init__` DEPRECATED, appelé seulement par chemin skippé),
-  `semantic/` (sauf `inference/` et `utils/` → relocalisés ; `__init__` du package DEPRECATED).
-- **Lignée runtime abandonnée** : cf §5.3 (`runtime_v2`, v3 sauf nli, v4*, v5 orchestration,
-  `facts_first`).
-- **Incertains à trancher** (refs faibles/indirectes) : `consolidation/`, `linguistic/`
-  (`coref_engine` DEPRECATED, garder FastCoref si utilisé), `anchor/`, `perspectives/`
-  (vérifier usage par synthèse).
-
-### 5.9 Frontend (GARDER, nettoyage mineur)
-Qualité ~7/10, socle propre (`lib/` axios typé). Nettoyage :
-- Supprimer : `app/rfp-excel/page-original.tsx` (doublon), `components/common/LanguageSelector.tsx`
-  et `components/layout/ContextualSidebar.tsx` (orphelins).
-- Pages hors-nav à décider : `/documents/upload`, `/documents/rfp` (doublons import/rfp-excel),
-  `/wiki` (legacy → garder `/wiki/articles` + `/atlas`).
-- Réactiver dans `next.config.js` : retirer `ignoreBuildErrors:true` + `ignoreDuringBuilds:true`
-  (dette TS/ESLint cachée). Repasser `tsconfig` target `es5` → `es2020+`.
-- API helper `documentTypes` marqué DEPRECATED dans `lib/api.ts` → retirer.
-
-#### 5.9.1 Ménage de la navigation admin (`app/admin/layout.tsx`)
-La nav admin (sections Infrastructure / Import / Knowledge Graph / Analyse / Atlas) mélange du
-produit et des dashboards R&D, et contient des entrées mortes.
-
-**Supprimer (mort / 404) :**
-- `Runtime V2 (chat)` → `/chat/runtime-v2` : suit le runtime_v2 backend jeté (cf §5.3). Retirer
-  l'item nav + `app/chat/runtime-v2/` + `app/api/runtime_v2/*` + `components/runtime/`.
-- `Runtime Calibration` → `/admin/runtime-calibration` (`layout.tsx:101`) : **lien mort, la page
-  n'existe pas (404)**. Retirer l'item.
-- `/admin/living-ontology` (page hors-nav, liée depuis le dashboard) : backend `living_ontology`
-  **désactivé** dans `api/main.py`. Retirer la page + la carte du dashboard.
-- `/admin/markers` (page hors-nav orpheline) : à retirer sauf usage réel de la feature markers.
-
-**Renommer (suffixe de version) :**
-- `Relations V3.3` → **`Relations`** (route `/admin/relations` inchangée).
-
-**Déporter hors de l'admin produit (vers `osmosis-cockpit` / `osmosis-bench`, cf §2) :**
-La sous-section *Analyse* empile des surfaces d'**observabilité/R&D** qui correspondent à la mission
-du cockpit (« métriques et feedback sur l'état du système ») et du harnais bench :
-- `Benchmarks` (`/admin/benchmarks`, 1335 l.) → `osmosis-bench`.
-- `Golden Set (annotation)` (`/admin/relations/golden-set`) → outil d'annotation/éval → `osmosis-bench`.
-- `Audit Corpus` (`/admin/corpus-audit`) → diagnostic → `osmosis-cockpit`.
-- `Corpus Intelligence` (`/admin/corpus-intelligence`) → dashboard → cockpit (ou garder si jugé produit).
-
-**Garder dans l'admin produit osmosis :** GPU & Compute, Backup & Restore, Configuration
-(découper, 1315 l.), Apparence ; Claim-First Pipeline, Mode Burst ; Domain Context (découper,
-2309 l.), Post-Import, KG Hygiene, Domain Packs ; Contradictions, Relations ; Générateur Atlas.
-
-**Cible :** une nav admin resserrée sur l'exploitation quotidienne ; l'observabilité et la R&D
-vivent dans des surfaces indépendantes.
-
-### 5.10 Infra & config (GARDER l'actif, élaguer les doublons)
-- **GARDER** : `docker-compose.infra.yml` (Qdrant v1.15.1, Redis 7.2, Neo4j 5.26, Postgres/pgvector)
-  + `docker-compose.yml` + `docker-compose.monitoring.yml` ; `frontend/Dockerfile` (multi-stage,
-  modèle à suivre) ; `config/**` (YAML métier, conserver tel quel) ; `migrations/*.cypher` ;
-  `schemas/` ; module `burst/` + `cloudformation/burst-spot*.yaml` (GPU Spot à la demande).
-- **JETER/ÉLAGUER** : `docker-compose.app.yml` (doublon désynchronisé), `.build.yml`,
-  `.ecr.yml` (sauf déploiement ECR), `cloudformation/knowbase-stack.yaml` (EC2 monolithe
-  redondant avec le burst — garder un seul chemin).
-- **À refondre** : `app/Dockerfile` en **multi-stage**, sortir torch/spacy/docling/fasttext de la
-  base, retirer `pytest`/`respx` du runtime, LibreOffice/Java seulement si conversion Office utile.
-
-### 5.11 Doc, scripts, tests
-- **Doc — GARDER** : `doc/README.md`, `VISION.md`, `EXECUTION_ROADMAP.md`, `ARCH_PIPELINE.md`,
-  `ARCH_CLAIMFIRST.md`(→`ARCH_CLAIMS.md`), `ARCH_RETRIEVAL.md`, `ARCH_STOCKAGE.md`, `OPS.md`,
-  `DEV_GUIDE.md`, `ongoing/adr/` (ADR structurants), `ongoing/etudes/`. Mettre à jour les
-  références de nommage (knowbase→osmosis, claimfirst→claims, extraction_v2→extraction).
-- **Doc — NE PAS reprendre** : `doc/archive/` (443), `ongoing/chantiers/` + `ongoing/sessions/`
-  (journaux datés → archive hors dépôt).
-- **Scripts — GARDER (~40)** : `setup_*`, `migrate_*`/`migration_*`, `reset_*`,
-  `import_document.py`/`export_document.py`, `clean_all_databases.*`,
-  `full_reset_preserve_cache.*`, `backfill_*`, `check_qdrant.py`, `aws/`, `golden-ami/`, `router/`.
-- **Scripts — JETER (~160)** : `audit_*`, `diag_*`/`diagnostic_*`, `analyze_*`, `bench_*`,
-  doublons `test-burst-v2..v4.ps1`, `dump_*`, `inspect_*`, `night_orchestrator`, etc.
-- **Tests — GARDER, élaguer** : alignés ~90 % avec le code actif (claims 53, runtime 27,
-  common 21, api 17, relations 17). Retirer les tests de code jeté : `runtime_v2/`, `runtime_v6/`
-  (1), `mvp_v1/`, `phase_1_8/`, `eval_deepseek/`, `stratified/` (sauf utilitaires gardés).
-- **Fichiers racine — JETER** : `AUDIT_README_RAPPORT.md`, `TASK_COMPLETE.md`,
-  `routing_fails_audit.txt`, `analyze_cache.py`. **GARDER** : `enterprise_sap.osmpack` (artefact
-  domain pack), `dc.ps1`, `kw.ps1` (adapter), `migrations/`, `schemas/`.
+1. Package racine `knowbase` → **`osmosis`** (tous les `from knowbase.…` → `from osmosis.…`).
+2. **Aucun suffixe de version / nom de pivot** : `extraction_v2`→`extraction`,
+   `claimfirst`→`claims`, `runtime_a3`/`runtime_v*`→`runtime`, `semantic`→dissous,
+   `stratified`/`facts_first`→non migrés.
+3. Naming AWS/CI : `sap-kb-*`, `knowbase-*` → `osmosis-*` (cf §6).
+4. `domain_packs` **conservé tel quel** (nom porteur : packs domain-centric pluggables, concept
+   central de l'agnosticité multi-domaines AX-11).
+5. Bannir des logs/code/doc : « KnowBase », « KnowWhere », « SAP KB ». Doc : renommer
+   `ARCH_CLAIMFIRST.md` → `ARCH_CLAIMS.md`.
 
 ---
 
-## 6. Procédure de migration suggérée
+## 10. Synthèse legacy à NE PAS migrer
 
-1. **Geler** une révision de référence de KBGPT (tag), pour traçabilité.
-2. **Créer** les dépôts `osmosis`, `osmosis-cockpit`, `osmosis-bench` (vides).
-3. **Script d'import sélectif** (rsync/copie) matérialisant l'arbo §4 : ne copier QUE les chemins
-   GARDER. Le mort n'est jamais copié.
-4. **Renommer** le package : `git mv`/déplacement + remplacement global `knowbase→osmosis` et la
-   table §3.2. Outil : recherche-remplacement contrôlée sur les imports.
-5. **Consolider `runtime/`** : fusionner a3 + infra v5 portée + `nli_judge` ; recâbler le router.
-6. **Dissoudre `semantic/`** : relocaliser `inference/` et `utils`→`common/nlp/`, supprimer le reste.
-7. **Découpler `runtime_v2`** de `anchor`/`atlas`/`query_decomposer` avant de ne pas l'importer.
-8. **Recâbler `api/main.py`** : ne monter que les routers vivants (retirer `runtime_v2..v5`,
-   `stratified` déjà commenté, `living_ontology`).
-9. **Réécrire** `README.md` + `CLAUDE.md` (naming osmosis, structure réelle, règles à jour).
-10. **Vérifier** : `mypy`/`ruff`/`pytest` verts ; build images ; `docker compose up` ; un import
-    document de bout en bout (ingestion → claims → KG) ; une requête `/search` ; une requête
-    `runtime`.
-11. **Initialiser** l'historique git sur un commit propre (« import osmosis depuis cœur actif KBGPT »).
+- **Orphelins (0 référence)** : `facets/`, `audit/`, `lifecycle/`, `rules/`, `ui/`, `current/`.
+- **Pivot extraction abandonné** : `stratified/` (sauf utilitaires §1), `structural/` (sauf
+  `models.py`), `agents/` (`__init__` DEPRECATED), `semantic/` (sauf `inference/`+`utils/`),
+  `osmose_agentique`/`osmose_*`.
+- **Lignée runtime abandonnée** : `runtime_v2`, `runtime_v3` (sauf `nli_judge`), `runtime_v4*`,
+  orchestration `runtime_v5`, `facts_first`.
+- **Pipeline post-processing manuel** : `pass2/3/35/4_jobs.py`, `reprocess_job.py`,
+  `consolidation/`, `entity_resolution/`.
+- **AWS legacy** : EC2 monolithe (cf §6b), scripts dédoublonnés.
+- **Doc/scripts** : `doc/archive/` (443), `ongoing/{chantiers,sessions}/`, ~160 scripts jetables
+  (`audit_*`, `diag_*`, `analyze_*`, `bench_*`), fichiers racine `AUDIT_README_RAPPORT.md`,
+  `TASK_COMPLETE.md`, `routing_fails_audit.txt`, `analyze_cache.py`.
 
----
-
-## 7. Points de vigilance / sécurité
-
-- 🔴 **`ngrok.yml` contient un authtoken en clair** — révoquer et exclure du nouveau dépôt.
-- 🟠 `buildspec.yml` expose l'AWS Account ID — paramétrer via variable.
-- 🟠 `next.config.js` : TS/ESLint désactivés au build → réactiver (cf §5.9).
-- 🟠 `app/Dockerfile` mono-stage avec ML lourd + outils de test en prod → refondre (cf §5.10).
-- 🟠 `CLAUDE.md` actuel **obsolète** (structure doc à 4 fichiers, naming « KnowWhere ») alors que
-  la doc réelle est refondée → réécrire pour osmosis.
-- ⚠️ **Cache précieux** : la règle « ne jamais supprimer `data/extraction_cache/` » reste valable ;
-  le gestionnaire est `extraction/cache/versioned_cache.py` (format v5), pas l'ancien
-  `.knowcache.json`.
-
----
-
-## 8. Décisions ouvertes à trancher
-
+### Décisions ouvertes
 | # | Décision | Recommandation |
 |---|---|---|
-| D1 | Renommer `claimfirst` → `claims` (et `ARCH_CLAIMFIRST.md`) ? | Oui (cohérent avec « Claim » de VISION) — mais vérifier l'impact sur les ADR qui citent ClaimFirst |
-| D2 | Regroupement `kg/` (relations+ontology+hygiene+entity_resolution+neo4j) ? | Optionnel ; faisable en 2e passe pour limiter les déplacements initiaux |
-| D3 | Sort de `claims/procedures/` (ex-claimfirst/v6 + module runtime_v6), feature gated OFF | Garder le code (renommé) mais hors chemin par défaut ; ou différer l'import tant que non activé |
-| D4 | `benchmark/` : dépôt séparé `osmosis-bench` ou sous-dossier `tests/eval/` d'osmosis ? | Dépôt séparé (29 Mo, R&D) |
-| D5 | Zones incertaines `consolidation/`, `linguistic/`, `anchor/`, `perspectives/` | Trancher par un dernier audit d'usage UI/synthèse avant import |
-| D6 | Sort de `graph_first_search`/`graph_guided_search` (OFF) et `living_ontology` | Si abandon définitif, jeter — et `inference/` ne reste justifié que par `insights` |
+| D1 | `claimfirst` → `claims` (+ `ARCH_CLAIMS.md`) ? | Oui (aligné « Claim » de VISION) |
+| D2 | Regroupement `kg/` + `platform/` dès le 1er import ? | Optionnel ; faisable en 2e passe |
+| D3 | Sort de `claims/procedures/` (gated OFF) | Garder le code renommé, hors chemin par défaut |
+| D4 | EC2 monolithe (mécanisme b) : garder ou supprimer ? | Supprimer si burst + futur déploiement managé suffisent |
+| D5 | `relations/` : préciser le sous-ensemble lecture à garder | Auditer `graph_first_search`/`tier_filter`/router `claims` au retrait |
+| D6 | `graph_first_search`/`graph_guided_search` (désactivés) + `living_ontology` | Si abandon, jeter ; sinon `inference/` justifié seulement par `insights` |
+
+---
+
+## 11. Procédure de migration
+
+1. **Geler** un tag de référence sur KBGPT (traçabilité).
+2. **Créer** les dépôts `osmosis`, `osmosis-cockpit`, `osmosis-bench`.
+3. **Import sélectif** (script de copie) matérialisant l'arbo §8 : ne copier QUE le vivant.
+4. **Renommer** package + modules (§9) par recherche-remplacement contrôlée des imports.
+5. **Consolider `runtime/`** (a3 + infra v5 portée + nli_judge) ; recâbler le router.
+6. **Extraire `enrichment/`** depuis `claimfirst/worker_job.py` (post-processing inline).
+7. **Dissoudre `semantic/`** ; découpler `runtime_v2` d'`anchor`/`atlas`/`query_decomposer`.
+8. **Recâbler `api/main.py`** : ne monter que les routers vivants.
+9. **Réécrire** `README.md` + `CLAUDE.md` (naming + structure réelle).
+10. **Vérifier** : `mypy`/`ruff`/`pytest` verts ; build images ; `docker compose up` ; import doc
+    de bout en bout (extraction → claims → enrichment → KG) ; requête `/search` ; requête `runtime`.
+11. **Initialiser** l'historique git sur un commit propre.
+
+---
+
+## 12. Points de vigilance / sécurité
+
+- 🔴 `ngrok.yml` : **authtoken en clair** — révoquer, exclure du dépôt.
+- 🟠 `buildspec.yml` : AWS Account ID en clair → variable.
+- 🟠 `next.config.js` : TS/ESLint désactivés au build → réactiver.
+- 🟠 `app/Dockerfile` mono-stage avec ML lourd (torch/spacy/docling/fasttext) + `pytest`/`respx`
+  en prod → refondre en multi-stage.
+- 🟠 `CLAUDE.md` actuel **obsolète** (structure doc, naming « KnowWhere ») → réécrire.
+- ⚠️ **Cache précieux** : règle « ne jamais supprimer `data/extraction_cache/` » maintenue ;
+  gestionnaire = `extraction/cache/versioned_cache.py` (v5).
 
 ---
 
