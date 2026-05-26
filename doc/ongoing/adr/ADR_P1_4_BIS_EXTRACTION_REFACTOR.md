@@ -61,9 +61,15 @@ Les mesures déterministes du jour cadrent l'ampleur :
 | Q13 | **Déduplication** | Doublons polluent le ranking | ❌ | **#2 dédup tiered** en post-ingestion |
 | Q14 | **Couverture / rappel** | Ne PAS perdre les faits importants (crainte Volet 1) | ✅ (sur-couvre) | Sélection ne coupe QUE le non-checkworthy ; **smoke vérifie le rappel** |
 | Q15 | **Fluence du texte du claim** | Qualité d'embedding + de synthèse | ✅ médiane 99c | Conserver |
-| Q16 | **Confiance calibrée** | Pondération au runtime, abstention honnête | champ `confidence` | Conserver, propager les flags (marginal, grounding) |
+| Q16 | **Confiance calibrée (composite)** | Pondération runtime + abstention honnête ([[project-judge-abstention-overfit]]) | champ `confidence` brut (overconfident) | **Signal composite** = raw LLM × grounding_score × structured_completeness × subject_canonical_present. Calibration post-hoc (temp scaling/isotonic) **différée** (besoin gold-set annoté). |
+| **Q17** | **Citation span-level (auditabilité)** | AI Act : « ce claim vient de cette phrase, page X » — pointer le Passage ne suffit pas | `unit_ids` ✅, `char_start/end` existent sur `AssertionUnit` | **Propager `source_char_spans`/`source_sentence_ids` au Claim** ; gate : ancrage dans un span **contigu** de la source (pas juste « sémantiquement proche »). Peu coûteux (données déjà là). |
+| **Q19** | **Normatif vs descriptif (poids déontique)** | Réglementaire/dual-use : « SHALL verify » (obligation) ≠ « typically verifies » (pratique) | partiel via `claim_type` (PRESCRIPTIVE) | **Extraction déterministe des marqueurs déontiques** (shall/must/should/may/required/prohibited/permitted + équiv. FR) → affine `claim_type` {normative/descriptive/definitional}. Domain-agnostic (déontique universel). Recouvre/renforce Q6. |
 
-**Apports NOUVEAUX de la refonte au-delà du volume** : **Q4 grounding gate**, **Q5 exactitude identifiants**, **Q6 modalité/négation**, **Q8 structured_form natif**, **Q3 subject_canonical quasi-obligatoire**. Ce sont les dimensions QA-critiques qui n'étaient pas explicitement garanties.
+**Apports NOUVEAUX de la refonte au-delà du volume** : **Q4 grounding gate**, **Q5 exactitude identifiants**, **Q6 modalité/négation**, **Q8 structured_form natif**, **Q3 subject_canonical quasi-obligatoire**, **Q16 confiance composite**, **Q17 citation span-level**, **Q19 normatif/descriptif**. Ce sont les dimensions QA-critiques (et compliance-critiques) qui n'étaient pas explicitement garanties.
+
+> **Q20 (différé Phase C)** — *Claim interdependence* : détecter à l'extraction qu'un claim en implique un autre (« X is mandatory » ⊨ « X is required ») pour enrichir le KG. Relève des relations claim-claim (Phase B/C), pas de P1.4-bis.
+
+> **Revue externe (Claude Web, 26/05/2026)** : architecture validée (multi-étapes, guided decoding, défaut sûr = SoTA). Gaps soulevés intégrés : Q17 (citation AI Act), Q19 (normatif), confiance composite (Q16 renforcé), grounding flag-not-reject, garde-fou longueur, robustesse détecteur énumération, smoke Qwen3-thinking. Décisions sur les 4 questions ouvertes → §11.
 
 ---
 
@@ -94,8 +100,16 @@ Les mesures déterministes du jour cadrent l'ampleur :
       source_unit_ids:[...], self_contained_text}
         │
 [DÉTERMINISTE GATES + POST]
-   ├─ Grounding gate (Q4/Q5) : identifiants du claim ∈ source (substring) ;
-   │   option NLI/bge-reranker : self_contained_text ⊨ passage. Sinon reject/flag.
+   ├─ Grounding gate (Q4/Q5/Q17) : (a) identifiants du claim ∈ source (substring, déterministe,
+   │   gratuit) ; (b) ancrage span CONTIGU dans la source (Q17 citation) ; (c) NLI léger
+   │   conditionnel sur claims sans identifiant : self_contained_text ⊨ passage.
+   │   NLI = MiniCheck-770M SI il charge proprement (sinon bge-reranker déjà chargé, prouvé
+   │   au probe dédup — HHEM écarté car remote code cassé). Seuil conservateur → **flag
+   │   `marginal=true`, PAS reject dur** (cohérent « NULL > faux » + préserver le rappel Q14).
+   ├─ Garde-fou longueur (Q3 vacuous résiduel) : claim < ~5 mots → `marginal=true` (flag),
+   │   SAUF s'il porte un identifiant protégé (ne jamais pénaliser un fait court mais précis).
+   ├─ Marqueurs déontiques (Q19) : extraction déterministe shall/must/should/may/required/
+   │   prohibited/permitted → affine claim_type {normative/descriptive/definitional}.
    ├─ subject_canonical (Q3) : subject_resolver_v2 → quasi-obligatoire, sinon marginal=true.
    ├─ entity linking (Q10), bitemporel (Q11), confidence (Q16) : inchangés.
    ├─ Dédup tiered (#2) : exact → cosine 0.93 → bge-reranker + garde-fou LARGE.
@@ -120,12 +134,14 @@ Guided decoding **XGrammar (vLLM)** avec un schéma où **l'énumération est un
   - `table`/`table_cell` → ligne = fait ; éviter d'exploser les cellules.
   - `paragraph`/`TEXT` → minimalité + détecteur d'énumération intra-phrase.
   - `HEADING` → contexte, pas claim en soi.
-- Limite honnête : Docling donne 1 `list_item` **par puce** (pas de conteneur « énumération ») → le cas piégeux « une phrase qui énumère » relève du schéma liste-comme-champ + détecteur regex coordination (déterministe).
+- Limite honnête : Docling donne 1 `list_item` **par puce** (pas de conteneur « énumération ») et **les énumérations intra-paragraphe** (« supports X, Y, and Z ») ne sont PAS marquées `list_item` → relèvent du schéma liste-comme-champ + détecteur regex coordination (déterministe).
+- **Robustesse du détecteur d'énumération (impératif)** : distinguer une énumération de valeurs partageant un prédicat (« supports X, Y **and** Z » → 1 claim-liste) d'une **coordination non-énumérative** : sujets coordonnés (« the pilot **and** the copilot must verify »), **alternative** (« procedure A **or** B may be used »), conjonction de propositions. **Défaut sûr = ne PAS décomposer si ambigu.** Tester explicitement ces faux positifs au smoke.
 
 ### 4.5 Fiabilité Qwen (Volet 3)
 - Qwen2.5-14B (ré-ingestion) : `guided_json` vLLM propre → **utiliser XGrammar**.
-- Qwen3-235B (extraction prod) : bug vLLM `guided_json`+`enable_thinking=False` (#18819) → **garder thinking on** ou valider/réparer.
+- Qwen3-235B (extraction prod) : bug vLLM `guided_json`+`enable_thinking=False` (#18819) → **garder thinking on** ou valider/réparer. ⚠️ **Vérifier que `thinking=on` ne dégrade pas la sortie structurée** : smoke Qwen3+thinking vs Qwen2.5-14B sur 2-3 docs ; si Qwen3+thinking < Qwen2.5, garder Qwen2.5-14B pour l'extraction (Qwen3 reste au runtime).
 - Température 0-0.2 ; prompts **courts mono-focus** ; **few-shot démonstratif cross-domain** (1 énumération gardée en liste, 1 opinion DROP, 1 modalité préservée).
+- **Option (si coût A+B problématique)** : modèle léger pour Stage A (sélection, tâche simple) + modèle plus fort pour Stage B (décompo). Non retenu par défaut (2 endpoints = complexité burst) ; à activer seulement si le coût/latence le justifie.
 
 ---
 
@@ -162,7 +178,8 @@ Guided decoding **XGrammar (vLLM)** avec un schéma où **l'énumération est un
 
 ## 8. Plan d'implémentation (incrémental, smoke-first)
 
-1. **P1.4b-1 — Segmenter** : option anti-fragmentation énumération + propagation item_type/unit_type. Tests unitaires.
+0. **P1.4b-0 — Pré-flight modèle/guided decoding** : valider guided decoding (XGrammar) sur le modèle de ré-ingestion **Qwen2.5-14B** ; smoke **Qwen3+thinking vs Qwen2.5-14B** sur 2-3 docs (bug #18819 + dégradation thinking). Choisir le modèle d'extraction.
+1. **P1.4b-1 — Segmenter** : option anti-fragmentation énumération + propagation item_type/unit_type. Tests unitaires **incluant les faux positifs** (sujets coordonnés « pilot AND copilot », alternative « A or B ») → ne pas décomposer.
 2. **P1.4b-2 — Stage A Sélection** : `selection_gate.py` + guided-JSON. Smoke 2-3 docs, mesurer % drop (réutiliser méthode probe utilité).
 3. **P1.4b-3 — Stage B Décompo+décontextualisation** : schéma liste-comme-champ + guided decoding + modalité/identifiants. Smoke.
 4. **P1.4b-4 — Grounding gate** : ancrage déterministe + option reranker. Smoke (mesurer claims rejetés/flaggés).
@@ -196,4 +213,11 @@ Guided decoding **XGrammar (vLLM)** avec un schéma où **l'énumération est un
 
 ---
 
-*KG actuel (4 docs / 8530 claims) = bac à sable de mesure, re-purgé à la ré-ingestion propre. Probes `app/scripts/p1_dedup_tiered_probe.py` + `p1_utility_filter_smoke.py` réutilisables pour re-mesurer après chaque étape.*
+## 11. Décisions sur questions ouvertes (post-revue externe 26/05/2026)
+
+1. **Coût 2 appels LLM (A+B) → GARDER SÉPARÉ.** Fusionner = recréer le méga-prompt défaillant. Coût mitigé par l'élagage Stage A (net ≈ 1.3-1.5× pas 2×). Calibrations incompatibles (A = haute précision/rappel, B = granularité). Option modèle léger/lourd en réserve (§4.5).
+2. **Grounding → déterministe + NLI léger en FLAG (pas reject).** (a) identifiants ∈ source + span contigu (déterministe, gratuit) ; (b) NLI conditionnel = MiniCheck-770M **si charge propre**, sinon **bge-reranker** (déjà chargé, prouvé ; HHEM écarté). Toujours `marginal=true`, jamais reject dur (préserve le rappel).
+3. **Vacuous → prompt Stage A** (subjectif/domain-dépendant, pas de règle hard-codée) **+ garde-fou longueur en flag** (respecte le garde-fou identifiants).
+4. **Dimensions ajoutées** : Q17 citation span-level (AI Act), Q19 normatif/descriptif (déontique), Q16 renforcé en confiance composite. Q20 (interdépendance) → Phase C.
+
+*KG actuel (4 docs / 8530 claims) = bac à sable de mesure, re-purgé à la ré-ingestion propre. Probes `app/scripts/p1_dedup_tiered_probe.py` + `p1_utility_filter_smoke.py` réutilisables pour re-mesurer après chaque étape. Revue externe Claude Web intégrée le 26/05/2026.*
