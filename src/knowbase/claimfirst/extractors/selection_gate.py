@@ -58,11 +58,17 @@ DROP only if the unit is clearly NOT worth storing:
 - legal / liability / warranty / copyright / disclaimer boilerplate;
 - document meta-statements (table of contents, "this document describes…", navigation, \
 formatting/version notes with no standalone fact);
+- SECTION HEADINGS / TITLES, including numbered ones (e.g. "7.20 Follow-Up Activities", \
+"3.1 Prerequisites are for…"), and ENUMERATION LEAD-INS that merely announce a list without \
+stating it (e.g. "The following components are relevant:", "For ACM, the following applies:");
 - generic marketing or filler with no checkable content;
 - vacuous statements that assert almost nothing ("X provides many benefits", "this improves \
 efficiency"). Only call vacuous when there is essentially NO checkable content — if a specific \
 feature/field/object/relationship is named, prefer KEEP;
-- pure cross-references ("see the section below").
+- PURE cross-references whose ENTIRE content is just a pointer with no standalone fact \
+(e.g. "see the section below", "For more information, refer to 2142308", "See SAP Note 123"). \
+But KEEP a unit that states a FACT and also cites a reference (e.g. "Activate function X; \
+see note Y" → KEEP, it carries the fact "activate X").
 
 Be domain-neutral (software, medical, legal, engineering…). WHEN IN DOUBT, KEEP (recall matters).
 
