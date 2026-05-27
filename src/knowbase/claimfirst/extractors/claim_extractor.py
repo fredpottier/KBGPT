@@ -716,7 +716,7 @@ class ClaimExtractor:
     _MODALITY_TO_CLAIM_TYPE = {
         "assertive": "FACTUAL", "prescriptive": "PRESCRIPTIVE",
         "permissive": "PERMISSIVE", "recommended": "PRESCRIPTIVE",
-        "conditional": "CONDITIONAL",
+        "conditional": "CONDITIONAL", "procedural": "PROCEDURAL",
     }
 
     def _claim_from_candidate(self, cand, task: "BatchTask") -> Optional[Claim]:

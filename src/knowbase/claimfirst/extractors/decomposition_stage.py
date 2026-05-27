@@ -30,7 +30,7 @@ from typing import Callable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-_MODALITIES = ["assertive", "prescriptive", "permissive", "recommended", "conditional"]
+_MODALITIES = ["assertive", "prescriptive", "permissive", "recommended", "conditional", "procedural"]
 _POLARITIES = ["affirmative", "negative"]
 
 DECOMPOSITION_JSON_SCHEMA = {
@@ -78,8 +78,12 @@ claim's text rather than spawning a separate claim for it.
 2. DECONTEXTUALIZE: resolve pronouns/anaphora using the passage context; NAME the subject \
 explicitly (never leave "it" / "the system" / "this"). If the referent is genuinely unknown, \
 keep the best literal subject — do NOT invent one.
-3. MODALITY: set modality = prescriptive (must/shall/required), permissive (may/can/allowed), \
-recommended (should/recommended), conditional (if/when…), else assertive. PRESERVE it.
+3. MODALITY: choose ONE — procedural (an executable ACTION/STEP performed as part of a task or \
+sequence: "run X", "execute Y", "click Z", "first do…then…"), prescriptive (an obligation, \
+requirement or constraint: must/shall/required), permissive (may/can/allowed), recommended \
+(should/recommended), conditional (if/when…), else assertive. Use `procedural` ONLY for an \
+executable step/action — NOT for a mere requirement, property or capability (those are \
+prescriptive/assertive). PRESERVE it.
 4. POLARITY: set polarity = negative if the statement is a negation (not/no/cannot/never), \
 else affirmative. NEVER drop a negation.
 5. IDENTIFIERS: copy codes, identifiers and numeric values VERBATIM from the source — never \
@@ -102,6 +106,10 @@ Examples (note: related details stay in ONE claim, not split):
   {"subject":"The experimental API","predicate":"must be used in","objects":["production"],
    "modality":"prescriptive","polarity":"negative",
    "self_contained_text":"The experimental API must not be used in production.","source_unit_ids":["u3"]}
+- Units: "[u4] Run the SI-Check before starting the conversion." (an executable step) ->
+  {"subject":"the SI-Check","predicate":"run before","objects":["starting the conversion"],
+   "modality":"procedural","polarity":"affirmative",
+   "self_contained_text":"Run the SI-Check before starting the conversion.","source_unit_ids":["u4"]}
 """
 
 
