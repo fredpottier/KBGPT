@@ -30,8 +30,12 @@ DOC_IDS = [
 def main():
     staged = os.getenv("CLAIMFIRST_STAGED_PIPELINE", "0") == "1"
     grounding = os.getenv("CLAIMFIRST_GROUNDING_GATE", "1") == "1"
-    # doc_ids depuis argv si fournis, sinon la liste par défaut (3 docs)
-    doc_ids = sys.argv[1:] if len(sys.argv) > 1 else DOC_IDS
+    # doc_ids : "ALL" → tout le cache (corpus complet) ; sinon argv ; sinon défaut (3 docs)
+    if len(sys.argv) == 2 and sys.argv[1].upper() == "ALL":
+        from knowbase.claimfirst.worker_job import _build_cache_map
+        doc_ids = sorted(_build_cache_map("/data/extraction_cache").keys())
+    else:
+        doc_ids = sys.argv[1:] if len(sys.argv) > 1 else DOC_IDS
     print(f"[REINGEST] staged={staged} grounding={grounding} docs={len(doc_ids)}")
     for d in doc_ids:
         print(f"  - {d}")
