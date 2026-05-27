@@ -175,7 +175,11 @@ def test_is_hard_junk_category():
     assert _is_hard_junk_category("legal_boilerplate")
     assert _is_hard_junk_category("marketing_filler")
     assert _is_hard_junk_category("pure_cross_reference")
+    assert _is_hard_junk_category("pure_reference")
+    assert _is_hard_junk_category("internal_link")
+    assert _is_hard_junk_category("url")
     assert _is_hard_junk_category("enumeration_lead-ins")
     assert not _is_hard_junk_category("vacuous")
+    assert not _is_hard_junk_category("constraint")  # vrai fait conditionnel → guard protège
     assert not _is_hard_junk_category("factual")
     assert not _is_hard_junk_category("")

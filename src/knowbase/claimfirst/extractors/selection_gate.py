@@ -95,7 +95,7 @@ _HARD_JUNK_CATEGORY_KEYS = (
     "doc_meta", "meta",
     "heading", "title", "toc",
     "legal", "boilerplate", "copyright", "disclaimer", "liability", "warranty",
-    "cross_reference", "cross-reference", "cross_ref", "cross-ref",
+    "reference", "url", "link",  # cross_reference, pure_reference, internal_link, url (renvois/URL purs)
     "navigation", "header", "footer",
     "lead_in", "lead-in",
     "marketing", "filler",
