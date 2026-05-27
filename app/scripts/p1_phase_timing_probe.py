@@ -86,6 +86,12 @@ def main():
     patch(ClaimFirstOrchestrator, "_generate_embeddings", "5_embeddings")
     patch(ClaimFirstOrchestrator, "_derive_subjects_from_entities", "2.8_derive_subj")
     patch(ClaimFirstOrchestrator, "_run_domain_pack_enrichment", "4.5_domain_pack")
+    # Phase 0 (document-level, le « overhead » — investigation (a))
+    patch(ClaimFirstOrchestrator, "_create_passages", "0_create_passages")
+    patch(ClaimFirstOrchestrator, "_extract_document_context", "0.5_doc_context")
+    patch(ClaimFirstOrchestrator, "_validate_new_subjects_llm", "0.5b_validate_subj")
+    patch(ClaimFirstOrchestrator, "_resolve_comparable_subject", "0.55_comparable")
+    patch(ClaimFirstOrchestrator, "_build_applicability_frame", "0.6_applic_frame")
 
     from knowbase.claimfirst.worker_job import _get_llm_client, _get_neo4j_driver, _build_cache_map
     from knowbase.stratified.pass0.cache_loader import load_pass0_from_cache
