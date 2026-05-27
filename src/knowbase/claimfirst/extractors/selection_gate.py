@@ -85,6 +85,29 @@ _EXAMPLES = (
 )
 
 
+# Catégories où le juge LLM a identifié du DÉCHET FRANC : en-tête, méta-document, mention
+# légale, cross-référence pure, lead-in d'énumération, marketing/filler. Dans ces unités, un
+# identifiant (version « 9.0 », année « 2023 », n° de SAP Note, URL, nom de produit) ne porte
+# AUCUN fait → le garde-fou identifiant ne doit PAS contredire le DROP du juge (sinon on
+# rescape des centaines d'en-têtes/mentions/renvois sur un corpus type SAP). Le guard continue
+# de protéger l'identifiant dans les cas borderline (vacuous/générique/sans catégorie claire).
+_HARD_JUNK_CATEGORY_KEYS = (
+    "doc_meta", "meta",
+    "heading", "title", "toc",
+    "legal", "boilerplate", "copyright", "disclaimer", "liability", "warranty",
+    "cross_reference", "cross-reference", "cross_ref", "cross-ref",
+    "navigation", "header", "footer",
+    "lead_in", "lead-in",
+    "marketing", "filler",
+)
+
+
+def _is_hard_junk_category(category: str) -> bool:
+    """True si la catégorie (juge) désigne du déchet franc où le garde-fou ne doit pas rescaper."""
+    c = (category or "").lower()
+    return any(k in c for k in _HARD_JUNK_CATEGORY_KEYS)
+
+
 @dataclass
 class UnitVerdict:
     unit_id: str
@@ -101,6 +124,7 @@ class SelectionResult:
     dropped: List[UnitVerdict] = field(default_factory=list)
     verdicts: List[UnitVerdict] = field(default_factory=list)
     guard_overrides: int = 0
+    guard_suppressed: int = 0  # juge=DROP + identifiant MAIS catégorie déchet franc → jeté quand même
     judge_failed: bool = False
 
     @property
@@ -215,13 +239,21 @@ class SelectionGate:
                 continue
             judge_label = "DROP" if str(item.get("label", "")).upper() == "DROP" else "KEEP"
             category = str(item.get("category", ""))[:40]
-            # GARDE-FOU : ne jamais jeter une unité portant un identifiant précis
-            guard_override = judge_label == "DROP" and has_specific_identifier(txt)
+            # GARDE-FOU : protéger une unité portant un identifiant précis (transaction, code
+            # objet, n° règlement…) — SAUF si le juge l'a classée en DÉCHET FRANC (en-tête,
+            # méta-doc, légal, cross-réf, marketing) où l'identifiant ne porte aucun fait. Dans
+            # ce cas on défère au juge (évite de rescaper en-têtes/mentions/renvois). cf funnel
+            # 012/022 : ~39-58% des "gardées" étaient des rescapes de déchet à identifiant.
+            has_id = judge_label == "DROP" and has_specific_identifier(txt)
+            hard_junk = _is_hard_junk_category(category)
+            guard_override = has_id and not hard_junk
             final = "KEEP" if (judge_label == "KEEP" or guard_override) else "DROP"
             v = UnitVerdict(uid, txt, final, judge_label, category, guard_override)
             result.verdicts.append(v)
             if guard_override:
                 result.guard_overrides += 1
+            elif has_id and hard_junk:
+                result.guard_suppressed += 1
             if final == "KEEP":
                 result.kept_ids.append(uid)
             else:

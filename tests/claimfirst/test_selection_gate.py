@@ -120,3 +120,62 @@ def test_disabled_is_noop_without_calling_llm():
 def test_empty_units():
     res = SelectionGate(_llm_returning({})).classify([])
     assert res.n_kept == 0 and res.n_dropped == 0
+
+
+# ── guard conscient de la catégorie (anti sur-extraction, funnel 012/022) ──────
+def _llm_with_categories(verdict_map):
+    """verdict_map: id -> (label, category)."""
+    def _llm(system, user):
+        return json.dumps({
+            "verdicts": [{"id": uid, "label": lab, "category": cat}
+                         for uid, (lab, cat) in verdict_map.items()]
+        })
+    return _llm
+
+
+def test_guard_suppressed_on_hard_junk_category():
+    # juge=DROP + identifiant MAIS catégorie déchet franc (en-tête) → JETÉ (guard ne rescape pas)
+    units = [("u1", "Installation Guide for SAP S/4HANA 2021 Content")]
+    gate = SelectionGate(_llm_with_categories({"u1": ("DROP", "doc_meta")}))
+    res = gate.classify(units)
+    assert res.kept_ids == []
+    assert res.guard_overrides == 0
+    assert res.guard_suppressed == 1
+    assert res.verdicts[0].label == "DROP"
+
+
+def test_guard_still_overrides_on_non_junk_category():
+    # juge=DROP + identifiant + catégorie NON-déchet (vacuous) → guard rescape (KEEP)
+    units = [("u1", "Use transaction CG5Z weekly.")]
+    gate = SelectionGate(_llm_with_categories({"u1": ("DROP", "vacuous")}))
+    res = gate.classify(units)
+    assert res.kept_ids == ["u1"]
+    assert res.guard_overrides == 1
+    assert res.guard_suppressed == 0
+
+
+def test_guard_suppressed_cross_reference_and_legal():
+    units = [
+        ("u1", "For more information, see SAP Note 2590653."),  # cross-réf pure
+        ("u2", "© 2025 SAP SE or an SAP affiliate company."),    # légal
+    ]
+    gate = SelectionGate(_llm_with_categories({
+        "u1": ("DROP", "pure_cross_reference"),
+        "u2": ("DROP", "legal_boilerplate"),
+    }))
+    res = gate.classify(units)
+    assert res.kept_ids == []
+    assert res.guard_suppressed == 2
+
+
+def test_is_hard_junk_category():
+    from knowbase.claimfirst.extractors.selection_gate import _is_hard_junk_category
+    assert _is_hard_junk_category("doc_meta")
+    assert _is_hard_junk_category("SECTION_HEADING")
+    assert _is_hard_junk_category("legal_boilerplate")
+    assert _is_hard_junk_category("marketing_filler")
+    assert _is_hard_junk_category("pure_cross_reference")
+    assert _is_hard_junk_category("enumeration_lead-ins")
+    assert not _is_hard_junk_category("vacuous")
+    assert not _is_hard_junk_category("factual")
+    assert not _is_hard_junk_category("")
