@@ -60,6 +60,47 @@ def test_negation_and_modality_preserved():
     assert c.modality == "prescriptive"
 
 
+def test_procedural_modality_preserved():
+    # Phase B : la modalité `procedural` (étape exécutable) doit être conservée
+    payload = {"claims": [{
+        "subject": "the SI-Check", "predicate": "run before", "objects": ["the conversion"],
+        "modality": "procedural", "polarity": "affirmative",
+        "self_contained_text": "Run the SI-Check before the conversion.",
+        "source_unit_ids": ["u1"],
+    }]}
+    res = DecompositionStage(_llm(payload)).decompose([("u1", "Run the SI-Check before the conversion.")])
+    assert res.claims[0].modality == "procedural"
+
+
+def test_qualifiers_parsed_and_filtered():
+    # Phase B : qualifiers structurés extraits ; entrées non-dict filtrées
+    payload = {"claims": [{
+        "subject": "the feature", "predicate": "is available in", "objects": ["Private Cloud"],
+        "modality": "assertive", "polarity": "affirmative",
+        "self_contained_text": "For Private Cloud, the feature is available since release 2023.",
+        "source_unit_ids": ["u1"],
+        "qualifiers": [
+            {"qualifier_type": "version", "value": "Private Cloud edition", "confidence": 0.9},
+            {"qualifier_type": "temporal", "value": "since release 2023"},
+            "not-a-dict",
+        ],
+    }]}
+    res = DecompositionStage(_llm(payload)).decompose([("u1", "x")])
+    quals = res.claims[0].qualifiers
+    assert len(quals) == 2
+    assert quals[0]["qualifier_type"] == "version"
+    assert quals[1]["value"] == "since release 2023"
+
+
+def test_qualifiers_default_empty():
+    payload = {"claims": [{
+        "subject": "X", "predicate": "is", "objects": ["a"], "modality": "assertive",
+        "polarity": "affirmative", "self_contained_text": "X is a.", "source_unit_ids": ["u1"],
+    }]}
+    res = DecompositionStage(_llm(payload)).decompose([("u1", "x")])
+    assert res.claims[0].qualifiers == []
+
+
 def test_coercion_objects_string_and_invalid_modality():
     payload = {"claims": [{
         "subject": "X", "predicate": "is", "objects": "single",     # string -> list

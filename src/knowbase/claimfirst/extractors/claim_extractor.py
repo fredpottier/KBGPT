@@ -738,6 +738,8 @@ class ClaimExtractor:
                 "object": ", ".join(cand.objects) if cand.objects else "",
                 "open_predicate": True,
             },
+            # Phase B — qualifiers structurés issus du Stage B (parsés par _build_claim)
+            "qualifiers": cand.qualifiers,
         }
         return self._build_claim(
             raw=raw, units=task.units, unit_result=task.unit_result,

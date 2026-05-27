@@ -48,6 +48,19 @@ DECOMPOSITION_JSON_SCHEMA = {
                     "polarity": {"type": "string", "enum": _POLARITIES},
                     "self_contained_text": {"type": "string"},
                     "source_unit_ids": {"type": "array", "items": {"type": "string"}},
+                    "qualifiers": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "qualifier_type": {"type": "string", "enum": [
+                                    "temporal", "spatial", "version", "condition", "scope_limit"]},
+                                "value": {"type": "string"},
+                                "confidence": {"type": "number"},
+                            },
+                            "required": ["qualifier_type", "value"],
+                        },
+                    },
                 },
                 "required": ["subject", "predicate", "objects", "modality",
                              "polarity", "self_contained_text"],
@@ -89,6 +102,12 @@ else affirmative. NEVER drop a negation.
 5. IDENTIFIERS: copy codes, identifiers and numeric values VERBATIM from the source — never \
 paraphrase or alter them.
 6. self_contained_text = one fluent standalone sentence capturing the whole molecular fact.
+7. QUALIFIERS (conditions of applicability): capture as STRUCTURED `qualifiers` the conditions \
+under which the claim holds. Types (universal): temporal (since/until/effective…), spatial \
+(EU only/on-premise/zone…), version (release/edition…), condition (if/for X customers/when…), \
+scope_limit (non-production only/excluding…). Each MUST be grounded in the source (verbatim or \
+direct paraphrase) — NEVER infer. `qualifiers` defaults to [] when unconditional. Keep the \
+qualifier ALSO inside self_contained_text (rule 1), but additionally emit it here as structured.
 
 Be domain-neutral (software, medical, legal, engineering…). Do not add facts absent from the source.
 
@@ -110,6 +129,13 @@ Examples (note: related details stay in ONE claim, not split):
   {"subject":"the SI-Check","predicate":"run before","objects":["starting the conversion"],
    "modality":"procedural","polarity":"affirmative",
    "self_contained_text":"Run the SI-Check before starting the conversion.","source_unit_ids":["u4"]}
+- Units: "[u5] For the Private Cloud edition, the feature has been available since release 2023." ->
+  {"subject":"the feature","predicate":"is available in","objects":["the Private Cloud edition"],
+   "modality":"assertive","polarity":"affirmative",
+   "self_contained_text":"For the Private Cloud edition, the feature has been available since release 2023.",
+   "qualifiers":[{"qualifier_type":"version","value":"Private Cloud edition","confidence":0.9},
+                 {"qualifier_type":"temporal","value":"since release 2023","confidence":0.9}],
+   "source_unit_ids":["u5"]}
 """
 
 
@@ -122,6 +148,7 @@ class ClaimCandidate:
     polarity: str
     self_contained_text: str
     source_unit_ids: List[str] = field(default_factory=list)
+    qualifiers: List[dict] = field(default_factory=list)  # [{qualifier_type, value, confidence}]
 
     @property
     def is_enumeration(self) -> bool:
@@ -186,7 +213,9 @@ def _coerce_claim(item: dict, valid_ids: set) -> Optional[ClaimCandidate]:
         polarity = "affirmative"
     sct = str(item.get("self_contained_text", "")).strip() or f"{subj} {pred} {', '.join(objs)}".strip()
     src = [str(s) for s in (item.get("source_unit_ids") or []) if str(s) in valid_ids]
-    return ClaimCandidate(subj, pred, objs, modality, polarity, sct, src)
+    quals_raw = item.get("qualifiers")
+    quals = [q for q in quals_raw if isinstance(q, dict)] if isinstance(quals_raw, list) else []
+    return ClaimCandidate(subj, pred, objs, modality, polarity, sct, src, quals)
 
 
 class DecompositionStage:
