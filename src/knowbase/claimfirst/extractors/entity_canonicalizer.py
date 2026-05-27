@@ -130,7 +130,7 @@ class EntityCanonicalizer:
         tenant_id: str = "default",
         min_entities_for_llm: int = 5,
         batch_size: int = 30,
-        max_concurrent: int = 3,
+        max_concurrent: Optional[int] = None,
     ):
         """
         Initialise le canonicalizer.
@@ -139,11 +139,19 @@ class EntityCanonicalizer:
             tenant_id: Tenant ID pour injection contexte domaine
             min_entities_for_llm: Nombre min d'entités pour déclencher LLM
             batch_size: Taille max d'un batch pour le LLM
-            max_concurrent: Nombre max d'appels LLM en parallèle
+            max_concurrent: Nombre max d'appels LLM en parallèle. Si None → config burst
+                (≈32 quand burst actif, comme ClaimExtractor/SubjectIndexer), sinon 8.
+                (avant : bridé en dur à 3 → goulot sur les docs riches en entités).
         """
         self.tenant_id = tenant_id
         self.min_entities_for_llm = min_entities_for_llm
         self.batch_size = batch_size
+        # CONSERVATEUR : les batches de canonicalisation sont LOURDS (30 entités + gros
+        # contexte + sortie longue). Empiriquement (burst g6 unique), au-delà de ~3 appels
+        # concurrents, vLLM reset les connexions (« Connection error »). On NE monte donc PAS
+        # à la config burst ici (≠ extraction/SubjectIndexer dont les appels sont légers).
+        if not (max_concurrent and max_concurrent > 0):
+            max_concurrent = 3
         self.max_concurrent = max_concurrent
 
         self._stats = {
