@@ -200,13 +200,13 @@ class TestIndexClaims:
         assert results[0].claim_id == "c2"
 
     def test_apply_subject_and_marginal_to_claims(self):
-        # Claim 1 : extracted clean, Claim 2 : marginal
-        responses = iter([
-            json.dumps({"subject": "Entity", "confidence": 0.95, "marginal": False, "reasoning": ""}),
-            json.dumps({"subject": None, "confidence": 0.9, "marginal": True, "reasoning": "Generic"}),
-        ])
+        # Claim 1 : extracted clean, Claim 2 : marginal.
+        # Mock déterministe (map par texte) car l'indexation est PARALLÈLE → l'ordre
+        # des appels n'est pas garanti.
         def _llm(text):
-            return next(responses)
+            if "Entity does X" in text:
+                return json.dumps({"subject": "Entity", "confidence": 0.95, "marginal": False, "reasoning": ""})
+            return json.dumps({"subject": None, "confidence": 0.9, "marginal": True, "reasoning": "Generic"})
 
         c1 = _MockClaim("c1", "Entity does X")
         c2 = _MockClaim("c2", "You can do things")
