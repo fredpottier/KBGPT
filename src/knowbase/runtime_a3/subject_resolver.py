@@ -40,6 +40,24 @@ from knowbase.utils.normalize import normalize_canonical_key
 
 logger = logging.getLogger("knowbase.runtime_a3.subject_resolver")
 
+# Caractères spéciaux Lucene — sans échappement, un sujet type "S/4HANA" (le "/" démarre un
+# regex Lucene) casse `db.index.fulltext.queryNodes` → erreur lexicale → abstention → fallback.
+# (même logique que runtime_a3/execute._escape_lucene_query ; dupliqué pour éviter un import
+# circulaire execute ↔ subject_resolver). Domain-agnostic.
+_LUCENE_SPECIAL_CHARS = set('+-&|!(){}[]^"~*?:\\/')
+
+
+def _escape_lucene_query(text: str) -> str:
+    if not text:
+        return text
+    out = []
+    for ch in text:
+        if ch in _LUCENE_SPECIAL_CHARS:
+            out.append("\\" + ch)
+        else:
+            out.append(ch)
+    return "".join(out)
+
 
 # Constants
 MIN_CONFIDENCE = 0.5
@@ -246,7 +264,7 @@ class SubjectResolver:
                 ORDER BY raw_score DESC
                 LIMIT $k
                 """,
-                search_query=user_subject,
+                search_query=_escape_lucene_query(user_subject),
                 tid=tenant_id,
                 k=top_k,
             )
