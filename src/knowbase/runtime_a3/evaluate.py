@@ -210,10 +210,15 @@ class Evaluator:
                     self._router = LLMRouter()
 
                 def complete(self, system: str, user: str) -> str:
-                    # A4.8 ROLLBACK (22/05/2026 soir) : switch DeepSeek-V3.1 a régressé
-                    # C1 0.300→0.050. Cf A47 audit + commentaire parse.py. Revert.
+                    # 28/05/2026 : Evaluate → DeepSeek-V3.1 (RUNTIME_PARSE_EVALUATE).
+                    # Le rollback A4.8 (FAST_CLASSIFICATION=Qwen3-235B) concernait PARSE
+                    # (subject_canonical strict cassait le retrieval exact-match Cypher) ;
+                    # Evaluate ne produit qu'un VERDICT (aucun subject, aucun impact retrieval).
+                    # Qwen3-235B-Instruct-2507 tombe en JSON vide ~30% + 429 engine_overloaded
+                    # → corrompt le C1 (fallbacks) + latence. DeepSeek-V3.1 fiable (déjà
+                    # Synthesize). Retrieval désormais FTS+vecteur (≠ exact-match A4.8).
                     return self._router.complete(
-                        task_type=TaskType.FAST_CLASSIFICATION,
+                        task_type=TaskType.RUNTIME_PARSE_EVALUATE,
                         messages=[
                             {"role": "system", "content": system},
                             {"role": "user", "content": user},
