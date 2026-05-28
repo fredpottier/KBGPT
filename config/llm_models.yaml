@@ -20,7 +20,8 @@ task_models:
   # - DeepSeek-V4-Pro DeepInfra : C1=0.250 (IDEM)
   # → LLM Synthesize n'est PAS le bottleneck. Retour à V3.1 (moins cher).
   # Cf project_a46_llm_synthesize_not_bottleneck.md.
-  long_summary: "deepseek-ai/DeepSeek-V3.1"
+  long_summary: "deepseek/deepseek-v3.2"  # Novita (test latence 28/05) — ~3s vs ~15s DeepInfra V3.1
+  # long_summary: "deepseek-ai/DeepSeek-V3.1"  # DeepInfra (baseline, ~15s/appel)
   # long_summary: "deepseek-ai/DeepSeek-V4-Pro"  # Flagship 2026 — pas de gain mesurable vs V3.1
 
   # Enrichissement de contenu court (table summaries, slot enrichment)
@@ -55,7 +56,8 @@ task_models:
   # → fallback déterministe sans subject/predicate cohérents. Le retrieval n'a pas la chance de
   # bien fonctionner. Switch vers DeepSeek-V3.1 (déjà utilisé par Synthesize sans souci).
   # Cf doc/ongoing/A47_AUDIT_ORACLE_SYNTHESE.md.
-  runtime_parse_evaluate: "deepseek-ai/DeepSeek-V3.1"
+  runtime_parse_evaluate: "deepseek/deepseek-v3.2"  # Novita (test latence 28/05) — ~3s vs ~15s DeepInfra
+  # runtime_parse_evaluate: "deepseek-ai/DeepSeek-V3.1"  # DeepInfra (baseline)
 
 # Paramètres par type de tâche (basés sur les valeurs historiques du code)
 task_parameters:
@@ -140,6 +142,17 @@ providers:
       - "Qwen/Qwen3.5-27B"                        # Dense 27B — $0.195 in / $0.90 out
       - "Qwen/Qwen3-14B"                          # Dense 14B — $0.12 in / $0.24 out
       - "Qwen/Qwen2.5-72B-Instruct"                 # Dense 72B — $0.12 in / $0.39 out (extraction)
+
+  # Novita (OpenAI-compatible) — test latence 28/05/2026 : DeepSeek V3.2/V4-flash ~3s/appel
+  # (vs ~15s DeepInfra V3.1), JSON valide au smoke. V3.1 absent → on prend V3.2 (successeur).
+  novita:
+    api_key_env: "NOVITA_API_KEY"
+    base_url: "https://api.novita.ai/v3/openai"
+    models:
+      - "deepseek/deepseek-v3.2"                   # ~3.3s/appel, JSON OK (smoke 28/05)
+      - "deepseek/deepseek-v4-flash"               # ~3.1s, le moins cher ($0.14/$0.28)
+      - "meta-llama/llama-3.3-70b-instruct"        # juge
+      - "qwen/qwen2.5-7b-instruct"
 
   ollama:
     base_url_env: "OLLAMA_URL"        # Défaut: http://localhost:11434

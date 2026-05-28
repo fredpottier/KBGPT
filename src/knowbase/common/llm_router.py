@@ -116,6 +116,8 @@ class LLMRouter:
         # === DeepInfra (API OpenAI-compatible) ===
         self._deepinfra_client = None
         self._deepinfra_async_client = None
+        self._novita_client = None
+        self._novita_async_client = None
 
         # === Gate Redis pour vLLM (partage inter-processus) ===
         self._redis_burst_cache: Optional[Dict[str, Any]] = None
@@ -248,6 +250,15 @@ class LLMRouter:
         else:
             providers["deepinfra"] = False
             logger.debug("✗ DeepInfra provider non configuré (DEEPINFRA_API_KEY manquant)")
+
+        # Test Novita (API OpenAI-compatible) — DeepSeek V3.2/V4-flash, Llama-3.3, Qwen
+        novita_key = os.getenv("NOVITA_API_KEY", "").strip()
+        if novita_key:
+            providers["novita"] = True
+            logger.info("✓ Novita provider disponible")
+        else:
+            providers["novita"] = False
+            logger.debug("✗ Novita provider non configuré (NOVITA_API_KEY manquant)")
 
         return providers
 
@@ -1192,6 +1203,8 @@ class LLMRouter:
                 return self._call_anthropic(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "deepinfra":
                 return self._call_deepinfra(model, messages, temperature, max_tokens, task_type, **kwargs)
+            elif provider == "novita":
+                return self._call_novita(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "ollama":
                 return self._call_ollama(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "sagemaker":
@@ -1355,6 +1368,8 @@ class LLMRouter:
                 return self._call_anthropic(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "deepinfra":
                 return await self._call_deepinfra_async(model, messages, temperature, max_tokens, task_type, **kwargs)
+            elif provider == "novita":
+                return await self._call_novita_async(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "ollama":
                 return await self._call_ollama_async(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "sagemaker":
@@ -1558,6 +1573,59 @@ class LLMRouter:
             track_tokens(f"deepinfra/{model}", task_type.value,
                          response.usage.prompt_tokens, response.usage.completion_tokens)
             logger.info(f"[TOKENS:DEEPINFRA:ASYNC] {model} - In: {response.usage.prompt_tokens}, Out: {response.usage.completion_tokens}")
+        return response.choices[0].message.content or ""
+
+    # ── Novita (OpenAI-compatible) ──────────────────────────────────────────
+    def _get_novita_client(self):
+        if self._novita_client is None:
+            from openai import OpenAI
+            self._novita_client = OpenAI(
+                api_key=os.getenv("NOVITA_API_KEY", ""),
+                base_url="https://api.novita.ai/v3/openai",
+                max_retries=5,
+                timeout=120.0,
+            )
+        return self._novita_client
+
+    def _get_novita_async_client(self):
+        if self._novita_async_client is None:
+            from openai import AsyncOpenAI
+            self._novita_async_client = AsyncOpenAI(
+                api_key=os.getenv("NOVITA_API_KEY", ""),
+                base_url="https://api.novita.ai/v3/openai",
+                max_retries=5,
+                timeout=120.0,
+            )
+        return self._novita_async_client
+
+    def _call_novita(self, model, messages, temperature, max_tokens, task_type, **kwargs):
+        """Appel vers Novita (API OpenAI-compatible)."""
+        api_kwargs = {k: v for k, v in kwargs.items()
+                      if k not in ['model_preference', 'json_schema', 'enable_thinking']}
+        client = self._get_novita_client()
+        response = client.chat.completions.create(
+            model=model, messages=messages,
+            temperature=temperature, max_tokens=max_tokens, **api_kwargs
+        )
+        if response.usage:
+            track_tokens(f"novita/{model}", task_type.value,
+                         response.usage.prompt_tokens, response.usage.completion_tokens)
+            logger.info(f"[TOKENS:NOVITA] {model} - In: {response.usage.prompt_tokens}, Out: {response.usage.completion_tokens}")
+        return response.choices[0].message.content or ""
+
+    async def _call_novita_async(self, model, messages, temperature, max_tokens, task_type, **kwargs):
+        """Appel async vers Novita."""
+        api_kwargs = {k: v for k, v in kwargs.items()
+                      if k not in ['model_preference', 'json_schema', 'enable_thinking']}
+        client = self._get_novita_async_client()
+        response = await client.chat.completions.create(
+            model=model, messages=messages,
+            temperature=temperature, max_tokens=max_tokens, **api_kwargs
+        )
+        if response.usage:
+            track_tokens(f"novita/{model}", task_type.value,
+                         response.usage.prompt_tokens, response.usage.completion_tokens)
+            logger.info(f"[TOKENS:NOVITA:ASYNC] {model} - In: {response.usage.prompt_tokens}, Out: {response.usage.completion_tokens}")
         return response.choices[0].message.content or ""
 
     def _call_anthropic(
