@@ -28,9 +28,11 @@ task_models:
   # Migré du Qwen3-14B vers Qwen3-235B (moins cher de -41%/-58% in/out, context 6x plus grand)
   enrichment: "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
-  # Classification binaire rapide (oui/non, etc.)
-  # Migré du Qwen3-14B vers Qwen3-235B (idem économie)
-  classification: "Qwen/Qwen3-235B-A22B-Instruct-2507"
+  # Classification binaire rapide (oui/non, etc.) + JUGE du bench (FAST_CLASSIFICATION)
+  # 28/05 : Novita Llama-3.3-70B — rapide + fiable, pas de reasoning-mode (≠ Qwen3-235B qui
+  # tombe en JSON vide). Juge plus rapide que le 235B → bench accéléré.
+  classification: "meta-llama/llama-3.3-70b-instruct"
+  # classification: "Qwen/Qwen3-235B-A22B-Instruct-2507"  # DeepInfra (ancien juge)
 
   # Canonicalisation de noms (domain-agnostic)
   # Migré du Qwen2.5-72B vers Qwen3-235B (Qwen2.5-72B est passé à $0.36/$0.40 — 5x plus cher que Qwen3-235B)
@@ -149,9 +151,10 @@ providers:
     api_key_env: "NOVITA_API_KEY"
     base_url: "https://api.novita.ai/v3/openai"
     models:
-      - "deepseek/deepseek-v3.2"                   # ~3.3s/appel, JSON OK (smoke 28/05)
+      - "deepseek/deepseek-v3.2"                   # runtime Parse/Eval/Synthesize ~3.3s/appel
       - "deepseek/deepseek-v4-flash"               # ~3.1s, le moins cher ($0.14/$0.28)
-      - "meta-llama/llama-3.3-70b-instruct"        # juge
+      - "meta-llama/llama-3.3-70b-instruct"        # juge (rapide + fiable, pas de reasoning-mode)
+      - "qwen/qwen3-235b-a22b-instruct-2507"       # ingestion (thinking-off via _apply_qwen3_thinking_mode)
       - "qwen/qwen2.5-7b-instruct"
 
   ollama:

@@ -1600,8 +1600,10 @@ class LLMRouter:
 
     def _call_novita(self, model, messages, temperature, max_tokens, task_type, **kwargs):
         """Appel vers Novita (API OpenAI-compatible)."""
+        enable_thinking = kwargs.pop('enable_thinking', False)
         api_kwargs = {k: v for k, v in kwargs.items()
-                      if k not in ['model_preference', 'json_schema', 'enable_thinking']}
+                      if k not in ['model_preference', 'json_schema']}
+        self._apply_qwen3_thinking_mode(model, api_kwargs, enable_thinking)  # Qwen3: thinking off → JSON fiable
         client = self._get_novita_client()
         response = client.chat.completions.create(
             model=model, messages=messages,
@@ -1615,8 +1617,10 @@ class LLMRouter:
 
     async def _call_novita_async(self, model, messages, temperature, max_tokens, task_type, **kwargs):
         """Appel async vers Novita."""
+        enable_thinking = kwargs.pop('enable_thinking', False)
         api_kwargs = {k: v for k, v in kwargs.items()
-                      if k not in ['model_preference', 'json_schema', 'enable_thinking']}
+                      if k not in ['model_preference', 'json_schema']}
+        self._apply_qwen3_thinking_mode(model, api_kwargs, enable_thinking)  # Qwen3: thinking off → JSON fiable
         client = self._get_novita_async_client()
         response = await client.chat.completions.create(
             model=model, messages=messages,
