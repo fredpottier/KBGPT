@@ -175,12 +175,26 @@ class TestKgClaimsList:
         result = plan(_make_parse_input(), po)
         assert len(result.tool_calls) == 1
 
-    def test_list_no_subject_no_predicate_unmappable(self):
+    def test_list_no_subject_no_predicate_unmappable(self, monkeypatch):
+        # Legacy (exact-match) : sans subject NI predicate → unmappable.
+        monkeypatch.setenv("V6_HYBRID_RETRIEVAL", "0")
         po = _make_parse_output(sub_goals=[
             SubGoal(kind="list_enumeration", subject_canonical=None, predicate_hint=None)
         ])
         result = plan(_make_parse_input(), po)
         assert 0 in result.unmappable_sub_goals
+
+    def test_list_no_subject_no_predicate_mappable_in_hybrid(self, monkeypatch):
+        # P3.1 — en mode hybride, la question pilote le retrieval BM25/vector,
+        # donc un list_enumeration sans subject/predicate reste mappable.
+        monkeypatch.setenv("V6_HYBRID_RETRIEVAL", "rrf")
+        po = _make_parse_output(sub_goals=[
+            SubGoal(kind="list_enumeration", subject_canonical=None, predicate_hint=None)
+        ])
+        result = plan(_make_parse_input(), po)
+        assert result.unmappable_sub_goals == []
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].tool == "kg_claims_list"
 
 
 # ============================================================================

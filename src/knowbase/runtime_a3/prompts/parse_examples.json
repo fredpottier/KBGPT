@@ -97,6 +97,55 @@
     }
   },
   {
+    "question": "What do the documents say about component X, including its supported configurations, known limitations, and required permissions?",
+    "expected": {
+      "sub_goals": [
+        {
+          "kind": "definition_lookup",
+          "subject_canonical": "component X",
+          "predicate_hint": null,
+          "object_hint": null,
+          "expected_value_kind": "string",
+          "time_filter": "current",
+          "priority": 1
+        },
+        {
+          "kind": "list_enumeration",
+          "subject_canonical": "component X",
+          "predicate_hint": "supported configurations",
+          "object_hint": null,
+          "expected_value_kind": "string",
+          "time_filter": "current",
+          "priority": 1
+        },
+        {
+          "kind": "list_enumeration",
+          "subject_canonical": "component X",
+          "predicate_hint": "limitations",
+          "object_hint": null,
+          "expected_value_kind": "string",
+          "time_filter": "current",
+          "priority": 1
+        },
+        {
+          "kind": "list_enumeration",
+          "subject_canonical": "component X",
+          "predicate_hint": "required permissions",
+          "object_hint": null,
+          "expected_value_kind": "string",
+          "time_filter": "current",
+          "priority": 1
+        }
+      ],
+      "entities": ["component X"],
+      "language": "en",
+      "raw_question": "What do the documents say about component X, including its supported configurations, known limitations, and required permissions?",
+      "parse_confidence": 0.85,
+      "parse_warnings": [],
+      "schema_version": "a3.0"
+    }
+  },
+  {
     "question": "What's the weather like today?",
     "expected": {
       "sub_goals": [],

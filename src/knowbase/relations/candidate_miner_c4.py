@@ -144,7 +144,7 @@ class CandidateMinerC4:
         # Vector search pour chaque claim — batché par doc pour efficacité
         query_neighbors = """
         MATCH (source:Claim {claim_id: $claim_id, tenant_id: $tid})
-        CALL db.index.vector.queryNodes('claim_embedding', $k, source.embedding)
+        CALL db.index.vector.queryNodes('claim_embedding_idx', $k, source.embedding)
         YIELD node AS neighbor, score
         WHERE neighbor.tenant_id = $tid
           AND neighbor.doc_id <> source.doc_id
@@ -206,7 +206,7 @@ class CandidateMinerC4:
 
                 except Exception as e:
                     if "no such index" in str(e).lower():
-                        logger.error(f"[C4:MINER] Vector index 'claim_embedding' not found!")
+                        logger.error(f"[C4:MINER] Vector index 'claim_embedding_idx' not found!")
                         break
                     logger.debug(f"[C4:MINER] Vector search failed for {claim['claim_id']}: {e}")
 

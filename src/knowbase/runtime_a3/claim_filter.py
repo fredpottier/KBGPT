@@ -95,6 +95,7 @@ class ClaimFilter:
         question: str,
         claims: List[ClaimSummary],
         groups: Optional[List[int]] = None,
+        top_k: Optional[int] = None,
     ) -> Tuple[List[ClaimSummary], ClaimFilterResult]:
         """Filtre les claims par pertinence sémantique vs la question.
 
@@ -105,6 +106,8 @@ class ClaimFilter:
                 Si fourni, applique top-K **par groupe** (préserve la diversité
                 pour les comparaisons et list_enumeration multi-sub_goal).
                 Si None, top-K global.
+            top_k : override du top-K par défaut (P3.2 — élargi pour les
+                questions-liste afin de ne pas tronquer les réponses multi-items).
 
         Returns:
             (kept_claims, ClaimFilterResult)
@@ -113,6 +116,7 @@ class ClaimFilter:
         """
         t0 = time.perf_counter()
         n_in = len(claims)
+        eff_top_k = top_k if top_k is not None else self._top_k
 
         if groups is not None and len(groups) != len(claims):
             raise ValueError(
@@ -193,7 +197,7 @@ class ClaimFilter:
             if len(kept_with_threshold) < self._min_kept:
                 kept_indices_scores = scored[: self._min_kept]
             else:
-                kept_indices_scores = kept_with_threshold[: self._top_k]
+                kept_indices_scores = kept_with_threshold[: eff_top_k]
         else:
             # Stratification par groupe : top-K par groupe distinct
             kept_per_group: Dict[int, List[Tuple[int, float]]] = {}
@@ -203,7 +207,7 @@ class ClaimFilter:
                     kept_per_group[g] = []
                 # On limite top-K par groupe, en respectant le seuil (sauf min_kept)
                 if sim >= self._min_score or len(kept_per_group[g]) < self._min_kept:
-                    if len(kept_per_group[g]) < self._top_k:
+                    if len(kept_per_group[g]) < eff_top_k:
                         kept_per_group[g].append((idx, sim))
             # Flat back to a list, intra-group DESC déjà respecté (scored est DESC)
             kept_indices_scores = []

@@ -83,7 +83,8 @@ OUTPUT JSON ONLY, matching this schema:
 
 GUIDELINES:
 - Decompose, don't classify. The output is a list of small, actionable goals — not a single "type".
-- A simple question may have just 1 sub_goal. A complex one (comparison, lifecycle) may have 2-3.
+- A simple question may have just 1 sub_goal. A complex one (comparison, lifecycle, multi-aspect) has 2-5.
+- MULTI-ASPECT decomposition (IMPORTANT): when a question asks about a topic across SEVERAL aspects, components, or sub-topics — joined by "and"/"et", "including"/"incluant", "such as", or commas — produce ONE sub_goal PER aspect, all sharing the same subject_canonical but each with a distinct predicate_hint. NEVER collapse several aspects into one sub_goal, and NEVER stuff a list of aspects into a single predicate_hint. A comprehensive "what do the documents say about X, including A, B and C?" question must yield ≥3 sub_goals (one per aspect).
 - Use "fact_lookup" for "X has predicate Y" style questions.
 - Use "list_enumeration" for "all X such that ..." style.
 - Use "comparison" when comparing 2 entities — 2 fact_lookups + diff (one sub_goal per entity).

@@ -263,6 +263,63 @@ def has_conflict_exposure(answer_text: str, conflict_pending_warning: Optional[s
 
 
 # ============================================================================
+# Métriques DÉTERMINISTES (A1) — anti-bruit juge LLM
+# ============================================================================
+
+import re as _re
+
+_CODE_RE = _re.compile(r"[A-Z0-9/_]{3,}")
+_STOPCODES = {"SAP", "THE", "AND", "FOR", "WITH", "ARE", "NOT", "API", "URL"}
+
+
+def extract_id_codes(identifiers: List[str]) -> List[str]:
+    """Extrait les tokens-codes (CG5Z, /SAPAPO/OM13, P_RCF_STAT, 066, WWI...) des
+    `exact_identifiers` du gold-set, en ignorant les mots Title-case et stopwords."""
+    out: List[str] = []
+    seen = set()
+    for s in identifiers or []:
+        for tok in _CODE_RE.findall(s or ""):
+            t = tok.strip("/_")
+            if len(t) < 3 or t.upper() in _STOPCODES:
+                continue
+            # garde : contient chiffre/_/ OU all-caps ≥4 (code), pas un mot Title-case
+            is_code = any(c.isdigit() for c in t) or "_" in tok or "/" in tok or (t.isupper() and len(t) >= 4)
+            if is_code and tok.lower() not in seen:
+                seen.add(tok.lower())
+                out.append(tok)
+    return out
+
+
+def deterministic_metrics(q: Dict[str, Any], run: Dict[str, Any]) -> Dict[str, Any]:
+    """exact_id_recall (identifiants attendus présents dans la réponse) + abstention_correct.
+
+    Reproductible, zéro LLM. exact_id_recall=None si la question n'a pas d'identifiant attendu.
+    """
+    gt = q.get("ground_truth", {}) or {}
+    codes = extract_id_codes(gt.get("exact_identifiers"))
+    answer = (run.get("answer_text") or "").lower()
+    if codes:
+        found = [c for c in codes if c.lower() in answer]
+        exact_id_recall = len(found) / len(codes)
+    else:
+        exact_id_recall = None
+
+    # abstention_correct : abstention OK ssi unanswerable ; sinon abstention = échec
+    answerability = gt.get("answerability", "answerable")
+    is_abstention = (run.get("mode") == "ABSTENTION")
+    if answerability == "unanswerable":
+        abstention_correct = is_abstention
+    else:
+        abstention_correct = (not is_abstention)
+
+    return {
+        "exact_id_recall": exact_id_recall,
+        "n_expected_ids": len(codes),
+        "abstention_correct": abstention_correct,
+    }
+
+
+# ============================================================================
 # Run a single question via Orchestrator
 # ============================================================================
 
@@ -337,6 +394,7 @@ def run_bench_50q(orch, gold_path: Path, limit: Optional[int]) -> List[Dict[str,
             )
         else:
             judge = {"score": 0.0, "reasoning": "no_ground_truth_or_run_failed"}
+        det = deterministic_metrics(q, run)
         results.append({
             "id": q["id"],
             "primary_type": q.get("primary_type"),
@@ -348,6 +406,10 @@ def run_bench_50q(orch, gold_path: Path, limit: Optional[int]) -> List[Dict[str,
             "judge_reasoning": judge["reasoning"],
             "judge_attempts": judge.get("attempts"),
             "judge_used_fallback": judge.get("used_fallback", False),
+            # A1 — métriques déterministes (décisionnelles, anti-bruit juge)
+            "exact_id_recall": det["exact_id_recall"],
+            "n_expected_ids": det["n_expected_ids"],
+            "abstention_correct": det["abstention_correct"],
         })
     return results
 
@@ -423,12 +485,36 @@ def aggregate_50q(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         for t, s in by_type.items()
     }
 
+    # A1 — métriques déterministes (anti-bruit juge)
+    id_recalls = [r["exact_id_recall"] for r in results
+                  if r.get("exact_id_recall") is not None]
+    exact_id_recall_mean = statistics.mean(id_recalls) if id_recalls else None
+    abstention_correct_rate = (
+        sum(1 for r in results if r.get("abstention_correct")) / n if n else 0.0
+    )
+    # exact_id_recall par type
+    det_by_type: Dict[str, List[float]] = {}
+    for r in results:
+        if r.get("exact_id_recall") is not None:
+            det_by_type.setdefault(r.get("primary_type", "unknown"), []).append(
+                r["exact_id_recall"]
+            )
+    exact_id_recall_per_type = {
+        t: {"n": len(v), "mean": statistics.mean(v)} for t, v in det_by_type.items()
+    }
+
     return {
         "n_total": n,
         "n_judge_valid": len(valid_scores),
         "n_judge_failed": n_judge_failed,
         "judge_failure_rate": n_judge_failed / n if n else 0.0,
         "n_judge_fallback_used": n_judge_fallback,
+        # Métriques DÉTERMINISTES (décisionnelles)
+        "exact_id_recall_mean": exact_id_recall_mean,
+        "n_with_expected_ids": len(id_recalls),
+        "exact_id_recall_per_type": exact_id_recall_per_type,
+        "abstention_correct_rate": abstention_correct_rate,
+        # Juge LLM (diagnostic secondaire — bruité)
         "C1_mean": statistics.mean(valid_scores) if valid_scores else 0.0,
         "C3_lifecycle_mean": (statistics.mean(lifecycle_scores)
                               if lifecycle_scores else None),
@@ -541,7 +627,16 @@ def main():
     if agg_50q:
         print("\n50Q SAP STRATIFIÉ:")
         print(f"  n={agg_50q['n_total']} run_ok={agg_50q['n_run_ok']} failed={agg_50q['n_run_failed']}")
-        print(f"  C1 (LLM-judge mean) : {agg_50q['C1_mean']:.3f}  [valid={agg_50q['n_judge_valid']}/{agg_50q['n_total']}, judge_failed={agg_50q['n_judge_failed']} ({agg_50q['judge_failure_rate']:.1%}), fallback_used={agg_50q['n_judge_fallback_used']}]")
+        # DÉTERMINISTE (décisionnel)
+        eir = agg_50q.get('exact_id_recall_mean')
+        if eir is not None:
+            print(f"  ★ exact_id_recall : {eir:.3f}  (n={agg_50q['n_with_expected_ids']} q avec identifiants attendus) [DÉTERMINISTE]")
+        print(f"  ★ abstention_correct_rate : {agg_50q.get('abstention_correct_rate', 0):.1%} [DÉTERMINISTE]")
+        if agg_50q.get('exact_id_recall_per_type'):
+            parts = [f"{t}={d['mean']:.2f}(n{d['n']})" for t, d in sorted(agg_50q['exact_id_recall_per_type'].items())]
+            print(f"    exact_id_recall/type : {', '.join(parts)}")
+        # JUGE LLM (diagnostic secondaire, bruité)
+        print(f"  C1 (LLM-judge, bruité) : {agg_50q['C1_mean']:.3f}  [valid={agg_50q['n_judge_valid']}/{agg_50q['n_total']}, judge_failed={agg_50q['n_judge_failed']} ({agg_50q['judge_failure_rate']:.1%}), fallback_used={agg_50q['n_judge_fallback_used']}]")
         if agg_50q['C3_lifecycle_mean'] is not None:
             print(f"  C3 lifecycle ({agg_50q['n_lifecycle']}q) : {agg_50q['C3_lifecycle_mean']:.3f}")
         print(f"  Latency : p50={agg_50q['latency_p50_s']:.1f}s p95={agg_50q['latency_p95_s']:.1f}s max={agg_50q['latency_max_s']:.1f}s")

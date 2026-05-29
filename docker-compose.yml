@@ -146,10 +146,10 @@ services:
       # === Phase B (ré-ingestion 72B, 25/05/2026) ===
       # batch_size réduit : le 72B-AWQ tourne à max_model_len 4096 (contrainte L40S)
       # → 5 unités/appel pour que prompt P1.3.5 + sortie tiennent. (10 = défaut hors 72B)
-      CLAIMFIRST_BATCH_SIZE: "5"
+      CLAIMFIRST_BATCH_SIZE: "10"
       # Active l'extraction de procédures (Phase 6.7 : :Procedure + STEP_OF/PREREQUISITE_OF)
       V6_PROCEDURE_EXTRACTION: "1"
-      CLAIMFIRST_MAX_CONCURRENT_LLM: "2"  # match max_num_seqs=2 du 72B (evite la saturation queue)
+      CLAIMFIRST_MAX_CONCURRENT_LLM: "16"  # match max_num_seqs=2 du 72B (evite la saturation queue)
       # Judges centralises — switch d'Ollama vers llama.cpp self-hosted
       # (container prometheus-judge, GPU, stable vs Ollama timeout 14B)
       # CH-34 (04/05/2026) — bascule de Prometheus (sous-évaluait 90% des cas, +0.687 delta)
@@ -241,9 +241,9 @@ services:
       # CH-49 — bascule v4_2 Tiered Pipeline (Layer 0+1+2 + 5 operators + verifier veto) — 2026-05-10
       RUNTIME_VERSION: v4_2
       # === Phase B (ré-ingestion 72B, 25/05/2026) — idem worker primaire ===
-      CLAIMFIRST_BATCH_SIZE: "5"
+      CLAIMFIRST_BATCH_SIZE: "10"
       V6_PROCEDURE_EXTRACTION: "1"
-      CLAIMFIRST_MAX_CONCURRENT_LLM: "2"  # match max_num_seqs=2 du 72B (evite la saturation queue)
+      CLAIMFIRST_MAX_CONCURRENT_LLM: "16"  # match max_num_seqs=2 du 72B (evite la saturation queue)
       # CH-34 (04/05/2026) — bascule de Prometheus (sous-évaluait 90% des cas, +0.687 delta)
       # vers Llama-3.3-70B-Instruct sur DeepInfra (calibration honnête, distingue
       # abstention correcte vs hallucination). Audit benchmark/audit_judge_calibration_llama70b.json

@@ -161,3 +161,54 @@ def test_self_contained_text_fallback():
     }]}
     res = DecompositionStage(_llm(payload)).decompose([("u1", "x")])
     assert "X" in res.claims[0].self_contained_text
+
+
+# --- P3.7 : merge déterministe anti-fragmentation énumération ---
+
+def test_fragmented_enumeration_merged_to_one_claim():
+    # Simule le 14B violant la règle : 3 claims mono-objet, même unit/subject/predicate.
+    payload = {"claims": [
+        {"subject": "Assigning catalog X", "predicate": "assigns", "objects": ["catalog CUSTOMER_DSP"],
+         "modality": "assertive", "polarity": "affirmative",
+         "self_contained_text": "Assigning catalog X assigns catalog CUSTOMER_DSP.", "source_unit_ids": ["u1"]},
+        {"subject": "Assigning catalog X", "predicate": "assigns", "objects": ["catalog PRODUCT_DSP"],
+         "modality": "assertive", "polarity": "affirmative",
+         "self_contained_text": "Assigning catalog X assigns catalog PRODUCT_DSP.", "source_unit_ids": ["u1"]},
+        {"subject": "Assigning catalog X", "predicate": "assigns", "objects": ["catalog SUPPLIER_DSP"],
+         "modality": "assertive", "polarity": "affirmative",
+         "self_contained_text": "Assigning catalog X assigns catalog SUPPLIER_DSP.", "source_unit_ids": ["u1"]},
+    ]}
+    res = DecompositionStage(_llm(payload)).decompose([("u1", "x")])
+    assert res.n_claims == 1, "les 3 fratries d'énumération doivent fusionner en 1 claim"
+    c = res.claims[0]
+    assert len(c.objects) == 3
+    assert all(o in c.self_contained_text for o in
+               ["catalog CUSTOMER_DSP", "catalog PRODUCT_DSP", "catalog SUPPLIER_DSP"])
+
+
+def test_different_predicates_not_merged():
+    # Même subject/unit mais prédicats DIFFÉRENTS → ne PAS fusionner.
+    payload = {"claims": [
+        {"subject": "The engine", "predicate": "weighs", "objects": ["500 kg"],
+         "modality": "assertive", "polarity": "affirmative",
+         "self_contained_text": "The engine weighs 500 kg.", "source_unit_ids": ["u1"]},
+        {"subject": "The engine", "predicate": "runs on", "objects": ["kerosene"],
+         "modality": "assertive", "polarity": "affirmative",
+         "self_contained_text": "The engine runs on kerosene.", "source_unit_ids": ["u1"]},
+    ]}
+    res = DecompositionStage(_llm(payload)).decompose([("u1", "x")])
+    assert res.n_claims == 2, "prédicats différents → claims séparés"
+
+
+def test_different_units_not_merged():
+    # Même subject/predicate mais unités SOURCES différentes → ne PAS fusionner.
+    payload = {"claims": [
+        {"subject": "Module A", "predicate": "supports", "objects": ["feature X"],
+         "modality": "assertive", "polarity": "affirmative",
+         "self_contained_text": "Module A supports feature X.", "source_unit_ids": ["u1"]},
+        {"subject": "Module A", "predicate": "supports", "objects": ["feature Y"],
+         "modality": "assertive", "polarity": "affirmative",
+         "self_contained_text": "Module A supports feature Y.", "source_unit_ids": ["u2"]},
+    ]}
+    res = DecompositionStage(_llm(payload)).decompose([("u1", "x"), ("u2", "y")])
+    assert res.n_claims == 2, "unités sources différentes → pas de fusion"

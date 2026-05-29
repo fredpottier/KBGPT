@@ -549,6 +549,12 @@ class Executor:
                 relations: List[RelationSummary] = []
             elif tc.tool == "kg_claims_list":
                 resolved_params = self._resolve_subject_for_call(tc, "subject_filter")
+                # P3.1 (28/05/2026) — les réponses-liste sont dispersées sur des
+                # claims atomiques aux subjects/predicates hétérogènes ; l'exact-match
+                # subject_canonical+predicate ne peut pas les rassembler (recall 0,
+                # cf probe p1_probe_list_retrieval). On requête sur la question entière
+                # (signal sémantique le plus riche pour énumérer) en mode hybride.
+                resolved_params["query_text"] = (parse_input.question or "").strip()
                 claims, sections = self._call_kg_claims_list(resolved_params)
                 relations = []
             elif tc.tool == "lifecycle_query":
@@ -679,7 +685,9 @@ class Executor:
         try:
             from knowbase.common.clients.reranker import get_cross_encoder
             ce_model_name = os.getenv("V6_CE_RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
-            ce = get_cross_encoder(model_name=ce_model_name, device="cpu")
+            # device=None → auto-détection (CUDA si dispo, sinon CPU). Le conteneur
+            # app a accès au GPU ; cohérent avec le chemin synthesize ClaimReranker.
+            ce = get_cross_encoder(model_name=ce_model_name, device=None)
         except Exception as e:
             logger.warning("rrf_ce: cross-encoder load failed (%s), fallback RRF only", e)
             return claims, sections
@@ -859,7 +867,26 @@ class Executor:
     def _call_kg_claims_list(
         self, params: Dict[str, Any]
     ) -> Tuple[List[ClaimSummary], List[SectionSummary]]:
-        rows = self._get_neo4j().execute_query(CYPHER_KG_CLAIMS_LIST, **params)
+        # P3.1 (28/05/2026) — même politique de retrieval que kg_claims (cf A4.9).
+        # list_enumeration via exact-match subject_canonical+predicate ratait
+        # systématiquement les items dispersés (recall 0, cf probe). En mode hybride
+        # on requête claim.text (BM25 + vector RRF) pour agréger les claims atomiques
+        # formant la liste, quels que soient leurs subject/predicate individuels.
+        mode = os.getenv("V6_HYBRID_RETRIEVAL", "0").lower()
+        query_text = (params.get("query_text") or "").strip()
+        if query_text and mode != "0":
+            if mode == "vector":
+                return self._call_kg_claims_vector_only(params)
+            if mode == "rrf_ce":
+                return self._call_kg_claims_rrf_ce(params)
+            if mode == "rrf":
+                return self._call_kg_claims_rrf(params)
+            if mode in ("1", "bm25"):
+                return self._call_kg_claims_hybrid(params)
+        # Legacy exact-match (mode=0 ou query_text absent) : query_text n'est pas un
+        # paramètre Cypher de CYPHER_KG_CLAIMS_LIST, on le retire avant l'appel.
+        legacy_params = {k: v for k, v in params.items() if k != "query_text"}
+        rows = self._get_neo4j().execute_query(CYPHER_KG_CLAIMS_LIST, **legacy_params)
         return self._parse_claim_rows(rows)
 
     def _call_lifecycle(

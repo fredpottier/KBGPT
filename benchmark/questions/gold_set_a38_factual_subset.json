@@ -1,0 +1,279 @@
+[
+  {
+    "id": "V2_T1_T1_HUM_0097",
+    "question": "Quelle transaction est utilisee pour la Labeling Workbench dans Global Label Management ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "La transaction CBGLWB (Labeling Workbench) est utilisee pour filtrer les print requests par etat.",
+      "exact_identifiers": [
+        "Transaction CBGLWB (Labeling Workbench, filter by state)"
+      ],
+      "supporting_doc_ids": [
+        "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0017",
+    "question": "Quel role SAP est fourni pour le team lead dans le Payroll Control Center ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Le role SAP_HR_PYC_TM_MNG est fourni pour le team lead, avec l'objet d'autorisation P_PYD_INST.",
+      "exact_identifiers": [
+        "Team lead sample role: SAP_HR_PYC_TM_MNG; authorization object P_PYD_INST"
+      ],
+      "supporting_doc_ids": [
+        "027_SAP_S4HANA_2023_Security_Guide_c160af0e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0014",
+    "question": "Quelles options de connectivite Azure sont supportees pour RISE with SAP ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Les options incluent Site-to-Site VPN, Express Route, Express Route Direct, VNET Peering (Regional et Global), Virtual WAN. Pour le VNET Peering, RISE en tant que Spoke uniquement est supporte.",
+      "exact_identifiers": [
+        "RISE as a Spoke only is supported"
+      ],
+      "supporting_doc_ids": [
+        "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_PPTX_0018",
+    "question": "Comment SAP gere-t-il l'authentification pour l'acces aux systemes clients ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "L'authentification est le deuxieme principe d'acces (apres le consentement). SAP utilise des processus d'authentification formels pour verifier l'identite des personnels accedant aux systemes.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:?",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0054",
+    "question": "Que verifie la transaction /SAPAPO/OM13 pour liveCache ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "La transaction /SAPAPO/OM13 effectue un controle basique de la configuration liveCache. Les feux rouges doivent etre resolus immediatement.",
+      "exact_identifiers": [
+        "/SAPAPO/OM13 — Basic check of liveCache configuration; red traffic lights = resolve immediately"
+      ],
+      "supporting_doc_ids": [
+        "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0080",
+    "question": "Quels codes statut existent pour les print requests WWI dans EHS ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "AA = Print request body exists, ZS = Print request created not yet processed, ZD = Print request ready for printing.",
+      "exact_identifiers": [
+        "AA = Print request body exists, ZS = Print request created, not yet processed, ZD = Print request ready for printing"
+      ],
+      "supporting_doc_ids": [
+        "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_PPTX_0017",
+    "question": "Quel est le role de SAP Signavio dans l'ecosysteme SAP Business Suite ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "SAP Signavio fournit l'AI-assisted Cloud Transformation, permettant la transformation assistee par l'IA des processus metier vers le cloud.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:?",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0028",
+    "question": "Quelle transaction est utilisee pour le WWI Monitor dans SAP EHS ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "La transaction CG5Z est utilisee pour le WWI Monitor, qui affiche la queue de generation de rapports et les ordres d'expedition.",
+      "exact_identifiers": [
+        "Transaction CG5Z (WWI Monitor — shows report generation queue and shipping orders)"
+      ],
+      "supporting_doc_ids": [
+        "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0020",
+    "question": "Quels objets d'autorisation sont necessaires pour le scenario E-Recruiting Manager ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Les objets d'autorisation incluent P_RCF_POOL, P_RCF_STAT, P_RCF_ACT et CA_POWL (avec POWL_APPID = ERC_WORKCENTER).",
+      "exact_identifiers": [
+        "P_RCF_POOL, P_RCF_STAT, P_RCF_ACT, CA_POWL with POWL_APPID: ERC_WORKCENTER"
+      ],
+      "supporting_doc_ids": [
+        "027_SAP_S4HANA_2023_Security_Guide_c160af0e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0031",
+    "question": "Quelle transaction initialise le cache Expert dans SAP EHS ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "La transaction CGSADM initialise le cache Expert et sert d'outil d'administration central pour WWI et Expert.",
+      "exact_identifiers": [
+        "Transaction CGSADM: Central admin tool for WWI + Expert"
+      ],
+      "supporting_doc_ids": [
+        "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_PPTX_0020",
+    "question": "Quels outils SAP utilise-t-il pour le support client dans RISE with SAP ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "SAP utilise SAP Cloud Application Services (CAS) pour le support, avec des processus d'onboarding formels, un controle d'acces par le client, et des operations selon des procedures formalisees.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:?",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_PPTX_0008",
+    "question": "Qu'est-ce que le SAP Business Data Cloud ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Le SAP Business Data Cloud connecte toutes les donnees de l'entreprise et permet de liberer le potentiel des donnees souvent verrouillees derriere des silos.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:?",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0003",
+    "question": "Quel client SAP doit etre supprime avant la conversion vers S/4HANA ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Le client 066 (Early Watch client) doit etre supprime avant la conversion. Voir SAP Note 1749142.",
+      "exact_identifiers": [
+        "Client 066 (Early Watch client) must be removed before the conversion"
+      ],
+      "supporting_doc_ids": [
+        "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0033",
+    "question": "Quelle transaction permet un controle fonctionnel rapide de la configuration liveCache ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "La transaction /SAPAPO/OM03 permet un controle fonctionnel rapide (brief functional check) de liveCache.",
+      "exact_identifiers": [
+        "/SAPAPO/OM03 — Brief functional check"
+      ],
+      "supporting_doc_ids": [
+        "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0063",
+    "question": "Comment SAP S/4HANA utilise-t-il la recherche fuzzy HANA pour la classification commerciale ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "SAP S/4HANA utilise la recherche fuzzy HANA pour proposer des numeros de tarif douanier et codes de marchandises par recherche de similarite, avec les apps Activate Classification Proposals et Schedule Creation of Trade Classification Proposals.",
+      "exact_identifiers": [
+        "HANA fuzzy search for proposals for customs tariff numbers and commodity codes via similarity search"
+      ],
+      "supporting_doc_ids": [
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  }
+]

@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +196,69 @@ def _parse(raw: str) -> Optional[dict]:
         return None
 
 
+def _join_objects_natural(objects: List[str]) -> str:
+    """Joint une liste d'objets en énumération naturelle (A, B, and C)."""
+    if not objects:
+        return ""
+    if len(objects) == 1:
+        return objects[0]
+    return ", ".join(objects[:-1]) + f", and {objects[-1]}"
+
+
+def _merge_enumeration_siblings(claims: List[ClaimCandidate]) -> List[ClaimCandidate]:
+    """Fusionne les fratries d'énumération issues d'une même unité source (P3.7).
+
+    Regroupe les candidats partageant (source_unit_ids, subject, predicate, modality,
+    polarity) et fusionne leurs `objects` en UN claim. Garantit l'invariant
+    « énumération → un claim » même quand le LLM l'a violé en émettant N claims
+    mono-objet. Les candidats sans source_unit_ids restent isolés (pas de scope unité).
+    Domain-agnostic : aucune règle corpus-spécifique.
+    """
+    from collections import OrderedDict
+
+    groups: "OrderedDict[Any, List[ClaimCandidate]]" = OrderedDict()
+    for idx, c in enumerate(claims):
+        if c.source_unit_ids:
+            key = (
+                tuple(sorted(c.source_unit_ids)),
+                c.subject.strip().casefold(),
+                c.predicate.strip().casefold(),
+                c.modality,
+                c.polarity,
+            )
+        else:
+            key = ("__nosrc__", idx)  # pas de scope unité → reste singleton
+        groups.setdefault(key, []).append(c)
+
+    merged: List[ClaimCandidate] = []
+    for group in groups.values():
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        seen: set = set()
+        all_objects: List[str] = []
+        all_quals: List[dict] = []
+        for c in group:
+            for o in c.objects:
+                if o.strip().casefold() not in seen:
+                    seen.add(o.strip().casefold())
+                    all_objects.append(o)
+            all_quals.extend(c.qualifiers)
+        base = group[0]
+        sct = f"{base.subject} {base.predicate} {_join_objects_natural(all_objects)}".strip()
+        merged.append(ClaimCandidate(
+            subject=base.subject,
+            predicate=base.predicate,
+            objects=all_objects,
+            modality=base.modality,
+            polarity=base.polarity,
+            self_contained_text=sct,
+            source_unit_ids=base.source_unit_ids,
+            qualifiers=all_quals,
+        ))
+    return merged
+
+
 def _coerce_claim(item: dict, valid_ids: set) -> Optional[ClaimCandidate]:
     subj = str(item.get("subject", "")).strip()
     pred = str(item.get("predicate", "")).strip()
@@ -267,4 +330,10 @@ class DecompositionStage:
             cand = _coerce_claim(item, valid_ids)
             if cand is not None:
                 result.claims.append(cand)
+        # Filet déterministe anti-fragmentation (P3.7) : le schéma exige qu'une
+        # énumération (même subject+predicate) soit UN claim objects=[items], mais le
+        # LLM (14B notamment) émet parfois N claims mono-objet → fratries lues comme
+        # contradictoires (faux CONTRADICTS, supersession corrompue). Ce merge garantit
+        # l'invariant indépendamment de la compliance du LLM et du corpus.
+        result.claims = _merge_enumeration_siblings(result.claims)
         return result

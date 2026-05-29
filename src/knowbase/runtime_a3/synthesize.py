@@ -434,12 +434,20 @@ class Synthesizer:
         if not self._claim_filter_enabled or not claims:
             return claims
 
-        # P2.2 — Cross-encoder reranker prioritaire si activé
+        # P3.2 (29/05/2026) — top_k élargi pour les questions-liste : une réponse
+        # multi-items (codes, objets, outils) était tronquée à 5 → on garde plus de
+        # candidats pour couvrir tous les items. N'affecte PAS le factual atomique.
         import os as _os
+        is_list = any(
+            sg.kind == "list_enumeration" for sg in inp.parse_output.sub_goals
+        )
+        eff_top_k = int(_os.getenv("V6_LIST_TOP_K", "12")) if is_list else 5
+
+        # P2.2 — Cross-encoder reranker prioritaire si activé
         if _os.getenv("V6_CROSS_ENCODER_RERANK", "0") == "1":
             try:
                 from knowbase.runtime_a3.reranker import ClaimReranker
-                reranker = ClaimReranker(top_k=5)
+                reranker = ClaimReranker(top_k=eff_top_k)
                 question = inp.parse_output.raw_question
                 kept_claims, kept_scores = reranker.rerank(question, claims)
                 self._last_filter_result = None  # cross-encoder n'utilise pas le même schema
@@ -467,7 +475,7 @@ class Synthesizer:
         try:
             question = inp.parse_output.raw_question
             kept, result = self._get_claim_filter().filter(
-                question, claims, groups=groups,
+                question, claims, groups=groups, top_k=eff_top_k,
             )
             self._last_filter_result = result
             return kept

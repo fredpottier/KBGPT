@@ -206,7 +206,13 @@ class Planner:
         En revanche on exige au moins l'un des deux (subject_canonical ou predicate_hint)
         pour éviter de matériel un cartésien sur tout le KG.
         """
-        if not sub_goal.subject_canonical and not sub_goal.predicate_hint:
+        # P3.1 (28/05/2026) — en mode hybride, le retrieval list_enumeration passe
+        # par BM25/vector sur claim.text (la question pilote la requête), donc
+        # subject/predicate vides sont tolérés. En legacy (exact-match), on exige
+        # toujours au moins l'un des deux pour éviter un balayage de tout le KG.
+        import os as _os
+        hybrid_mode = _os.getenv("V6_HYBRID_RETRIEVAL", "0") != "0"
+        if not sub_goal.subject_canonical and not sub_goal.predicate_hint and not hybrid_mode:
             return [], "missing_subject_and_predicate_for_kg_claims_list"
 
         params: Dict = {
