@@ -502,10 +502,30 @@ class Executor:
         # A4.9-bis : stocker temporairement parse_output pour accès depuis _build_query_text_for_call
         self._current_parse_output = parse_output
 
-        # 1) Exécuter chaque ToolCall séquentiellement (parallélisation v2)
-        for tc in plan_output.tool_calls:
-            result = self._execute_tool_call(tc, parse_input, plan_output)
-            results.append(result)
+        # 1) Exécuter les ToolCall — en parallèle (C-latence 29/05/2026).
+        # B1 (planner multi-aspect) génère N sous-buts → N ToolCall indépendants ;
+        # les lancer en parallèle (I/O-bound : Neo4j + embeddings) réduit fortement
+        # la latence (p95). Ordre des résultats préservé par index. Toggle de repli
+        # V6_EXECUTE_PARALLEL=0 → séquentiel.
+        tool_calls = plan_output.tool_calls
+        parallel = (
+            os.getenv("V6_EXECUTE_PARALLEL", "1") == "1" and len(tool_calls) > 1
+        )
+        if parallel:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            indexed: List[Tuple[int, ToolResult]] = []
+            max_workers = min(len(tool_calls), 6)
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {
+                    pool.submit(self._execute_tool_call, tc, parse_input, plan_output): i
+                    for i, tc in enumerate(tool_calls)
+                }
+                for fut in as_completed(futures):
+                    indexed.append((futures[fut], fut.result()))
+            results = [r for _, r in sorted(indexed, key=lambda x: x[0])]
+        else:
+            for tc in tool_calls:
+                results.append(self._execute_tool_call(tc, parse_input, plan_output))
 
         # 2) Side-effect §2.6 : charger les :ConflictPending adjacents aux claims retournés
         self._attach_conflict_pendings(results, parse_input.tenant_id)

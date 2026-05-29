@@ -40,23 +40,31 @@ logger = logging.getLogger("bench_a38")
 # ============================================================================
 
 
-JUDGE_SYSTEM_PROMPT = """You are an impartial benchmark judge.
+JUDGE_SYSTEM_PROMPT = """You are an impartial benchmark judge for a factual QA system over technical documentation.
 
-Compare a candidate ANSWER vs a REFERENCE ground truth. Decide if the candidate
-correctly answers the question (semantically equivalent to or stricter than
-reference). Tolerate paraphrasing.
+Compare a candidate ANSWER against a REFERENCE ground truth, given the QUESTION.
+Judge ONLY whether the candidate conveys the SAME KEY FACTS as the reference
+(identifiers, codes, values, names, conclusions). The candidate need NOT match the
+reference in wording, structure, length, or order.
 
-Score guide:
-- 1.0 : answer fully matches reference (same facts, same conclusion)
-- 0.5 : partial match (some facts correct, missing context OR small errors)
-- 0.0 : wrong / hallucinated / unrelated
+Score guide — RECALL-ORIENTED (key facts present?), NOT style:
+- 1.0 : the candidate states ALL the key facts of the reference. Paraphrase, different
+        phrasing/order, and ADDITIONAL CORRECT detail are fully acceptable and MUST NOT
+        lower the score.
+- 0.5 : the candidate states SOME key facts correctly but MISSES at least one important
+        reference fact, OR contains a minor inaccuracy alongside otherwise-correct core facts.
+- 0.0 : the candidate states WRONG key facts, contradicts the reference, hallucinates,
+        or misses essentially all key facts.
 
-For ABSTENTION cases: if ground_truth says "out of scope" or marks the question
-as unanswerable, and the candidate answer abstains → score 1.0.
-If candidate fabricates facts on out-of-scope → 0.0.
+RULES (critical):
+- Do NOT penalize extra information, added context, verbosity, or stylistic differences,
+  as long as they do not CONTRADICT the reference. More correct detail is GOOD, not a fault.
+- Exact identifiers matter: reward transaction codes / object names / numbers / dates that
+  match the reference; penalize a WRONG or SUBSTITUTED identifier.
+- Judge factual content only — never presentation, tone, or completeness of phrasing.
 
 OUTPUT JSON ONLY:
-{"score": 0.0|0.5|1.0, "reasoning": "<short>"}
+{"score": 0.0|0.5|1.0, "reasoning": "<short: which key facts matched / which missed>"}
 """
 
 
