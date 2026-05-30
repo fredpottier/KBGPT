@@ -97,6 +97,14 @@ RULES (NON-NEGOTIABLE):
   answer. The cited claims remain the evidence; the chain provides ordering and
   completeness. Still cite the underlying claims; do not invent steps absent
   from the chain.
+- COMPARISON questions (the question contrasts two or more items, versions,
+  editions, options, or documents): structure the answer to present EACH side
+  EXPLICITLY and put them side by side (e.g. "Side A: <facts> ; Side B: <facts>"),
+  then state the actual difference. Cite the claims of each side. If the evidence
+  covers one side but NOT the other, say so explicitly ("the corpus documents X
+  for A but does not document the corresponding fact for B") instead of describing
+  only the covered side. Never present a one-sided answer as if it were the
+  comparison.
 - For ABSTENTION mode: produce a short motivated message explaining why the
   corpus cannot answer. Empty cited_claims is expected.
 
@@ -449,7 +457,17 @@ class Synthesizer:
                 from knowbase.runtime_a3.reranker import ClaimReranker
                 reranker = ClaimReranker(top_k=eff_top_k)
                 question = inp.parse_output.raw_question
-                kept_claims, kept_scores = reranker.rerank(question, claims)
+                # Comparaison / multi-aspect (≥2 sous-buts distincts) → rerank
+                # ÉQUILIBRÉ par côté pour que les 2 côtés soient représentés (sinon
+                # le côté dominant écrase l'autre → synthèse un seul côté).
+                # Cf project_comparison_synthesis_audit.
+                n_groups = len(set(groups)) if groups else 1
+                if n_groups >= 2:
+                    kept_claims, kept_scores = reranker.rerank_balanced(
+                        question, claims, groups, top_k=max(eff_top_k, 2 * n_groups),
+                    )
+                else:
+                    kept_claims, kept_scores = reranker.rerank(question, claims)
                 self._last_filter_result = None  # cross-encoder n'utilise pas le même schema
                 logger.info(
                     "[CROSS_ENCODER] kept %d/%d claims (top_score=%.3f)",

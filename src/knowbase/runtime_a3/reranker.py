@@ -172,3 +172,61 @@ class ClaimReranker:
             k, kept_scores[-1] if kept_scores else 0.0,
         )
         return kept_claims, kept_scores
+
+    def rerank_balanced(
+        self,
+        question: str,
+        claims: List[ClaimSummary],
+        groups: List[int],
+        top_k: Optional[int] = None,
+    ) -> Tuple[List[ClaimSummary], List[float]]:
+        """Rerank en garantissant un QUOTA PAR GROUPE (sub_goal).
+
+        Pour les comparaisons (≥2 sous-buts = 2 côtés comparés), le rerank global
+        laisse le côté dominant (plus de claims / mieux scorés) écraser l'autre →
+        synthèse un seul côté. Ici on rerank et on prend un quota équitable par
+        côté pour que les DEUX soient représentés dans le top-K envoyé au LLM.
+        Cf project_comparison_synthesis_audit.
+        """
+        if not claims:
+            return [], []
+        if len(groups) != len(claims):
+            return self.rerank(question, claims, top_k=top_k)
+        k = top_k or self._top_k
+        distinct = list(dict.fromkeys(groups))
+        if len(distinct) <= 1 or not question or not question.strip():
+            return self.rerank(question, claims, top_k=k)
+
+        # Score tous les claims en un seul predict (efficace)
+        pairs = [(question, _claim_text_for_rerank(c)) for c in claims]
+        valid_idx = [i for i, (_, ct) in enumerate(pairs) if ct]
+        if not valid_idx:
+            return claims[:k], [0.0] * min(k, len(claims))
+        try:
+            model = self._get_model()
+            scores = model.predict([pairs[i] for i in valid_idx],
+                                   batch_size=self._batch_size, show_progress_bar=False)
+        except Exception:
+            logger.exception("[ClaimReranker] balanced predict failed")
+            raise
+        score_by_idx = {orig: float(scores[li]) for li, orig in enumerate(valid_idx)}
+
+        # Quota par groupe (ceil) pour couvrir top_k tout en garantissant ≥1/côté
+        per_group_k = max(1, -(-k // len(distinct)))
+        kept: List[Tuple[int, float]] = []
+        for g in distinct:
+            g_scored = sorted(
+                ((i, score_by_idx[i]) for i in range(len(claims))
+                 if groups[i] == g and i in score_by_idx),
+                key=lambda x: x[1], reverse=True,
+            )
+            kept.extend(g_scored[:per_group_k])
+        # Présentation : tri global DESC
+        kept.sort(key=lambda x: x[1], reverse=True)
+        kept_claims = [claims[i] for i, _ in kept]
+        kept_scores = [s for _, s in kept]
+        logger.info(
+            "[ClaimReranker] balanced rerank %d→%d across %d groups (quota/group=%d)",
+            len(claims), len(kept_claims), len(distinct), per_group_k,
+        )
+        return kept_claims, kept_scores
