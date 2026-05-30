@@ -105,6 +105,14 @@ RULES (NON-NEGOTIABLE):
   for A but does not document the corresponding fact for B") instead of describing
   only the covered side. Never present a one-sided answer as if it were the
   comparison.
+- BE SPECIFIC, NOT GENERIC. Especially for broad/multi-aspect questions ("what do
+  the documents say about X, including A, B, C"): answer EACH named aspect with its
+  CONCRETE facts from the claims — the actual identifiers, names, values, options,
+  steps, or conditions — NOT a high-level paraphrase. Prefer naming the actual
+  items (e.g. "the supported options are Alpha, Beta and Gamma") over a vague
+  summary ("there are several options"). If a claim carries a specific fact
+  relevant to a requested aspect, surface that fact; do not summarise it away. A
+  correct-but-vague answer that omits the specifics available in the claims is a FAILURE.
 - For ABSTENTION mode: produce a short motivated message explaining why the
   corpus cannot answer. Empty cited_claims is expected.
 
