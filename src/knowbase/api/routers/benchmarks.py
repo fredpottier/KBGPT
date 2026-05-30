@@ -792,36 +792,46 @@ async def run_robustness_benchmark(req: RobustnessRunRequest):
 # et app/scripts/bench_a38_classic_rag.py (arm=classic_rag). Lecture seule :
 # ces benchs tournent en CLI, le dashboard ne fait qu'exposer les run JSON.
 
-# Mapping arm → répertoires candidats (fallback paths comme RESULTS_DIR).
-_A38_ARM_DIRS: dict[str, list[Path]] = {
-    "osmosis": [
-        Path("data/benchmark/a38_runtime_v6"),
-        Path("/data/benchmark/a38_runtime_v6"),
-        Path("benchmark/a38_runtime_v6"),
-    ],
-    "classic_rag": [
-        Path("data/benchmark/a38_classic_rag"),
-        Path("/data/benchmark/a38_classic_rag"),
-        Path("benchmark/a38_classic_rag"),
-    ],
-}
+# Répertoires de base contenant les sous-dossiers de runs a38 (a38_runtime_v6,
+# a38_classic_rag, et tout dossier expérimental a38_* : A/B, full_off/on, cmp_v*…).
+# On scanne TOUS les `a38*` pour que n'importe quel run apparaisse dans le dashboard,
+# quel que soit son --output-dir.
+_A38_BASE_DIRS: list[Path] = [
+    Path("data/benchmark"),
+    Path("/data/benchmark"),
+    Path("benchmark"),
+]
 
 
-def _a38_existing_dirs(arm: str) -> list[Path]:
-    return [d for d in _A38_ARM_DIRS.get(arm, []) if d.exists()]
+def _a38_iter_run_dirs() -> list[Path]:
+    out: list[Path] = []
+    for base in _A38_BASE_DIRS:
+        if base.exists():
+            out.extend(sorted(d for d in base.glob("a38*") if d.is_dir()))
+    return out
+
+
+def _a38_classify_arm(data: dict, filepath: Path) -> str:
+    """Détermine le bras : champ `arm` du run, sinon nom de dossier, sinon osmosis."""
+    arm = data.get("arm")
+    if arm:
+        return str(arm)
+    dirname = filepath.parent.name.lower()
+    if "classic_rag" in dirname or dirname.endswith("_rag"):
+        return "classic_rag"
+    return "osmosis"
 
 
 def _a38_find_file(filename: str) -> Path | None:
-    """Retrouve un run par filename dans l'un des répertoires des deux bras."""
-    for arm in _A38_ARM_DIRS:
-        for d in _a38_existing_dirs(arm):
-            f = d / filename
-            if f.exists():
-                return f
+    """Retrouve un run par filename dans l'un des dossiers a38*."""
+    for d in _a38_iter_run_dirs():
+        f = d / filename
+        if f.exists():
+            return f
     return None
 
 
-def _a38_summary(filepath: Path, arm: str) -> dict[str, Any] | None:
+def _a38_summary(filepath: Path) -> dict[str, Any] | None:
     """Résumé léger d'un run a38 (sans results_50q) pour la liste."""
     try:
         data = json.loads(filepath.read_text(encoding="utf-8"))
@@ -829,6 +839,7 @@ def _a38_summary(filepath: Path, arm: str) -> dict[str, Any] | None:
         logger.warning(f"Erreur lecture a38 {filepath}: {e}")
         return None
 
+    arm = _a38_classify_arm(data, filepath)
     agg = data.get("agg_50q", {}) or {}
 
     # Taux de refus (mode==ABSTENTION) par type — calculé depuis les résultats.
@@ -848,7 +859,8 @@ def _a38_summary(filepath: Path, arm: str) -> dict[str, Any] | None:
 
     return {
         "filename": filepath.name,
-        "arm": data.get("arm", arm),
+        "arm": arm,
+        "run_dir": filepath.parent.name,
         "timestamp": data.get("timestamp", filepath.stem.replace("run_", "")),
         "config": data.get("config", {}),
         "total_duration_s": data.get("total_duration_s"),
@@ -876,17 +888,17 @@ def _a38_summary(filepath: Path, arm: str) -> dict[str, Any] | None:
 
 @router.get("/a38")
 async def get_a38_runs() -> dict[str, Any]:
-    """Liste les runs a38 (OSMOSIS runtime_v6 + RAG classique), triés récents d'abord."""
-    seen: dict[str, tuple[Path, str]] = {}
-    for arm in _A38_ARM_DIRS:
-        for d in _a38_existing_dirs(arm):
-            for f in d.glob("run_*.json"):
-                if f.name not in seen:
-                    seen[f.name] = (f, arm)
+    """Liste les runs a38 (tous dossiers a38*), triés récents d'abord."""
+    seen: dict[str, Path] = {}
+    for d in _a38_iter_run_dirs():
+        for f in d.glob("run_*.json"):
+            key = f"{d.name}/{f.name}"
+            if key not in seen:
+                seen[key] = f
 
     runs: list[dict[str, Any]] = []
-    for f, arm in seen.values():
-        s = _a38_summary(f, arm)
+    for f in seen.values():
+        s = _a38_summary(f)
         if s:
             runs.append(s)
 
