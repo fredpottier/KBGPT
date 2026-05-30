@@ -848,13 +848,26 @@ def _a38_summary(filepath: Path) -> dict[str, Any] | None:
     # autres, c'est un échec. Le frontend l'interprète selon la famille de question.
     results = data.get("results_50q", []) or []
     abst_by_type: dict[str, list[bool]] = {}
+    handled_by_type: dict[str, list[bool]] = {}
     for r in results:
         t = r.get("primary_type", "unknown")
-        mode = (r.get("run", {}) or {}).get("mode")
+        run = r.get("run", {}) or {}
+        mode = run.get("mode")
         abst_by_type.setdefault(t, []).append(mode == "ABSTENTION")
+        # « géré correctement » sur les questions pièges/hors-périmètre = le système
+        # ne répond PAS naïvement : il abstient OU il corrige (vérificateur de faux
+        # présupposé → warning premise_*). Une réponse corrective n'est pas une
+        # abstention mais c'est bien le bon comportement → on la compte ici.
+        warnings = run.get("synthesize_warnings") or []
+        premise_fired = any("premise" in str(w) for w in warnings)
+        handled_by_type.setdefault(t, []).append(mode == "ABSTENTION" or premise_fired)
     abstention_rate_per_type = {
         t: {"n": len(v), "rate": (sum(v) / len(v)) if v else 0.0}
         for t, v in abst_by_type.items()
+    }
+    handled_rate_per_type = {
+        t: {"n": len(v), "rate": (sum(v) / len(v)) if v else 0.0}
+        for t, v in handled_by_type.items()
     }
 
     return {
@@ -870,6 +883,7 @@ def _a38_summary(filepath: Path) -> dict[str, Any] | None:
         "abstention_correct_rate": agg.get("abstention_correct_rate"),
         "exact_id_recall_per_type": agg.get("exact_id_recall_per_type", {}),
         "abstention_rate_per_type": abstention_rate_per_type,
+        "handled_rate_per_type": handled_rate_per_type,
         # Juge LLM (bruité, secondaire)
         "C1_mean": agg.get("C1_mean"),
         "C3_lifecycle_mean": agg.get("C3_lifecycle_mean"),

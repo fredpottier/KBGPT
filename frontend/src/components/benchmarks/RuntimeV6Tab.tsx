@@ -59,6 +59,7 @@ interface A38Run {
   abstention_correct_rate?: number | null
   exact_id_recall_per_type?: Record<string, PerTypeStat>
   abstention_rate_per_type?: Record<string, { n: number; rate: number }>
+  handled_rate_per_type?: Record<string, { n: number; rate: number }>
   C1_mean?: number | null
   C3_lifecycle_mean?: number | null
   per_type?: Record<string, PerTypeStat>
@@ -126,12 +127,16 @@ function fmtDeltaPp(d: number | null): string {
   return pp > 0 ? `+${pp} pts` : pp < 0 ? `${pp} pts` : '='
 }
 
-// Taux d'abstention moyen (pondéré par le nb de questions) sur un ensemble de types.
-function weightedAbstention(run: A38Run | null, types: string[]): { rate: number | null; n: number } {
+// Taux moyen (pondéré par le nb de questions) d'un champ *_rate_per_type sur un set de types.
+function weightedRate(
+  run: A38Run | null,
+  types: string[],
+  field: 'abstention_rate_per_type' | 'handled_rate_per_type',
+): { rate: number | null; n: number } {
   if (!run) return { rate: null, n: 0 }
   let num = 0, den = 0
   for (const t of types) {
-    const a = run.abstention_rate_per_type?.[t]
+    const a = run[field]?.[t]
     if (a) { num += a.rate * a.n; den += a.n }
   }
   return { rate: den > 0 ? num / den : null, n: den }
@@ -412,23 +417,32 @@ export function RuntimeV6Tab() {
 
       {/* ── Famille 2 : l'arbitrage répondre / s'abstenir (auto-porteur) ── */}
       {NOANSWER_TYPES.some(t => ref.per_type?.[t]) && (() => {
-        // Les deux faces du bon arbitrage, calculées depuis les données du run.
-        const oRefuse = weightedAbstention(osm, NOANSWER_TYPES)
-        const rRefuse = weightedAbstention(rag, NOANSWER_TYPES)
-        const oAnsAb = weightedAbstention(osm, ANSWER_TYPES)
-        const rAnsAb = weightedAbstention(rag, ANSWER_TYPES)
+        // Les deux faces du bon arbitrage + l'équilibre (calculés depuis les données).
+        // « Gère correctement » = abstient OU corrige (réponse corrective ≠ abstention
+        // mais c'est le bon comportement face à un piège) → handled_rate_per_type.
+        const oHandled = weightedRate(osm, NOANSWER_TYPES, 'handled_rate_per_type')
+        const rHandled = weightedRate(rag, NOANSWER_TYPES, 'handled_rate_per_type')
+        const oAnsAb = weightedRate(osm, ANSWER_TYPES, 'abstention_rate_per_type')
+        const rAnsAb = weightedRate(rag, ANSWER_TYPES, 'abstention_rate_per_type')
         const oAnswer = oAnsAb.rate != null ? 1 - oAnsAb.rate : null
         const rAnswer = rAnsAb.rate != null ? 1 - rAnsAb.rate : null
-        const cell = (v: number | null) => (
-          <Text fontSize="14px" fontWeight="700" fontFamily="'Fira Code', monospace" color={v != null ? scoreColor(v) : T.textMuted}>{v != null ? pct(v) : '—'}</Text>
+        // Équilibre = le maillon faible (min des 2). Pénalise un système lopsided
+        // (qui réussit une dimension en sacrifiant l'autre).
+        const minOr = (a: number | null, b: number | null) =>
+          a != null && b != null ? Math.min(a, b) : null
+        const oBalance = minOr(oHandled.rate, oAnswer)
+        const rBalance = minOr(rHandled.rate, rAnswer)
+        const cell = (v: number | null, bold = false) => (
+          <Text fontSize={bold ? '15px' : '14px'} fontWeight="700" fontFamily="'Fira Code', monospace" color={v != null ? scoreColor(v) : T.textMuted}>{v != null ? pct(v) : '—'}</Text>
         )
         return (
           <Card accent={T.statusWarn}>
-            <Text fontSize="sm" fontWeight="700" color={T.textPrimary} mb={1}>Sait-il s’abstenir… sans tout refuser ?</Text>
+            <Text fontSize="sm" fontWeight="700" color={T.textPrimary} mb={1}>Sait-il gérer les pièges… sans sacrifier le reste ?</Text>
             <Text fontSize="12px" color={T.textSecondary} mb={4} lineHeight="1.6">
-              Un bon système doit réussir <b>les deux lignes à la fois</b> : refuser les questions pièges / hors-périmètre,
-              <b> et</b> répondre aux vraies questions. Refuser systématiquement gonfle la 1<sup>re</sup> ligne au prix de
-              la 2<sup>de</sup> — d’où l’importance de les lire ensemble. Sur chaque ligne, <b>plus haut = mieux</b> (vert).
+              Un bon système doit réussir <b>les deux premières lignes à la fois</b> : bien gérer les questions pièges /
+              hors-périmètre (les corriger ou s’abstenir), <b>et</b> répondre aux vraies questions. Un système qui se
+              contente de tout refuser réussit la 1<sup>re</sup> ligne mais échoue la 2<sup>de</sup>. La ligne
+              <b> Équilibre</b> (le maillon faible) résume le tout : plus haut = mieux.
             </Text>
             <Box overflowX="auto">
               <Table size="sm" variant="unstyled">
@@ -442,13 +456,13 @@ export function RuntimeV6Tab() {
                 <Tbody>
                   <Tr borderBottom="1px solid" borderColor={T.borderSubtle}>
                     <Td py={3}>
-                      <InfoLabel text={`✋ Refuse quand il le faut`} help="Questions pièges (fausse affirmation à détecter) et hors-périmètre (info absente des documents). Refuser/signaler est le bon comportement." fontSize="12px" fontWeight="600" color={T.textSecondary} />
-                      <Text fontSize="10px" color={T.textMuted}>questions pièges & hors-périmètre ({oRefuse.n} q)</Text>
+                      <InfoLabel text={`✅ Gère correctement les pièges`} help="Questions pièges (fausse affirmation) et hors-périmètre. Bien gérer = corriger (« cet élément n'existe pas / c'est l'inverse ») OU s'abstenir, plutôt que répondre naïvement." fontSize="12px" fontWeight="600" color={T.textSecondary} />
+                      <Text fontSize="10px" color={T.textMuted}>questions pièges & hors-périmètre ({oHandled.n} q)</Text>
                     </Td>
-                    <Td py={3} isNumeric>{cell(oRefuse.rate)}</Td>
-                    {rag && <Td py={3} isNumeric>{cell(rRefuse.rate)}</Td>}
+                    <Td py={3} isNumeric>{cell(oHandled.rate)}</Td>
+                    {rag && <Td py={3} isNumeric>{cell(rHandled.rate)}</Td>}
                   </Tr>
-                  <Tr>
+                  <Tr borderBottom="1px solid" borderColor={T.borderSubtle}>
                     <Td py={3}>
                       <InfoLabel text={`💬 Répond quand il le faut`} help="Questions qui ont une vraie réponse dans les documents. Ici, s'abstenir est un échec — il faut répondre." fontSize="12px" fontWeight="600" color={T.textSecondary} />
                       <Text fontSize="10px" color={T.textMuted}>questions répondables ({oAnsAb.n} q)</Text>
@@ -456,12 +470,21 @@ export function RuntimeV6Tab() {
                     <Td py={3} isNumeric>{cell(oAnswer)}</Td>
                     {rag && <Td py={3} isNumeric>{cell(rAnswer)}</Td>}
                   </Tr>
+                  <Tr bg={`${T.statusOk}0c`}>
+                    <Td py={3}>
+                      <InfoLabel text={`⚖️ Équilibre (maillon faible)`} help="Le minimum des deux lignes ci-dessus. Un système doit être bon sur LES DEUX ; ce score reflète sa dimension la plus faible. C'est là que se voit l'avantage d'un système qui ne sacrifie aucune des deux." fontSize="12px" fontWeight="700" color={T.textPrimary} />
+                      <Text fontSize="10px" color={T.textMuted}>min(gère les pièges, répond aux vraies questions)</Text>
+                    </Td>
+                    <Td py={3} isNumeric>{cell(oBalance, true)}</Td>
+                    {rag && <Td py={3} isNumeric>{cell(rBalance, true)}</Td>}
+                  </Tr>
                 </Tbody>
               </Table>
             </Box>
             <Text fontSize="11px" color={T.textMuted} mt={3} lineHeight="1.6">
-              Un <b>100%</b> sur la 1<sup>re</sup> ligne n’est PAS un bon signe s’il s’accompagne d’un score faible sur la
-              2<sup>de</sup> : cela veut dire que le système refuse <i>tout</i>, y compris ce qu’il devrait traiter.
+              Comment lire : un système qui refuse <i>tout</i> obtient 100% sur la 1<sup>re</sup> ligne mais s’effondre sur
+              la 2<sup>de</sup> — son <b>Équilibre</b> reste donc faible. C’est l’Équilibre qui dit lequel gère vraiment
+              les deux situations.
             </Text>
           </Card>
         )
