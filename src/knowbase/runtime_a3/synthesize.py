@@ -676,7 +676,21 @@ class Synthesizer:
         try:
             if not hasattr(self, "_premise_verifier"):
                 self._premise_verifier = PremiseVerifier()
-            result = self._premise_verifier.verify(inp.parse_output.raw_question)
+            # Passer les claims que le pipeline a réellement trouvés (preuve riche →
+            # évite les faux positifs UNSUPPORTED sur entités existantes mal-retrouvées).
+            pipeline_texts: List[str] = []
+            for c in _aggregate_claims(inp.execute_output)[:30]:
+                extras = c.model_dump() if hasattr(c, "model_dump") else {}
+                txt = extras.get("text") or c.value or c.value_normalized
+                if not txt:
+                    subj = c.subject_canonical or ""
+                    pred = (c.predicate or "").replace("_", " ")
+                    txt = f"{subj} {pred} {c.value or ''}".strip()
+                if txt:
+                    pipeline_texts.append(str(txt))
+            result = self._premise_verifier.verify(
+                inp.parse_output.raw_question, pipeline_evidence=pipeline_texts,
+            )
         except Exception:
             logger.exception("[PREMISE] verify raised, fail-open (continue synthesize)")
             return None

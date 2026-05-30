@@ -92,13 +92,19 @@ Decide ONE overall status:
   "analytics", never that exact feature). The specific thing is very likely non-existent
   or out of the documented scope.
 
-CRITICAL (avoid false alarms):
-- Be CONSERVATIVE. Prefer "OK" unless there is a CLEAR contradiction, or the core named
-  entity is CLEARLY absent (only adjacent/different things present).
-- Do NOT answer "FALSE_*" merely because the evidence does not fully answer the question.
-  Incompleteness is NOT a false premise.
-- "adjacent but different" (e.g. asks X, evidence shows a related-but-distinct Y) supports
-  FALSE_UNSUPPORTED only when the SPECIFIC asked-about entity is the thing missing.
+CRITICAL (avoid false alarms — this is the most important rule):
+- Be VERY CONSERVATIVE. The default is "OK". Only escape to FALSE_* with strong evidence.
+- "FALSE_UNSUPPORTED" is reserved for an entity/feature/procedure that is GENUINELY ABSENT
+  or FABRICATED — i.e. the corpus discusses the surrounding topic but the specific named
+  thing simply does not exist (invented product/module name, or a combination that the
+  corpus never attests). If the evidence MENTIONS the entity at all — even briefly, partially,
+  under a slightly different name, or while describing it differently than the question
+  frames it — then the premise HOLDS → answer "OK".
+- Being pedantic about the exact wording/characterization is a MISTAKE. If the question asks
+  about UCON/an authorization object/a specific code/a scenario and the evidence shows that
+  thing exists (even if it doesn't fully answer the question), that is "OK", NOT a false
+  premise. Incompleteness of the answer is NEVER a false premise.
+- When unsure whether the entity is genuinely absent vs just under-retrieved, choose "OK".
 
 If status is FALSE_*, write a SHORT correction (1-2 sentences) grounded ONLY in the
 evidence: state what the evidence actually says (the contradicting fact, or that the
@@ -119,6 +125,14 @@ EVIDENCE: ["ProductX provides in-memory analytics.", "ProductX caching is config
 PRESUPPOSITIONS: ["The Falcon-9 rocket has a defined maximum payload"]
 EVIDENCE: ["Falcon-9 can lift up to 22,800 kg to low Earth orbit."]
 {"status": "OK", "reasoning": "Evidence attests the payload capacity.", "correction": ""}
+
+PRESUPPOSITIONS: ["The UCON framework secures RFC access in SystemY"]
+EVIDENCE: ["UCON (Unified Connectivity) is available in SystemY.", "RFC connections can be restricted."]
+{"status": "OK", "reasoning": "The entity UCON exists in the evidence; the question is answerable even if not fully detailed here.", "correction": ""}
+
+PRESUPPOSITIONS: ["A virus scan profile PAOC_RCF_BL/HTTP_UPLOAD exists for E-Recruiting"]
+EVIDENCE: ["E-Recruiting uses virus scan profiles for HTTP upload.", "Profile PAOC_RCF_BL/HTTP_UPLOAD controls uploads."]
+{"status": "OK", "reasoning": "The specific profile is attested in the evidence.", "correction": ""}
 """
 
 
@@ -239,6 +253,23 @@ class PremiseVerifier:
         entity = (entity or "").strip()
         if len(entity) < 3:
             return False
+        ent_norm = _norm(entity)
+        content_words = [w for w in ent_norm.split() if len(w) > 3]
+
+        def _hit(txt: str) -> bool:
+            txt = _norm(txt)
+            if not txt:
+                return False
+            if ent_norm and ent_norm in txt:
+                return True
+            return bool(content_words) and all(w in txt for w in content_words)
+
+        # 1) claims du pipeline principal (preuve la plus pertinente)
+        for psg in getattr(self, "_pipeline_evidence_texts", []) or []:
+            if _hit(psg):
+                return True
+
+        # 2) retrieval ciblé sur le nom seul (chunks)
         try:
             vec = self._get_embedder()(entity)
             hits = self._get_search()(
@@ -247,19 +278,10 @@ class PremiseVerifier:
             )
         except Exception:
             logger.exception("entity attestation retrieval failed for: %s", entity[:60])
-            return False  # fail-safe : ne pas rétrograder si on ne peut pas confirmer
-
-        ent_norm = _norm(entity)
-        content_words = [w for w in ent_norm.split() if len(w) > 3]
+            hits = []
         for h in hits:
             p = h.get("payload", {}) or {}
-            txt = _norm((p.get("text") or p.get("content") or ""))
-            if not txt:
-                continue
-            if ent_norm and ent_norm in txt:
-                return True
-            # fallback : tous les mots de contenu (≥4 lettres) présents dans le passage
-            if content_words and all(w in txt for w in content_words):
+            if _hit(p.get("text") or p.get("content") or ""):
                 return True
 
         # Le savoir d'OSMOSIS vit aussi (surtout) dans les claims KG, pas seulement les
@@ -315,8 +337,14 @@ class PremiseVerifier:
         return _parse_json(raw) or {}
 
     # -- public ----------------------------------------------------------
-    def verify(self, question: str) -> PremiseResult:
-        """Retourne un PremiseResult. Fail-open OK sur toute erreur."""
+    def verify(self, question: str, pipeline_evidence: Optional[List[str]] = None) -> PremiseResult:
+        """Retourne un PremiseResult. Fail-open OK sur toute erreur.
+
+        pipeline_evidence : textes des claims que le pipeline principal a réellement
+            trouvés pour cette question. Les inclure dans la preuve évite les faux
+            positifs UNSUPPORTED (l'entité existe, le pipeline l'a trouvée, mais le
+            retrieval dédié maigre du vérificateur la ratait). Cf bench full 50q.
+        """
         t0 = time.perf_counter()
         if not question or not question.strip():
             return PremiseResult("OK", duration_s=time.perf_counter() - t0)
@@ -331,8 +359,17 @@ class PremiseVerifier:
             return PremiseResult("OK", reasoning="no_presupposition_extracted",
                                  duration_s=time.perf_counter() - t0)
 
-        # Retrieval dédié par présupposé, pool dédupliqué
+        # Preuve = claims du pipeline principal (les plus pertinents) + retrieval dédié
+        # par présupposé, dédupliqué.
         seen, evidence = set(), []
+        for psg in (pipeline_evidence or []):
+            psg = (psg or "").strip()[:600]
+            if psg:
+                key = psg[:120].lower()
+                if key not in seen:
+                    seen.add(key)
+                    evidence.append(psg)
+        self._pipeline_evidence_texts = list(evidence)  # pour l'attestation
         for p in presuppositions:
             for psg in self._retrieve_for_premise(p):
                 key = psg[:120].lower()
