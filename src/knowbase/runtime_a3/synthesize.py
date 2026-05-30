@@ -510,6 +510,13 @@ class Synthesizer:
 
     def synthesize(self, inp: SynthesizeInput) -> SynthesizeOutput:
         """Rédige et valide la sortie (LLM ou fallback template)."""
+        # PremiseVerifier (faux présupposés, 30/05/2026) — AVANT tout : empêche la
+        # confabulation quand des claims existent mais que le présupposé est faux.
+        # Cf ADR_PREMISE_VERIFIER.md. Toggle V6_PREMISE_VERIFIER_ENABLED. Fail-open.
+        premise = self._maybe_premise_correction(inp)
+        if premise is not None:
+            return premise
+
         claims = _aggregate_claims(inp.execute_output)
 
         # Court-circuit ABSTENTION (pas d'evidence → pas besoin LLM)
@@ -648,6 +655,54 @@ class Synthesizer:
 
         out.synthesize_warnings = warnings
         return out
+
+    # ------------------------------------------------------------------
+    # PremiseVerifier (faux présupposés)
+    # ------------------------------------------------------------------
+
+    def _maybe_premise_correction(
+        self, inp: SynthesizeInput
+    ) -> Optional[SynthesizeOutput]:
+        """Si le PremiseVerifier détecte un faux présupposé → réponse corrective.
+
+        Retourne None si désactivé, statut OK, ou erreur (fail-open : on laisse le
+        pipeline normal répondre). Cf ADR_PREMISE_VERIFIER.md.
+        """
+        from knowbase.runtime_a3.premise_verifier import (
+            PremiseVerifier, is_enabled as pv_enabled,
+        )
+        if not pv_enabled():
+            return None
+        try:
+            if not hasattr(self, "_premise_verifier"):
+                self._premise_verifier = PremiseVerifier()
+            result = self._premise_verifier.verify(inp.parse_output.raw_question)
+        except Exception:
+            logger.exception("[PREMISE] verify raised, fail-open (continue synthesize)")
+            return None
+
+        if not result.is_false_premise:
+            return None
+
+        if result.correction:
+            answer = result.correction
+        elif result.status == "FALSE_CONTRADICTED":
+            answer = ("Les documents indexés contredisent un présupposé de la question. "
+                      "La réponse demandée ne peut donc pas être fournie telle quelle.")
+        else:  # FALSE_UNSUPPORTED
+            answer = ("Les documents indexés ne documentent pas l'élément spécifique évoqué "
+                      "par la question ; il pourrait ne pas exister ou être hors périmètre.")
+
+        return SynthesizeOutput(
+            answer_text=answer,
+            cited_claims=[],
+            uncovered_sub_goals_warning=None,
+            conflict_pending_warning=None,
+            mode="TEXT_ONLY",  # réponse corrective ancrée corpus (pas un claim KG)
+            synthesize_warnings=[f"premise_{result.status.lower()}"],
+            citation_coverage_rate=1.0,
+            schema_version="a3.0",
+        )
 
     # ------------------------------------------------------------------
     # SufficiencyChecker (anti-sur-confiance)

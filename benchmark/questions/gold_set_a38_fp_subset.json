@@ -1,0 +1,430 @@
+[
+  {
+    "id": "V2_V1_GOLD_SAP_Q1_1",
+    "question": "Comment activer le module Embedded Reporting Studio dans S/4HANA Cloud Private Edition 2024 ?",
+    "primary_type": "false_premise",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Il n’existe pas de composant standard SAP officiellement nommé « Embedded Reporting Studio » dans SAP S/4HANA Cloud Private Edition. Les capacités de reporting embarqué reposent principalement sur Embedded Analytics, CDS Views, Fiori analytical apps, Smart Business KPIs et l’intégration SAP Analytics Cloud. L’activation passe généralement par l’activation des business roles Fiori, des services OData, des CDS analytical queries et éventuellement des contenus SAC intégrés.",
+      "exact_identifiers": [
+        "Embedded Analytics",
+        "CDS Views",
+        "Smart Business KPIs",
+        "SAP Analytics Cloud",
+        "OData"
+      ],
+      "supporting_doc_ids": [
+        "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"
+      ],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    },
+    "source_set": "gold_set_sap_v1",
+    "category": "false_premise"
+  },
+  {
+    "id": "V2_V1_GOLD_SAP_Q1_3",
+    "question": "Comment configurer le multi-tenant strict sur un déploiement S/4HANA Cloud Private Edition ?",
+    "primary_type": "false_premise",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Faux présupposé : S/4HANA Cloud Private Edition est un environnement privé/dédié, pas un SaaS public multi-tenant strict. Le multi-tenant strict correspond davantage à la logique Public Edition.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "Public Edition",
+        "S/4HANA",
+        "HANA",
+        "MM",
+        "PP",
+        "FI",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896",
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"
+      ],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    },
+    "source_set": "gold_set_sap_v1",
+    "category": "false_premise"
+  },
+  {
+    "id": "V2_T6_T6_FP_002",
+    "question": "Comment fonctionne le support natif d'Oracle Database dans SAP S/4HANA ?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "SAP S/4HANA necessite SAP HANA comme base de donnees. Oracle n'est pas supporte nativement. Preuve documentaire : A new installation of SAP S/4HANA needs to run on the SAP HANA database.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "027_SAP_S4HANA_2023_Security_Guide"
+      ],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "T6_robustness",
+    "category": "false_premise"
+  },
+  {
+    "id": "V2_T6_T6_FP_025",
+    "question": "Est-ce que SAP Information Lifecycle Management (SAP ILM) est nécessaire pour la suppression simplifiée et le blocage de données personnelles dans le Transaction Manager lorsqu'on utilise uniquement le Risk Management pour analyser les Transactions?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "SAP Information Lifecycle Management (SAP ILM) n'est pas nécessaire pour la suppression simplifiée et le blocage de données personnelles dans le Transaction Manager lorsqu'on utilise uniquement le Risk Management pour analyser les Transactions. Preuve documentaire : SAP Information Lifecycle Management (SAP ILM) is not necessary for simplified blocking and deletion of personal data in the Transaction Manager when only using Risk Management to analyze Transaction",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "T6_robustness",
+    "category": "false_premise"
+  },
+  {
+    "id": "V2_V1_GOLD_SAP_Q1_2",
+    "question": "Quelle est la procédure de migration directe depuis SAP Business One vers S/4HANA Cloud Private Edition ?",
+    "primary_type": "false_premise",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "SAP ne propose pas de procédure standard de system conversion directe depuis SAP Business One vers SAP S/4HANA Cloud Private Edition. Les conversions SUM/DMO concernent SAP ECC et SAP Business Suite. Pour SAP Business One, l’approche recommandée est généralement une nouvelle implémentation (greenfield) avec migration de données via SAP Migration Cockpit, SAP Data Services ou outils partenaires.",
+      "exact_identifiers": [
+        "SUM",
+        "DMO",
+        "greenfield",
+        "Migration Cockpit",
+        "SAP Business One"
+      ],
+      "supporting_doc_ids": [
+        "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+        "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"
+      ],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    },
+    "source_set": "gold_set_sap_v1",
+    "category": "false_premise"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0097",
+    "question": "Quelle transaction est utilisee pour la Labeling Workbench dans Global Label Management ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "La transaction CBGLWB (Labeling Workbench) est utilisee pour filtrer les print requests par etat.",
+      "exact_identifiers": [
+        "Transaction CBGLWB (Labeling Workbench, filter by state)"
+      ],
+      "supporting_doc_ids": [
+        "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0017",
+    "question": "Quel role SAP est fourni pour le team lead dans le Payroll Control Center ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Le role SAP_HR_PYC_TM_MNG est fourni pour le team lead, avec l'objet d'autorisation P_PYD_INST.",
+      "exact_identifiers": [
+        "Team lead sample role: SAP_HR_PYC_TM_MNG; authorization object P_PYD_INST"
+      ],
+      "supporting_doc_ids": [
+        "027_SAP_S4HANA_2023_Security_Guide_c160af0e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T1_T1_HUM_0014",
+    "question": "Quelles options de connectivite Azure sont supportees pour RISE with SAP ?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Les options incluent Site-to-Site VPN, Express Route, Express Route Direct, VNET Peering (Regional et Global), Virtual WAN. Pour le VNET Peering, RISE en tant que Spoke uniquement est supporte.",
+      "exact_identifiers": [
+        "RISE as a Spoke only is supported"
+      ],
+      "supporting_doc_ids": [
+        "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T1_provenance:human_derived",
+    "category": "factual_simple"
+  },
+  {
+    "id": "V2_T4_T4_HUM_0044",
+    "question": "Que disent les documents sur les RFC destinations et la configuration reseau inter-systemes dans SAP S/4HANA ?",
+    "primary_type": "multi_hop",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Les RFC destinations et la configuration réseau inter-systèmes dans SAP S/4HANA s'appuient sur les Remote Function Calls (RFC) comme mécanisme principal de communication, gérant les appels de fonctions, le transfert de paramètres et la gestion d'erreurs entre systèmes ([doc=021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e]).\n\n**Configuration RFC pour intégration ERP ↔ EWM Decentralized (cas d'usage central documenté)** :\n- **Transaction BD54** ou IMG path \"ABAP Platform > Application Server > IDoc Interface / Application Link Enabling (ALE) > Basic Settings > Logical Systems > Define Logical System\" pour définir un dummy logical system pour la communication qRFC ([doc=014_SAP_S4HANA_2021_Operations_Guide_819d2c07]). Convention de nommage : `<XXX>EWM<NNN>` où XXX est le nom du système S/4HANA et NNN le client (exemple : RSKEWM079).\n- **Transaction BD97** ou IMG path \"ALE > Communication > Determine RFC Destinations for Method Calls\" pour déterminer les RFC destinations utilisées pour les appels de méthodes synchrones BAPI.\n- **Standard BAPI destination** : configuration de la RFC destination du système EWM (en majuscules, par exemple EWMCLNT001).\n- **Table de customizing /SCWM/V_SDESTDEF** (accessible via SM31) pour assigner des RFC destinations par défaut aux logical systems pour les appels BAPI synchrones depuis EWM vers ERP, MII ou GTS.\n- **Setup RFC destination bidirectionnelle** : depuis SAP S/4HANA ERP vers EWM Decentralized ET depuis EWM Decentralized vers ERP, via l'écran \"Configuration of RFC Connections\" (création + onglet Technical Settings).\n- **QOUT Scheduler** : configuration du scheduler de la outbound queue dans EWM pour le traitement automatique des messages.\n\n**bgRFC (Background RFC)** : Le mécanisme bgRFC est utilisé pour l'Output Management et la Transportation Management. La configuration bgRFC doit être maintenue sinon aucun output n'est possible ([doc=005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf]). Pour TM, transaction **SBGRFCCONF** permet de créer une inbound destination.\n\n**Sécurité réseau et communication** ([doc=027_SAP_S4HANA_2023_Security_Guide_c160af0e]) : SAP S/4HANA repose sur l'ABAP Platform et hérite de ses ports AS ABAP. La communication avec systèmes externes utilise les canaux SAP basis standard — ALE/IDoc, RFC/BAPI, File Interface, SAP Process Integration (PI), e-mail/fax. Pour le Financial Accounting, des interfaces existent vers Taxware, Vertex (calculs de taxes), Elster (déclaration TVA électronique via XI), et IDoc pour paiements/avis de paiement.\n\n**Trusted/Trusting RFC** : Si SAP Dispute Management ou SAP Collections Management sont utilisés dans un scénario multi-système où les RFC destinations utilisent une relation Trusted/Trusting, les appels vers l'autre système s'effectuent sous l'identité de l'utilisateur appelant — un utilisateur valide doit donc exister dans le système cible. Sinon, des technical users dédiés sont requis : Communication users pour les appels BAPI synchrones/asynchrones (IDocs), Dialog users pour les appels dialog distants ([doc=ERP Transition option_de027d7b]).",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e",
+        "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"
+      ],
+      "answerability": "answerable",
+      "false_premise": false,
+      "entity": "RFC destinations and inter-system networking",
+      "expected_claim_count": 6,
+      "expected_contradiction_count": 0
+    },
+    "source_set": "T4_audit:human_derived",
+    "category": "multi_hop_audit"
+  },
+  {
+    "id": "V2_T4_T4_HUM_0016",
+    "question": "Que disent les documents sur le MRP (Material Requirements Planning) dans SAP S/4HANA, incluant les transactions, rapports et BAdIs ?",
+    "primary_type": "multi_hop",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Le MRP (Material Requirements Planning) dans SAP S/4HANA est documenté de manière constante à travers les Operations Guides des versions 2021, 2022 et 2023, avec un set d'outils et de transactions stable sur les trois releases ([doc=014_SAP_S4HANA_2021_Operations_Guide_819d2c07], [doc=015_SAP_S4HANA_2022_Operations_Guide_c30abf8e], [doc=017_SAP_S4HANA_2023_Operations_Guide_b11842e3]).\n\n**Positionnement** : Le MRP est traité dans la section \"10.2.1 Production Planning\" puis \"10.2.1.1 Material Requirements Planning\" des Operations Guides, sous l'ombrelle \"10.2 Manufacturing\" / SAP S/4HANA Business Applications. Le rôle du MRP est la planification opérationnelle des besoins matière dans des environnements de fabrication discrète, make-to-order, make-to-stock ou repetitive.\n\n**Reports et transactions clés** :\n- **PPH_SETUP_MRPRECORDS** : report utilisé pour créer et corriger des MRP records pour un ensemble donné de plants. Il lit les material master data (notamment le MRP type) et crée le MRP record correspondant. Les MRP records créés servent à la planification opérationnelle.\n- **PPH_SETUP_MRPRECORDS_SIMU** : variante du report précédent, utilisée pour créer des MRP records dédiés à la **planification simulative (long-term planning)**.\n- **Option \"Regenerative (w. BOM Explosion)\"** : la sélection de cette checkbox démarre le report en mode regenerative — le système active automatiquement le net change flag et le BOM explosion flag pour chaque material. Sans cette option, le report sert de **consistency check** pour mettre à jour les MRP records.\n- **MRP Live** : mode de planning natif S/4HANA dont l'exécution est conditionnée par l'absence de total requirements dans le système — d'où la nécessité d'une activité de cleanup explicite documentée.\n- **Transaction SE38** : utilisée pour créer/exécuter le report ABAP **Z_MATERIALS_W_COLLECTIVE_REQS** qui identifie les materials utilisant un ATP checking group créant des total customer requirements (checking group 01 par défaut, à adapter sinon).\n- **Transaction MD20** : création de planning file entries dans la table RQID, avec activation des indicators \"Net change planning\" et \"Re-explode BOM\".\n- **Report ATP_VBBE_CONSISTENCY** : pour identifier et corriger les inconsistances dans la persistence secondaire des sales documents (quotation, sales order, scheduling agreement) ou des delivery requirements, détectables dans la stock/requirements list. Ces inconsistances peuvent déclencher des follow-on errors dans le planning.\n\n**Prérequis fonctionnels** :\n- Les materials du plant doivent être relevant pour MRP — c'est-à-dire que les MRP views doivent être maintenues dans les material master records, avec un MRP type approprié.\n- L'ATP Checking Group dans Customizing for Sales and Distribution (path : Basic Functions > Availability Check And Transfer of Requirements > Availability Check > Availability Check with ATP Logic or Against Planning > Define Checking Groups) doit être configuré : un ATP checking group avec valeur **B (Totals records per day)** dans les colonnes TotalSales ou TotDlvReqs crée des total requirements, tandis que la valeur **A (Single records)** crée des individual requirements. Pour exécuter MRP Live, il faut basculer de B vers A.\n\n**Cleanup Total Requirements (étape obligatoire avant MRP Live)** : Procédure documentée pour traiter les total customer requirements et les total dependent requirements. Cela comprend la vérification de la table VBBS, la révision des ATP checking groups, et — si l'on travaille en repetitive manufacturing — la vérification de l'indicator \"Aggregate reqmts\" dans les repetitive manufacturing profiles (Customizing for Production > Repetitive Manufacturing > Control Data > Define Repetitive Manufacturing Profiles, onglet Control data 2). Cet indicator, combiné au collective requirements indicator du material master, détermine si les dependent requirements sont regroupés en collective requirements sur une base journalière.\n\n**Number range PP** : Création de la number range PP pour les planned orders, purchase requisitions et reservations comme étape de configuration finale.\n\nLes BAdIs spécifiques au MRP ne sont pas détaillés dans les sections fournies des Operations Guides, mais le cadre standard d'extensibilité ABAP Platform s'applique. La logique MRP S/4HANA reste cohérente entre 2021, 2022 et 2023 — aucune contradiction inter-versions n'est documentée dans le matériel fourni.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "014_SAP_S4HANA_2021_Operations_Guide_819d2c07",
+        "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e",
+        "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"
+      ],
+      "answerability": "answerable",
+      "false_premise": false,
+      "entity": "MRP (Material Requirements Planning)",
+      "expected_claim_count": 8,
+      "expected_contradiction_count": 0
+    },
+    "source_set": "T4_audit:human_derived",
+    "category": "multi_hop_audit"
+  },
+  {
+    "id": "V2_T4_T4_HUM_0045",
+    "question": "Que disent les documents sur le Feature Scope de SAP S/4HANA pour la Finance, incluant la Treasury et le Watch List Screening ?",
+    "primary_type": "multi_hop",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Le Feature Scope de SAP S/4HANA pour la Finance couvre un large périmètre fonctionnel détaillé dans le Business Scope FPS03 ([doc=022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba]) et le Feature Scope Description PCE 2023 ([doc=024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3]).\n\n**Périmètre général Finance (FPS03 Delta scope)** ([doc=028_SAP_S4HANA_2022_Security_Guide_44f7ec32], slide 260) : Plusieurs axes d'innovation FPS03 :\n- **SAP S/4HANA Central Finance (cFIN)** : enhanced planning features avec transfert de plan data across systems, accroissement de l'efficacité du plan vs actual data reporting pour plusieurs source systems, planning & replication pour cost center et activity type, intégration Purchase Order pour création centralisée d'asset, intégration rapide procurement + asset accounting, harmonized material cost estimate analysis sur une devise CA, Holistic Accounting View of Logistics (AVL), replication/deletion/enhanced reporting pour les nouvelles sales order categories (service contract et scheduling agreement), centralized tax reporting incluant le replication des parked docs, integration RITA (Registration for Indirect Taxation Abroad) posting.\n- **Contract and Lease Management** : plan-versus-actuals report pour usable objects, enabling contract management pour intercompany leases.\n\n**Accounts Receivable — Mass processing** ([doc=028_SAP_S4HANA_2022_Security_Guide_44f7ec32], slide 271) : Nouvelle SAP Fiori app **\"Upload Customer Open Items\"** permettant d'uploader multiple customer open items en batch — customer invoices, credit memos, contrôle/édition après upload, contrôle d'erreurs avant posting, posting en batch. Support pour One-Time Account (OTA) et Alternative Payer (ALT). Bénéfice annoncé : efficacité opérationnelle accrue et flexibilité.\n\n**SAP International Trade Management Portfolio** ([doc=028_SAP_S4HANA_2022_Security_Guide_44f7ec32], slide 276) : Trois solutions couvrent les key capabilities :\n- **Compliance Management** : ensure export/import compliance via checks pour embargoes, managing licenses, inline blocking/release pour transactions.\n- **Customs Management** : foreign trade zones, China's processing trade, bonded warehousing, Intrastat compliance.\n- **Trade Preference Management** : free trade agreement benefits avec automated product qualification, supplier declarations.\n- **Special Customs Procedures** : import/export customs, documentation, duties, product classification, optimisation cost savings.\n\n**Integration with SAP Watch List Screening** ([doc=028_SAP_S4HANA_2022_Security_Guide_44f7ec32], slide 280) : Intégration de SAP Watch List Screening avec les business partner master data dans SAP S/4HANA Cloud. Call de l'application Watch List Screening sur **SAP Business Technology Platform** depuis SAP S/4HANA, pour les business partners avec rôles customer ou supplier. Capacités :\n- Screen le nom et les adresses d'un business partner pour personnes naturelles ou organisations qui pourraient être sanctionnées.\n- Ajout de status fields représentant le screening status aux addresses du business partner.\n- Gestion d'un cumulative status field au niveau general data du business partner.\n- Relevance pour les international trade documents : lorsqu'un business partner déjà screené est utilisé dans un trade compliance document, on peut définir si le résultat du business partner screening est utilisé pour le trade compliance document, ou si un screening additionnel est exécuté.\n- **Nouvelle feature 'Business Partner Screening'** : screening des business partners avec les rôles customer ou supplier contre les sanction party lists.\n\n**Treasury — Mitigation of financial risks** ([doc=028_SAP_S4HANA_2022_Security_Guide_44f7ec32], slide 284) :\n- **Balance Sheet Exposure — Working Day Shift** : reporting des net open exposures (FX risk) sur base journalière dans l'app **Hedge Management Cockpit**.\n- **Hedge Management of Balance Sheet FX Risks — Enhancements** : possibilité d'assigner un specific, central factor calendar pour le working day check pendant la hedge request generation. Choix du Net Due Date au lieu du Clearing Date comme date relevant pour la sélection de l'FX exposure depuis la data source FI Open Items.\n- **Simulation of period-end closing with different rate type** : simulation et stockage des période-end closing results des treasury positions incluant valuation, accrual et deferral d'expenses et revenues, classification — utilisant le framework des operative period-end closing functions sans créer de posting réel. Enhancement de la selection screen de la **Simulate Period-End Closing app** avec le foreign-exchange price type utilisé pour la simulated valuation et le simulated accrual processing.\n\n**Predictive Accounting** ([doc=024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3], section 2.5.1) : Permet de prédire les résultats futurs en utilisant les data des documents source (par exemple sales orders) avant que les journal entries soient créés. Les predictive journal entries servent à l'analysis et au reporting pour comprendre les résultats financiers projetés en fin de période.\n\n**SAP BRIM Localization (Finance)** ([doc=023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914] — référence) : SAP Billing and Revenue Innovation Management (BRIM) propose une localisation incluant SAP Contract Accounting et SAP Convergent Invoicing, intégrée avec SAP Document and Reporting Compliance. Capacités FPS3 nouvelles : versions locales pour Luxembourg, Malaysia, Israel ; features additionnelles pour Portugal (BP Master Data), Austria (Payment formats), South Korea (VAT Declaration), Turkey (WHT et FX gains), Denmark (OIOUBL e-invoicing), Japan (Central Bank Payment), Poland (Split Payment), United Kingdom (Direct Debit Notifications). Coverage globale : 23 pays end-to-end.\n\n**Corporate Close — Data Preparation** ([doc=024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3]) : Note de licensing critique : ces features ne sont disponibles que pour les clients qui ont licensed ces features **avant le 1er octobre 2022**, incluant la maintenance. Comparable successor functionality fournie par **SAP S/4HANA Finance for Group Reporting** (peut nécessiter additional licenses).\n\n**Settlement Management** ([doc=024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3], section 2.5.4.3) : Couvre tous types de processus de settlement (rebate settlement, pooled payment, financial settlement avec brokers et payment agencies, commission calculation, del credere guarantees). Intégré dans les cycles order-to-cash et procure-to-pay.\n\nEn synthèse, le Feature Scope Finance S/4HANA Cloud Private Edition est riche et structuré autour de : Central Finance, GL/AR/AP, Treasury et Risk Management (Hedge Management Cockpit, Simulate Period-End Closing), Settlement Management, BRIM, International Trade et Watch List Screening intégré sur BTP, Predictive Accounting. L'évolution FPS03 ajoute majoritairement de l'UX (apps Fiori) et de la couverture pays.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"
+      ],
+      "answerability": "answerable",
+      "false_premise": false,
+      "entity": "Finance feature scope",
+      "expected_claim_count": 5,
+      "expected_contradiction_count": 0
+    },
+    "source_set": "T4_audit:human_derived",
+    "category": "multi_hop_audit"
+  },
+  {
+    "id": "V2_T2_T2_HUM_0005",
+    "question": "Quelle est la difference entre les Release Information Notes de S/4HANA 2022 et 2023 ?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Les deux documents reflètent une évolution chronologique : S/4HANA 2022 utilise la SAP Note 3145277 comme Release Information Note, tandis que S/4HANA 2023 utilise la SAP Note 3307222 comme Release Information Note. Ce n'est pas une contradiction technique mais une mise à jour entre versions.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf",
+        "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"
+      ],
+      "answerability": "answerable",
+      "false_premise": false,
+      "tension_nature": "evolution",
+      "has_real_tension": false
+    },
+    "source_set": "T2_contradictions:human_derived",
+    "category": "comparison"
+  },
+  {
+    "id": "V2_T2_T2_HUM_0049",
+    "question": "Les deux guides d'installation (2021 et 2023) couvrent-ils le Management of Change de la meme facon ?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Les deux documents reflètent une évolution chronologique : Le Installation Guide 2021 couvre le Management of Change activation, tandis que Le Installation Guide 2023 couvre SAP Fiori setup et User Assistance/SHELP_CONFIG, avec un focus different sur les technologies front-end. Ce n'est pas une contradiction technique mais une mise à jour entre versions.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "012_SAP_S4HANA_2021_Installation_Guide_c441dbaf",
+        "011_SAP_S4HANA_2023_Installation_Guide_23de8c60"
+      ],
+      "answerability": "answerable",
+      "false_premise": false,
+      "tension_nature": "evolution",
+      "has_real_tension": true
+    },
+    "source_set": "T2_contradictions:human_derived",
+    "category": "comparison"
+  },
+  {
+    "id": "V2_T2_T2_HUM_0004",
+    "question": "Le job /SCWM/R_ODO_POST_GI est-il mentionne dans les trois versions du Operations Guide ?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": "Les deux documents reflètent une évolution chronologique : Le Operations Guide 2022 mentionne le job /SCWM/R_ODO_POST_GI avec frequence Hourly pour poster les goods issue des outbound delivery orders, tandis que Le Operations Guide 2021 ne mentionne pas ce job specifique dans la meme section. Ce n'est pas une contradiction technique mais une mise à jour entre versions.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "014_SAP_S4HANA_2021_Operations_Guide_819d2c07",
+        "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false,
+      "tension_nature": "evolution",
+      "has_real_tension": true
+    },
+    "source_set": "T2_contradictions:human_derived",
+    "category": "comparison"
+  },
+  {
+    "id": "V2_V1_GOLD_SAP_Q2_1",
+    "question": "À partir de quelle release SPS le support de HANA 1.0 s'arrête-t-il pour S/4HANA Cloud Private Edition ?",
+    "primary_type": "lifecycle",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "SAP HANA 1.0 est obsolète pour les releases modernes S/4HANA. S/4HANA Cloud Private Edition récentes reposent sur SAP HANA 2.0. Mais avec les sources candidates seules, la réponse exacte “à partir de tel SPS” reste insuffisamment documentée.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "S/4HANA",
+        "HANA",
+        "SPS",
+        "MM",
+        "PP",
+        "FI"
+      ],
+      "supporting_doc_ids": [
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    },
+    "source_set": "gold_set_sap_v1",
+    "category": "lifecycle"
+  },
+  {
+    "id": "V2_V1_GOLD_SAP_Q2_2",
+    "question": "Quelle version de S/4HANA Cloud Private Edition introduit l'obligation de migrer du Classic Asset Accounting vers New Asset Accounting ?",
+    "primary_type": "lifecycle",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "La migration vers New Asset Accounting est un prérequis de conversion S/4HANA lié aux simplification items Finance. Elle ne doit pas être présentée comme une nouveauté spécifique d’une release PCE récente : c’est une exigence structurelle de S/4HANA. Les étapes doivent être validées via SAP Readiness Check, Simplification Item Catalog et les notes Finance associées.",
+      "exact_identifiers": [
+        "Simplification Item Catalog",
+        "Classic Asset Accounting",
+        "Cloud Private Edition",
+        "New Asset Accounting",
+        "Asset Accounting",
+        "Readiness Check",
+        "S/4HANA",
+        "HANA",
+        "PCE",
+        "MM"
+      ],
+      "supporting_doc_ids": [
+        "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    },
+    "source_set": "gold_set_sap_v1",
+    "category": "lifecycle"
+  },
+  {
+    "id": "V2_T6_T6_HY_010",
+    "question": "Si l'objet d'autorisation P_PYC_POL n'a pas le paramètre ACTVT défini sur 03 (Affichage), que se passe-t-il lorsque l'on essaie de consulter la liste des politiques ?",
+    "primary_type": "contextual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": " Cette information est confirmée par : Viewing the list of policies requires the authorization object P_PYC_POL with ACTVT set to 03 (Display).",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T6_robustness",
+    "category": "hypothetical"
+  },
+  {
+    "id": "V2_T6_T6_HY_008",
+    "question": "Si la mise en œuvre du cadre administratif de l'Unified Connectivity (UCON) n'est pas réalisée, qu'advient-il de la protection du système SAP S/4HANA lors de l'accès distant via des RFCs?",
+    "primary_type": "contextual",
+    "secondary_types": [],
+    "ground_truth": {
+      "answer": " Cette information est confirmée par : Unified Connectivity (UCON) administration framework significantly increases protection for SAP S/4HANA system when accessed remotely using RFCs.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "T6_robustness",
+    "category": "hypothetical"
+  },
+  {
+    "id": "V2_V1_GOLD_SAP_Q9_2",
+    "question": "Quel est le prix exact d'une licence S/4HANA Cloud Private Edition pour 500 users en France ?",
+    "primary_type": "unanswerable",
+    "language": "fr",
+    "ground_truth": {
+      "answer": "Le prix dépend des FUE/users, modules, environnements, hyperscaler, SLA, services inclus, durée contractuelle et remises négociées.",
+      "exact_identifiers": [
+        "Cloud Private Edition",
+        "S/4HANA",
+        "HANA",
+        "FUE/",
+        "SLA",
+        "CO"
+      ],
+      "supporting_doc_ids": [
+        "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      ],
+      "answerability": "unanswerable",
+      "false_premise": false
+    },
+    "annotation_meta": {
+      "annotator": "user_fred_sap_expert",
+      "reviewed_at": "2026-05-12"
+    },
+    "source_set": "gold_set_sap_v1",
+    "category": "unanswerable"
+  }
+]
