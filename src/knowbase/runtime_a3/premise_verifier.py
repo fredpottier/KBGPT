@@ -22,7 +22,8 @@ Premise Verification via RAG Logical Reasoning 2025 ; Google Sufficient Context 
 Handling asymétrique anti-sur-abstention : seul CONTREDIT (ou entité principale
 clairement absente) déclenche une correction ; jamais sur « réponse incomplète ».
 
-Toggle env : V6_PREMISE_VERIFIER_ENABLED (défaut "0"). Fail-open (OK) sur erreur.
+Toggle env : V6_PREMISE_VERIFIER_ENABLED (défaut "1", activé après bench full 50q).
+Fail-open (OK) sur erreur.
 Domain-agnostic strict : aucun token corpus-spécifique.
 """
 
@@ -445,5 +446,6 @@ def _parse_json(raw: str) -> Optional[dict]:
 
 
 def is_enabled() -> bool:
-    """Toggle env. Défaut OFF — activer pour bench A/B."""
-    return os.getenv("V6_PREMISE_VERIFIER_ENABLED", "0") == "1"
+    """Toggle env. Défaut ON (activé 30/05/2026 après bench full 50q : false_premise
+    +40pp, exact_id_recall flat). Mettre "0" pour désactiver."""
+    return os.getenv("V6_PREMISE_VERIFIER_ENABLED", "1") == "1"
