@@ -785,3 +785,126 @@ async def run_robustness_benchmark(req: RobustnessRunRequest):
         job_id=job_id, job_timeout=14400, result_ttl=3600,
     )
     return {"job_id": job_id, "message": "Benchmark robustesse lance"}
+
+
+# ── A3.8 Runtime v6 + RAG classique (bench décisionnel actuel) ─────────
+# Sert les runs produits par app/scripts/bench_a38_runtime_v6.py (arm=osmosis)
+# et app/scripts/bench_a38_classic_rag.py (arm=classic_rag). Lecture seule :
+# ces benchs tournent en CLI, le dashboard ne fait qu'exposer les run JSON.
+
+# Mapping arm → répertoires candidats (fallback paths comme RESULTS_DIR).
+_A38_ARM_DIRS: dict[str, list[Path]] = {
+    "osmosis": [
+        Path("data/benchmark/a38_runtime_v6"),
+        Path("/data/benchmark/a38_runtime_v6"),
+        Path("benchmark/a38_runtime_v6"),
+    ],
+    "classic_rag": [
+        Path("data/benchmark/a38_classic_rag"),
+        Path("/data/benchmark/a38_classic_rag"),
+        Path("benchmark/a38_classic_rag"),
+    ],
+}
+
+
+def _a38_existing_dirs(arm: str) -> list[Path]:
+    return [d for d in _A38_ARM_DIRS.get(arm, []) if d.exists()]
+
+
+def _a38_find_file(filename: str) -> Path | None:
+    """Retrouve un run par filename dans l'un des répertoires des deux bras."""
+    for arm in _A38_ARM_DIRS:
+        for d in _a38_existing_dirs(arm):
+            f = d / filename
+            if f.exists():
+                return f
+    return None
+
+
+def _a38_summary(filepath: Path, arm: str) -> dict[str, Any] | None:
+    """Résumé léger d'un run a38 (sans results_50q) pour la liste."""
+    try:
+        data = json.loads(filepath.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning(f"Erreur lecture a38 {filepath}: {e}")
+        return None
+
+    agg = data.get("agg_50q", {}) or {}
+
+    # Taux de refus (mode==ABSTENTION) par type — calculé depuis les résultats.
+    # Métrique non ambiguë : « % du temps où le système refuse de répondre ».
+    # Pour les types pièges/hors-périmètre, refuser est le BON réflexe ; pour les
+    # autres, c'est un échec. Le frontend l'interprète selon la famille de question.
+    results = data.get("results_50q", []) or []
+    abst_by_type: dict[str, list[bool]] = {}
+    for r in results:
+        t = r.get("primary_type", "unknown")
+        mode = (r.get("run", {}) or {}).get("mode")
+        abst_by_type.setdefault(t, []).append(mode == "ABSTENTION")
+    abstention_rate_per_type = {
+        t: {"n": len(v), "rate": (sum(v) / len(v)) if v else 0.0}
+        for t, v in abst_by_type.items()
+    }
+
+    return {
+        "filename": filepath.name,
+        "arm": data.get("arm", arm),
+        "timestamp": data.get("timestamp", filepath.stem.replace("run_", "")),
+        "config": data.get("config", {}),
+        "total_duration_s": data.get("total_duration_s"),
+        # Métriques déterministes (décisionnelles)
+        "exact_id_recall_mean": agg.get("exact_id_recall_mean"),
+        "n_with_expected_ids": agg.get("n_with_expected_ids"),
+        "abstention_correct_rate": agg.get("abstention_correct_rate"),
+        "exact_id_recall_per_type": agg.get("exact_id_recall_per_type", {}),
+        "abstention_rate_per_type": abstention_rate_per_type,
+        # Juge LLM (bruité, secondaire)
+        "C1_mean": agg.get("C1_mean"),
+        "C3_lifecycle_mean": agg.get("C3_lifecycle_mean"),
+        "per_type": agg.get("per_type", {}),
+        "judge_failure_rate": agg.get("judge_failure_rate"),
+        # Latence
+        "latency_p50_s": agg.get("latency_p50_s"),
+        "latency_p95_s": agg.get("latency_p95_s"),
+        "n_total": agg.get("n_total"),
+        "n_run_ok": agg.get("n_run_ok"),
+        # Gates (présent seulement pour le bench OSMOSIS 50q+30q)
+        "gates": data.get("gates", {}),
+        "conflict_exposure_rate": (data.get("agg_30q_cp", {}) or {}).get("conflict_exposure_rate"),
+    }
+
+
+@router.get("/a38")
+async def get_a38_runs() -> dict[str, Any]:
+    """Liste les runs a38 (OSMOSIS runtime_v6 + RAG classique), triés récents d'abord."""
+    seen: dict[str, tuple[Path, str]] = {}
+    for arm in _A38_ARM_DIRS:
+        for d in _a38_existing_dirs(arm):
+            for f in d.glob("run_*.json"):
+                if f.name not in seen:
+                    seen[f.name] = (f, arm)
+
+    runs: list[dict[str, Any]] = []
+    for f, arm in seen.values():
+        s = _a38_summary(f, arm)
+        if s:
+            runs.append(s)
+
+    runs.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+    return {"runs": runs}
+
+
+@router.get("/a38/{filename}")
+async def get_a38_run_detail(filename: str) -> dict[str, Any]:
+    """Détail complet d'un run a38 (inclut results_50q pour le drill-down par question)."""
+    # Garde-fou path traversal
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Nom de fichier invalide")
+    f = _a38_find_file(filename)
+    if f is None:
+        raise HTTPException(status_code=404, detail=f"Run a38 introuvable: {filename}")
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur lecture: {e}")
+    return data

@@ -24,6 +24,7 @@ import {
   FiAlertTriangle,
   FiShield,
   FiGitMerge,
+  FiZap,
   FiTrendingUp,
   FiTrendingDown,
   FiMinus,
@@ -39,6 +40,7 @@ import {
   OverviewTab,
   RobustnessTab,
   RadarChart,
+  RuntimeV6Tab,
 } from '@/components/benchmarks'
 
 // ── Design tokens ─────────────────────────────────────────────────────
@@ -117,15 +119,17 @@ interface RunProgress {
   current_question?: string
 }
 
-type TabKey = 'overview' | 'ragas' | 'contradictions' | 'robustness'
+type TabKey = 'runtime_v6' | 'overview' | 'ragas' | 'contradictions' | 'robustness'
 
 // ── Tab definitions ───────────────────────────────────────────────────
+// `group` distingue le bench décisionnel actuel (a38) des évaluateurs V3 legacy.
 
-const TABS: { key: TabKey; label: string; Icon: React.ElementType; accent: string }[] = [
-  { key: 'overview', label: 'Vue d\'ensemble', Icon: FiActivity, accent: T.accentRagas },
-  { key: 'ragas', label: 'RAGAS', Icon: FiBarChart2, accent: T.accentRagas },
-  { key: 'contradictions', label: 'Contradictions', Icon: FiAlertTriangle, accent: T.accentContra },
-  { key: 'robustness', label: 'Robustesse', Icon: FiShield, accent: T.accentRobust },
+const TABS: { key: TabKey; label: string; Icon: React.ElementType; accent: string; group: 'current' | 'archive' }[] = [
+  { key: 'runtime_v6', label: 'Runtime v6', Icon: FiZap, accent: T.accentRagas, group: 'current' },
+  { key: 'overview', label: 'Vue d\'ensemble (V3)', Icon: FiActivity, accent: T.textMuted, group: 'archive' },
+  { key: 'ragas', label: 'RAGAS', Icon: FiBarChart2, accent: T.textMuted, group: 'archive' },
+  { key: 'contradictions', label: 'Contradictions', Icon: FiAlertTriangle, accent: T.textMuted, group: 'archive' },
+  { key: 'robustness', label: 'Robustesse', Icon: FiShield, accent: T.textMuted, group: 'archive' },
 ]
 
 const PROFILES = [
@@ -197,7 +201,7 @@ function Card({ children, accent, ...props }: { children: React.ReactNode; accen
 
 export default function BenchmarksPage() {
   // ── Tab state ───────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<TabKey>('overview')
+  const [activeTab, setActiveTab] = useState<TabKey>('runtime_v6')
 
   // ── Report lists ────────────────────────────────────────────────────
   const [ragasReports, setRagasReports] = useState<RagasReport[]>([])
@@ -436,33 +440,44 @@ export default function BenchmarksPage() {
         borderColor={T.borderSubtle}
         overflowX="auto"
       >
-        {TABS.map(tab => {
+        {TABS.map((tab, i) => {
           const isActive = activeTab === tab.key
+          const accent = isActive ? (tab.group === 'current' ? T.accentRagas : T.textSecondary) : T.textMuted
+          // Séparateur avant le premier onglet du groupe "archive"
+          const showSep = tab.group === 'archive' && TABS[i - 1]?.group === 'current'
           return (
-            <Box
-              key={tab.key}
-              as="button"
-              onClick={() => setActiveTab(tab.key)}
-              px={5}
-              py={3}
-              borderBottom="2px solid"
-              borderColor={isActive ? tab.accent : 'transparent'}
-              transition="all 0.2s"
-              _hover={{ bg: T.bgElevated }}
-              cursor="pointer"
-              flexShrink={0}
-            >
-              <HStack spacing={2}>
-                <tab.Icon size={14} color={isActive ? tab.accent : T.textMuted} />
-                <Text
-                  fontSize="13px"
-                  fontWeight={isActive ? '700' : '500'}
-                  color={isActive ? T.textPrimary : T.textMuted}
-                >
-                  {tab.label}
-                </Text>
-              </HStack>
-            </Box>
+            <HStack key={tab.key} spacing={0} flexShrink={0}>
+              {showSep && (
+                <HStack spacing={1.5} px={3} borderLeft="1px solid" borderColor={T.borderSubtle} ml={2} h="20px" alignSelf="center">
+                  <Text fontSize="9px" fontWeight="700" color={T.textMuted} textTransform="uppercase" letterSpacing="0.08em">
+                    Archive V3
+                  </Text>
+                </HStack>
+              )}
+              <Box
+                as="button"
+                onClick={() => setActiveTab(tab.key)}
+                px={5}
+                py={3}
+                borderBottom="2px solid"
+                borderColor={isActive ? accent : 'transparent'}
+                transition="all 0.2s"
+                _hover={{ bg: T.bgElevated }}
+                cursor="pointer"
+                opacity={tab.group === 'archive' && !isActive ? 0.7 : 1}
+              >
+                <HStack spacing={2}>
+                  <tab.Icon size={14} color={accent} />
+                  <Text
+                    fontSize="13px"
+                    fontWeight={isActive ? '700' : '500'}
+                    color={isActive ? T.textPrimary : T.textMuted}
+                  >
+                    {tab.label}
+                  </Text>
+                </HStack>
+              </Box>
+            </HStack>
           )
         })}
       </HStack>
@@ -530,6 +545,8 @@ export default function BenchmarksPage() {
       })()}
 
       {/* Tab content */}
+      {activeTab === 'runtime_v6' && <RuntimeV6Tab />}
+
       {activeTab === 'overview' && (
         <OverviewTab
           ragasReport={latestRagas}
