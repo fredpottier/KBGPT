@@ -42,6 +42,10 @@ Quatre statuts, appliqués fichier par fichier (jamais « par dossier en bloc »
 - Un **re-export `__init__.py`** passif n'est pas un consommateur vivant.
 - Un **endpoint HTTP atteignable** sans aucune UI ni script qui l'appelle = mort côté produit (mais le router reste monté → bien le décrocher de `main.py`).
 - Distinguer **router** et **package** : un router peut être legacy alors que le package héberge un utilitaire partagé vivant (cf. `runtime_v3.nli_judge`, `runtime_v2.llm_client`).
+- **TRACER LA REACHABILITÉ JUSQU'À LA RACINE RENDUE/MONTÉE** (leçon Fred 31/05, 2 erreurs d'agents corrigées) :
+  - Frontend : un lien/page n'est ALIVE que s'il est atteignable **transitivement depuis la nav réellement rendue** (`MainLayout`→`TopNavigation`). Un lien dans un composant **jamais importé** (`ContextualSidebar`) est MORT, même si la page + tout le câblage backend existent (cas RFP Excel). → Énumérer les pages joignables depuis `TopNavigation`, le reste = candidat orphelin.
+  - Backend : un module peut être ALIVE via un **appel interne** dans un pipeline vivant (orchestrator/execute) **sans** qu'aucun router ne l'importe (cas `domain_packs._run_domain_pack_enrichment`). → Vérifier les appels internes, pas seulement les imports de routers.
+  - « Inchangé depuis longtemps » n'est PAS un critère de mort (feature stable) ; « inaccessible depuis l'entrée vivante » l'est.
 
 ---
 
@@ -87,7 +91,7 @@ Quatre statuts, appliqués fichier par fichier (jamais « par dossier en bloc »
 | Élément | Statut | Justification |
 |---------|--------|---------------|
 | `folder_watcher.py`, `queue/{dispatcher,jobs_v2,__init__,connection,worker}.py` | ✅ | Chemin prod : `docs_in` → folder_watcher (service Docker `docker-compose.yml:307`) → dispatcher → `jobs_v2.ingest_document_v2_job` → ExtractionPipelineV2 → **chaînage ClaimFirst** (`jobs_v2.py:439`). |
-| `pipelines/excel_pipeline.py`, `pipelines/smart_fill_excel_pipeline.py`, `pipelines/fill_excel_pipeline.py` | ✅ | Flux RFP. ⚠️ `fill_excel_pipeline` est une **dépendance vivante** de `smart_fill` (`smart_fill_excel_pipeline.py:399`) — **réfuté legacy**, ne pas supprimer. |
+| `pipelines/excel_pipeline.py`, `pipelines/smart_fill_excel_pipeline.py`, `pipelines/fill_excel_pipeline.py` (+ routeur `ingest.fill_excel_rfp`, jobs `fill_excel_job`, page `app/rfp-excel/**`, proxies `api/documents/{fill-rfp-excel,upload-excel-qa,analyze-excel}`) | 🔴 **LEGACY (UI-orpheline)** | **CORRECTION (vérif Fred 31/05)** : tout le câblage existe MAIS la feature est **INACCESSIBLE depuis l'UI vivante**. Le seul lien `/rfp-excel` est dans `ContextualSidebar.tsx:95`, composant **jamais rendu** (0 import — la nav vivante est `TopNavigation` via `MainLayout`, qui ne référence pas rfp-excel). Inchangé depuis 2025-12-29. → **feature abandonnée**, à EXCLURE d'Osmosis (avec `ContextualSidebar.tsx` lui-même = mort). *(Sauf décision Fred de la ressusciter → re-brancher dans `TopNavigation`.)* `fill_excel_pipeline` est bien une dép de `smart_fill`, mais tout le bloc tombe ensemble. |
 | `pipelines/pass05_coref.py`, `document_valid_from_extractor.py`, `resilience/{job_manager,job_state,recovery}.py` | ✅ | Consommés par `extraction_v2/pipeline.py` et `claimfirst/orchestrator.py`. |
 | `osmose_enrichment.py` | ✅ **partiel** | `generate_document_summary` consommé par `extraction_v2/pipeline.py:735`. **Découper** : garder cette fonction, retirer le reste. |
 | `burst/**` | 🛠️ | EC2 Spot GPU. Consommé par `routers/burst.py` + `admin/burst`. → cockpit. |
@@ -132,7 +136,8 @@ Quatre statuts, appliqués fichier par fichier (jamais « par dossier en bloc »
 ### 4.1 `osmosis` (application cœur)
 
 **Prend** :
-- **Ingestion** : folder_watcher, queue (dispatcher/job d'ingestion/worker/connection), `extraction_v2` (Docling+Vision), `pass05_coref`, `document_valid_from_extractor`, resilience, `generate_document_summary` (extrait d'osmose_enrichment), pipelines Excel/RFP.
+- **Ingestion** : folder_watcher, queue (dispatcher/job d'ingestion/worker/connection), `extraction_v2` (Docling+Vision), `pass05_coref`, `document_valid_from_extractor`, resilience, `generate_document_summary` (extrait d'osmose_enrichment). *(PAS les pipelines Excel/RFP — voir §3.3 : feature UI-orpheline = legacy, sauf décision de la ressusciter.)*
+- **domain_packs** (registry + pack_manager + enrichment) : mécanisme multi-domaine câblé dans l'extraction ClaimFirst (Phase 4.5). ALIVE.
 - **Extraction-KG** : `claimfirst/**` (avec staged pipeline par défaut), `semantic/{utils,inference,insights,ontology}`, relations cross-doc (c4/c6) + `types`.
 - **Answering** : `runtime_a3/**` (renommé `answering/`), router answer.
 - **API end-user** : les ~30 routers ALIVE (§3.2).
