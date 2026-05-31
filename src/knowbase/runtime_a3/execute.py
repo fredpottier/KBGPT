@@ -352,6 +352,46 @@ class Executor:
             return question
         return " ".join(parts).strip()
 
+    def _aspect_emphasized_query(self, tc: "ToolCall") -> Optional[str]:
+        """Requête EMPHASÉE sur l'aspect pour les questions multi-aspect.
+
+        Quand ≥2 sous-buts partagent le même subject (ex « Que disent les docs sur X,
+        incluant A, B, C »), requêter avec la question entière (ou subject+aspect) laisse
+        le SUJET dominant noyer l'aspect → tous les sous-buts récupèrent les mêmes claims
+        génériques. Ici on up-weight l'aspect (predicate_hint/object_hint) du sous-but
+        (répété + en tête, sujet en contexte de scope) pour remonter les claims de CET
+        aspect. Retourne None si pas multi-aspect (→ comportement habituel conservé).
+
+        Toggle V6_ASPECT_EMPHASIS (défaut "1"). Domain-agnostic.
+        """
+        if os.getenv("V6_ASPECT_EMPHASIS", "1") != "1":
+            return None
+        po = getattr(self, "_current_parse_output", None)
+        if po is None:
+            return None
+        try:
+            sub_goals = po.sub_goals
+            sg = sub_goals[tc.sub_goal_idx]
+        except (AttributeError, IndexError):
+            return None
+        subj = (sg.subject_canonical or "").strip()
+        if not subj:
+            return None
+        # multi-aspect : au moins 2 sous-buts partagent ce subject
+        same = sum(1 for x in sub_goals if (x.subject_canonical or "").strip() == subj)
+        if same < 2:
+            return None
+        aspect_parts: List[str] = []
+        if sg.predicate_hint:
+            aspect_parts.append(str(sg.predicate_hint).replace("_", " ").lower())
+        if getattr(sg, "object_hint", None):
+            aspect_parts.append(str(sg.object_hint))
+        aspect = " ".join(aspect_parts).strip()
+        if not aspect:
+            return None
+        # Up-weight l'aspect (en tête + répété), sujet en contexte de scope.
+        return f"{aspect} {aspect} {subj}".strip()
+
     def _resolve_subject_for_call(
         self,
         tc: ToolCall,
@@ -564,7 +604,11 @@ class Executor:
                 # Si Parse a produit un sub_goal précis (subject/predicate/object_hint),
                 # on construit query Lucene depuis ces champs → recherche plus ciblée
                 # qu'avec la question complète. Fallback question si sub_goal vide.
-                resolved_params["query_text"] = self._build_query_text_for_call(tc, parse_input)
+                # Multi-aspect → requête emphasée sur l'aspect ; sinon subject+aspect habituel.
+                resolved_params["query_text"] = (
+                    self._aspect_emphasized_query(tc)
+                    or self._build_query_text_for_call(tc, parse_input)
+                )
                 claims, sections = self._call_kg_claims(resolved_params)
                 relations: List[RelationSummary] = []
             elif tc.tool == "kg_claims_list":
@@ -574,7 +618,13 @@ class Executor:
                 # subject_canonical+predicate ne peut pas les rassembler (recall 0,
                 # cf probe p1_probe_list_retrieval). On requête sur la question entière
                 # (signal sémantique le plus riche pour énumérer) en mode hybride.
-                resolved_params["query_text"] = (parse_input.question or "").strip()
+                # EXCEPTION multi-aspect : si ≥2 sous-buts partagent le subject, la question
+                # entière est subject-dominée et tous les aspects récupèrent les mêmes claims
+                # génériques → on emphase l'aspect du sous-but (cf _aspect_emphasized_query).
+                resolved_params["query_text"] = (
+                    self._aspect_emphasized_query(tc)
+                    or (parse_input.question or "").strip()
+                )
                 claims, sections = self._call_kg_claims_list(resolved_params)
                 relations = []
             elif tc.tool == "lifecycle_query":
