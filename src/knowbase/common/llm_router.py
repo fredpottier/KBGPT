@@ -1576,13 +1576,33 @@ class LLMRouter:
         return response.choices[0].message.content or ""
 
     # ── Novita (OpenAI-compatible) ──────────────────────────────────────────
+    @staticmethod
+    def _novita_timeout_for_task(task_type) -> float:
+        """Timeout par tâche (fiabilité synthèse, audit #430).
+
+        La synthèse (LONG_TEXT_SUMMARY) génère des réponses longues (multi-aspect) :
+        sous charge Novita la génération dépasse souvent 120s → timeout → template
+        fallback (réponse garbage). On lui donne 240s. Les tâches courtes
+        (Parse/Evaluate/classification) gardent un timeout court (fail-fast).
+        """
+        try:
+            name = getattr(task_type, "value", str(task_type))
+        except Exception:
+            name = ""
+        if name in ("long_summary", "long_text_summary"):
+            return 240.0
+        return 120.0
+
     def _get_novita_client(self):
         if self._novita_client is None:
             from openai import OpenAI
+            # max_retries=2 (était 5) : un timeout était réessayé 5× × 120s = jusqu'à
+            # 600s sur un appel bloqué (bombe à latence). 2 suffit pour les 429/5xx
+            # transitoires. Le timeout par-appel est géré dans _call_novita.
             self._novita_client = OpenAI(
                 api_key=os.getenv("NOVITA_API_KEY", ""),
                 base_url="https://api.novita.ai/v3/openai",
-                max_retries=5,
+                max_retries=2,
                 timeout=120.0,
             )
         return self._novita_client
@@ -1593,7 +1613,7 @@ class LLMRouter:
             self._novita_async_client = AsyncOpenAI(
                 api_key=os.getenv("NOVITA_API_KEY", ""),
                 base_url="https://api.novita.ai/v3/openai",
-                max_retries=5,
+                max_retries=2,
                 timeout=120.0,
             )
         return self._novita_async_client
@@ -1607,7 +1627,9 @@ class LLMRouter:
         client = self._get_novita_client()
         response = client.chat.completions.create(
             model=model, messages=messages,
-            temperature=temperature, max_tokens=max_tokens, **api_kwargs
+            temperature=temperature, max_tokens=max_tokens,
+            timeout=self._novita_timeout_for_task(task_type),  # #430 : 240s pour la synthèse
+            **api_kwargs
         )
         if response.usage:
             track_tokens(f"novita/{model}", task_type.value,
@@ -1624,7 +1646,9 @@ class LLMRouter:
         client = self._get_novita_async_client()
         response = await client.chat.completions.create(
             model=model, messages=messages,
-            temperature=temperature, max_tokens=max_tokens, **api_kwargs
+            temperature=temperature, max_tokens=max_tokens,
+            timeout=self._novita_timeout_for_task(task_type),  # #430 : 240s pour la synthèse
+            **api_kwargs
         )
         if response.usage:
             track_tokens(f"novita/{model}", task_type.value,
