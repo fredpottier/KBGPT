@@ -74,7 +74,9 @@ Quatre statuts, appliqués fichier par fichier (jamais « par dossier en bloc »
 
 > *`claims`/`claimfirst`/`admin` = frontière à trancher (cf. §8).
 
-**🟡 KEEP-DORMANT** : `domain_packs` (mécanisme multi-domaine, `main.py:297`), `living_ontology` (volontairement désactivé `main.py:248`, réactivable).
+**✅ ALIVE (mécanisme, effet dormant)** : `domain_packs` — **CORRECTION (vérif Fred 31/05)** : le *mécanisme* est câblé dans le pipeline ClaimFirst PAR DÉFAUT (`claimfirst/orchestrator.py:664-667` Phase 4.5 `_run_domain_pack_enrichment` appelé **inconditionnellement**, `:515` chargement `context_defaults.json`, `resolution/subject_resolver_v2.py:276`, `constants.py:136`). C'est **ALIVE / core** (à migrer obligatoirement, sinon l'extraction casse) ; seul son *effet* est dormant tant qu'aucun pack n'est installé. Le **router** `domain_packs.py` (upload/install/uninstall) = gestion → frontière core/cockpit (la gestion de packs reste une feature produit core multi-domaine, recommandation : core). *(Pas KEEP-DORMANT comme indiqué initialement.)*
+
+**🟡 KEEP-DORMANT** : `living_ontology` (volontairement désactivé `main.py:248`, réactivable).
 
 **🔴 LEGACY** : `runtime_v3`, `runtime_v4`, `runtime_v4_poc`, `runtime_v4_2` (routers — 0 frontend). `runtime_v2` = **COCKPIT/UNSURE** (UI debug branchée), `runtime_v5` = LEGACY (router mort, package à auditer).
 
@@ -210,7 +212,7 @@ osmosis/
 │   ├── verification/                # nli.py (ex runtime_v3/nli_judge)
 │   ├── llm/                         # runtime_client.py (ex runtime_v2/llm_client), router
 │   ├── common/                      # clients, metrics, settings
-│   ├── domain_packs/                # KEEP-DORMANT (biomedical, regulatory, aerospace...)
+│   ├── domain_packs/                # ALIVE (mécanisme câblé dans l'extraction ClaimFirst ; effet dormant sans pack installé)
 │   └── config/
 ├── frontend/                        # pages end-user (sans app/admin)
 ├── config/                          # *.yaml (llm_models, prompts, rules, sap_solutions→domain_catalog)
@@ -325,7 +327,7 @@ osmosis-cockpit/
 **Pièges à NE PAS commettre** :
 - Ne pas supprimer `nli_judge` (v3) / `llm_client` (v2) / `fill_excel_pipeline` / `subject_resolver` v1 / `merge_arbiter` / `generate_document_summary` : **tous ALIVE** malgré leur emplacement trompeur.
 - Ne pas confondre `ingestion/queue/reprocess_job.py` (LEGACY) avec `domain_packs/reprocess_job.py` (**ALIVE**).
-- Ne pas jeter `domain_packs/**` ni `semantic/extraction` (KEEP-DORMANT domain-agnostic).
+- **`domain_packs/**` = ALIVE** (registry + pack_manager + enrichment) : câblé dans l'extraction ClaimFirst PAR DÉFAUT (orchestrator Phase 4.5, subject_resolver_v2, constants) — à migrer en CORE, pas traiter comme dormant/secondaire (effet dormant ≠ code dormant). `semantic/extraction` reste KEEP-DORMANT.
 - Ne pas embarquer `runtime_v6/` (extraction) en croyant que c'est un runtime.
 - Ne pas se fier aux commentaires obsolètes (`relation_extraction_prompts.py:74` « Pipeline principal OSMOSE actuel » est **faux**).
 - Mettre à jour le **logging de config** en tête de bench (V6_HYBRID_RETRIEVAL n'était positionné nulle part → benchs faussés A4.9-A4.14).
