@@ -221,7 +221,7 @@ class Parser:
             # Tests : llm_client injecté avec interface .complete(messages, ...)
             return self._llm_client.complete(
                 messages=self._build_messages(question, parse_input, attempt),
-                temperature=0.1,
+                temperature=0.0,  # déterminisme : même question → mêmes sous-buts
                 max_tokens=2000,
             )
 
@@ -254,7 +254,12 @@ class Parser:
         return router.complete(
             task_type=task_type,
             messages=self._build_messages(question, parse_input, attempt),
-            temperature=0.1,
+            # DÉTERMINISME (01/06/2026) — un chat qui répond différemment à la MÊME
+            # question détruit la confiance en direct. temperature=0 (greedy) + seed
+            # fixe → même question → mêmes sous-buts → même retrieval → même réponse.
+            # Le seed est forwardé par llm_router → api_kwargs → client.create(seed=).
+            temperature=0.0,
+            seed=1234,
             max_tokens=2000,
         ).strip()
 

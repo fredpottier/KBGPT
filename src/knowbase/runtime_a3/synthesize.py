@@ -51,6 +51,50 @@ logger = logging.getLogger("knowbase.runtime_a3.synthesize")
 # ============================================================================
 
 
+# i18n (01/06/2026) — le chat doit répondre dans la LANGUE DE LA QUESTION, pas
+# celle des claims (corpus souvent EN). Domain-agnostic.
+_LANG_NAMES = {"fr": "French", "en": "English", "de": "German", "es": "Spanish"}
+
+
+def _lang_name(parse_output) -> str:
+    code = getattr(parse_output, "language", None)
+    code = getattr(code, "value", code)  # enum → str
+    return _LANG_NAMES.get(str(code or "").lower(), "the same language as the question")
+
+
+# Messages de repli (chemins SANS LLM) — localisés pour ne pas casser la langue.
+_I18N_NO_CLAIM = {
+    "fr": "Aucune information pertinente n'a été trouvée dans le corpus indexé pour répondre à cette question.",
+    "en": "No relevant claim found in the indexed corpus to answer this question.",
+    "de": "Im indexierten Korpus wurde keine relevante Information gefunden, um diese Frage zu beantworten.",
+    "es": "No se ha encontrado información pertinente en el corpus indexado para responder a esta pregunta.",
+}
+_I18N_UNCOVERED = {
+    "fr": "Aspects non couverts", "en": "Sub-goals not covered",
+    "de": "Nicht abgedeckte Teilfragen", "es": "Aspectos no cubiertos",
+}
+_I18N_CONFLICT = {
+    "fr": "Sources en tension", "en": "Conflicting sources",
+    "de": "Widersprüchliche Quellen", "es": "Fuentes en conflicto",
+}
+_I18N_NEXT_STEPS = {
+    "fr": "Pistes possibles :\n  - Reformuler avec des termes plus précis\n  - Vérifier que le corpus indexé couvre ce sujet",
+    "en": "Possible next steps:\n  - Reformulate with more specific terms\n  - Verify that the indexed corpus covers this topic",
+    "de": "Mögliche nächste Schritte:\n  - Mit präziseren Begriffen umformulieren\n  - Prüfen, ob das indexierte Korpus dieses Thema abdeckt",
+    "es": "Posibles pasos siguientes:\n  - Reformular con términos más específicos\n  - Verificar que el corpus indexado cubre este tema",
+}
+_I18N_UNCOVERED_BLOCK = {
+    "fr": "Aspects non couverts", "en": "Uncovered sub-goals",
+    "de": "Nicht abgedeckte Teilfragen", "es": "Aspectos no cubiertos",
+}
+
+
+def _i18n(table: Dict[str, str], parse_output) -> str:
+    code = getattr(parse_output, "language", None)
+    code = getattr(code, "value", code)
+    return table.get(str(code or "").lower(), table["en"])
+
+
 _SYSTEM_PROMPT_BASE = """You are a knowledge synthesizer. Write a clear, factual
 response to the user's question, based STRICTLY on the cited claims.
 
@@ -81,6 +125,18 @@ OUTPUT JSON ONLY (no markdown fences). Schema:
 RULES (NON-NEGOTIABLE):
 - NEVER invent facts. Every factual statement MUST trace to a cited_claim in
   the input. If no claim supports a statement, do NOT make that statement.
+- DOCUMENT TITLES, FILENAMES, SECTION NAMES and source metadata are NOT facts.
+  NEVER extract or infer a value (version, date, number, code, identifier, name)
+  from a `doc_title`, filename, or source label. A value appearing only in a
+  filename (e.g. a year in "..._2025_Guide") does NOT mean it is the answer.
+  Facts come ONLY from the verbatim claim TEXT. If the specific value the
+  question asks for is not stated in any claim's text, abstain — do NOT guess it
+  from a title or filename.
+- LANGUAGE: write `answer_text` (and any warning message you put in it) in the
+  SAME language as the user's question — given as `answer_language` in the input.
+  Do this EVEN IF the cited claims are written in another language: translate the
+  facts into the question's language. EXCEPTION: keep `cited_claims[].claim_verbatim`
+  in its EXACT original source language (it is a verbatim quote, never translate it).
 - Quote claims verbatim in `cited_claims[].claim_verbatim`. Do NOT paraphrase
   the source text. Paraphrasing for fluidity is OK in `answer_text`, but the
   verbatim field must be the exact source.
@@ -111,7 +167,7 @@ RULES (NON-NEGOTIABLE):
   steps, or conditions — NOT a high-level paraphrase. Prefer naming the actual
   items (e.g. "the supported options are Alpha, Beta and Gamma") over a vague
   summary ("there are several options"). If a claim carries a specific fact
-  relevant to a requested aspect, surface that fact; do not summarise it away. A
+  relevant to a requested aspect, surface that fact; do not summarize it away. A
   correct-but-vague answer that omits the specifics available in the claims is a FAILURE.
 - For ABSTENTION mode: produce a short motivated message explaining why the
   corpus cannot answer. Empty cited_claims is expected.
@@ -282,8 +338,10 @@ def _serialize_input(
             "covered": idx in inp.evaluate_output.covered_sub_goals,
         })
 
+    answer_language = _lang_name(inp.parse_output)
     payload = {
         "question": inp.parse_output.raw_question,
+        "answer_language": answer_language,
         "response_mode": inp.response_mode,
         "evaluate_verdict": inp.evaluate_output.verdict,
         "evaluate_reasoning": inp.evaluate_output.reasoning,
@@ -296,7 +354,7 @@ def _serialize_input(
     return (
         "USER INPUT (JSON):\n"
         + json.dumps(payload, ensure_ascii=False, indent=2)
-        + "\n\nRespond with JSON only."
+        + f"\n\nWrite answer_text in {answer_language}. Respond with JSON only."
     )
 
 
@@ -524,7 +582,11 @@ class Synthesizer:
                             {"role": "system", "content": system},
                             {"role": "user", "content": user},
                         ],
-                        temperature=0.1,  # faible créativité, factuel
+                        # DÉTERMINISME (01/06/2026) — temperature=0 + seed fixe pour que
+                        # la MÊME question donne la MÊME réponse (assert/abstention
+                        # stable). Reproductibilité = condition de confiance.
+                        temperature=0.0,
+                        seed=1234,
                         max_tokens=1500,
                     )
             self._llm_client = _RouterClient()
@@ -819,14 +881,15 @@ class Synthesizer:
 
         uncovered_block = ""
         if uncovered_descs:
-            uncovered_block = "\n\nUncovered sub-goals:\n" + "\n".join(uncovered_descs)
+            uncovered_block = (
+                "\n\n" + _i18n(_I18N_UNCOVERED_BLOCK, inp.parse_output) + ":\n"
+                + "\n".join(uncovered_descs)
+            )
 
         answer = (
-            "No relevant claim found in the indexed corpus to answer this question."
+            _i18n(_I18N_NO_CLAIM, inp.parse_output)
             + uncovered_block
-            + "\n\nPossible next steps:\n"
-            "  - Reformulate with more specific terms\n"
-            "  - Verify that the indexed corpus covers this topic"
+            + "\n\n" + _i18n(_I18N_NEXT_STEPS, inp.parse_output)
         )
 
         warning_text = (
@@ -884,15 +947,17 @@ class Synthesizer:
         uncovered_warning = None
         if inp.evaluate_output.uncovered_sub_goals:
             uncov_idx = inp.evaluate_output.uncovered_sub_goals
-            uncovered_warning = f"Sub-goals not covered: indices {uncov_idx}."
-            answer_text += f"\n\n⚠ Sub-goals not covered: {uncov_idx}"
+            _ulbl = _i18n(_I18N_UNCOVERED, inp.parse_output)
+            uncovered_warning = f"{_ulbl}: {uncov_idx}."
+            answer_text += f"\n\n⚠ {_ulbl}: {uncov_idx}"
 
         cps = _aggregate_conflict_pending_summaries(inp.execute_output)
         cp_warning = None
         if cps:
             cp_ids = [cp["conflict_id"] for cp in cps]
-            cp_warning = f"Unresolved :ConflictPending detected: {cp_ids}."
-            answer_text += f"\n\n⚠ Conflicting sources: {cp_ids}"
+            _clbl = _i18n(_I18N_CONFLICT, inp.parse_output)
+            cp_warning = f"{_clbl}: {cp_ids}."
+            answer_text += f"\n\n⚠ {_clbl}: {cp_ids}"
 
         return SynthesizeOutput(
             answer_text=answer_text,

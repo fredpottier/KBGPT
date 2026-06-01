@@ -15,6 +15,10 @@ from knowbase.runtime_a3.claim_filter import (
     MIN_SCORE,
     TOP_K_DEFAULT,
     _claim_text,
+    _claim_verbatim_text,
+    _is_identifier_token,
+    _lexical_overlap,
+    _weighted_query_tokens,
     filter_claims,
 )
 from knowbase.runtime_a3.schemas import ClaimFilterResult, ClaimSummary
@@ -304,3 +308,121 @@ class TestTopLevelAPI:
         kept, result = filter_claims("q", claims, filter_obj=injected)
         assert isinstance(result, ClaimFilterResult)
         assert kept == claims
+
+
+# ============================================================================
+# L1 — Gate final fusionné (verbatim c.text + signal lexical)
+# ============================================================================
+
+
+class TestIdentifierToken:
+    def test_digit_token_is_identifier(self):
+        assert _is_identifier_token("CG5Z") is True
+        assert _is_identifier_token("2021/821") is True
+
+    def test_internal_punct_is_identifier(self):
+        assert _is_identifier_token("/SAPAPO/OM03") is True
+        assert _is_identifier_token("S_ALR_87012326") is True
+
+    def test_allcaps_short_is_identifier(self):
+        assert _is_identifier_token("RISE") is True
+        assert _is_identifier_token("WWI") is True
+
+    def test_ordinary_word_not_identifier(self):
+        assert _is_identifier_token("transaction") is False
+        assert _is_identifier_token("Workbench") is False
+
+
+class TestWeightedQueryTokens:
+    def test_identifiers_overweighted(self):
+        w = _weighted_query_tokens("What does transaction CG5Z do")
+        # CG5Z (identifiant) pèse 3, transaction pèse 1
+        assert w["cg5z"] == 3.0
+        assert w["transaction"] == 1.0
+
+    def test_stopwords_and_short_dropped(self):
+        w = _weighted_query_tokens("What is the X of Y")
+        # what/is/the/of dropped ; X/Y trop courts et non-identifiants → droppés
+        assert "what" not in w
+        assert "the" not in w
+
+    def test_empty_question(self):
+        assert _weighted_query_tokens("") == {}
+
+
+class TestLexicalOverlap:
+    def test_identifier_match_dominates(self):
+        qw = _weighted_query_tokens("transaction CG5Z")  # {transaction:1, cg5z:3}
+        # claim contenant l'identifiant → overlap élevé
+        high = _lexical_overlap(qw, "The CG5Z transaction shows documents")
+        low = _lexical_overlap(qw, "Some other unrelated content here")
+        assert high > 0.9
+        assert low == 0.0
+
+    def test_empty_weights_returns_zero(self):
+        assert _lexical_overlap({}, "anything") == 0.0
+
+
+class TestVerbatimText:
+    def test_prefers_verbatim_over_triplet(self):
+        c = ClaimSummary(
+            claim_id="c1", subject_canonical="X", predicate="P", value="v",
+            text="Full verbatim claim text about CG5Z",
+        )
+        assert _claim_verbatim_text(c) == "Full verbatim claim text about CG5Z"
+
+    def test_falls_back_to_triplet_without_text(self):
+        c = ClaimSummary(claim_id="c1", subject_canonical="X", predicate="P", value="v")
+        assert _claim_verbatim_text(c) == _claim_text(c)
+
+
+class TestFusionRanking:
+    """Le signal lexical doit rattraper un match exact-id que le cosinus rate."""
+
+    def _claims(self):
+        return [
+            ClaimSummary(
+                claim_id="wrong", subject_canonical="X", predicate="P", value="v",
+                text="some semantically similar blah",
+            ),
+            ClaimSummary(
+                claim_id="right", subject_canonical="X", predicate="P", value="v",
+                text="the CG5Z transaction displays documents",
+            ),
+        ]
+
+    def _embedder(self):
+        # cosinus PIÉGÉ : le mauvais claim est sémantiquement "proche", le bon ne l'est pas
+        return _make_embedder({
+            "transaction CG5Z": [1.0, 0.0],
+            "some semantically similar blah": [1.0, 0.0],       # cos=1.0 (piège)
+            "the CG5Z transaction displays documents": [0.0, 1.0],  # cos=0.0
+        })
+
+    def test_lambda_zero_is_pure_cosine_baseline(self):
+        f = ClaimFilter(embedder=self._embedder(), lexical_weight=0.0, min_score=0.0)
+        kept, result = f.filter("transaction CG5Z", self._claims())
+        # cosinus pur → le piège gagne
+        assert kept[0].claim_id == "wrong"
+        assert result.method.startswith("embedding_cosine")
+
+    def test_lexical_fusion_rescues_exact_id(self):
+        f = ClaimFilter(embedder=self._embedder(), lexical_weight=0.7, min_score=0.0)
+        kept, result = f.filter("transaction CG5Z", self._claims())
+        # fusion λ=0.7 → le claim contenant l'identifiant remonte premier
+        assert kept[0].claim_id == "right"
+        assert "fused" in result.method
+
+    def test_verbatim_used_for_embedding(self):
+        # Si verbatim OFF, l'embedding se fait sur le triplet "X p v" (pas le text)
+        f = ClaimFilter(
+            embedder=_make_embedder({"transaction CG5Z": [1.0, 0.0], "X P v": [1.0, 0.0]}),
+            lexical_weight=0.0, use_verbatim_text=False, min_score=0.0,
+        )
+        c = ClaimSummary(
+            claim_id="c1", subject_canonical="X", predicate="P", value="v",
+            text="the CG5Z transaction displays documents",
+        )
+        kept, _ = f.filter("transaction CG5Z", [c])
+        # pas d'exception + claim gardé (embedding sur triplet "X p v")
+        assert kept[0].claim_id == "c1"

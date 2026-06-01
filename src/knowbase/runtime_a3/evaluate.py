@@ -224,6 +224,7 @@ class Evaluator:
                             {"role": "user", "content": user},
                         ],
                         temperature=0.0,
+                        seed=1234,  # déterminisme du verdict (cf parse/synthesize)
                         max_tokens=600,
                     )
             self._llm_client = _RouterClient()

@@ -84,6 +84,12 @@ services:
       # P2.2 (toggle OFF par défaut tant que reranker pas validé) : cross-encoder rerank post-RRF.
       V6_CROSS_ENCODER_RERANK: "0"
       V6_CE_RERANK_MODEL: BAAI/bge-reranker-v2-m3
+      # L1 (31/05/2026) — gate final ClaimFirst : scorer sur c.text VERBATIM (gain net
+      # bench A/B/C : exact_id 0.712→0.732, abstention 84%→96%, C1 0.43→0.49).
+      # Signal lexical RÉFUTÉ par l'isolation (annulait le gain) → λ=0. Config pinned
+      # (anti-drift A4.15).
+      V6_GATE_VERBATIM_TEXT: "1"
+      V6_GATE_LEXICAL_WEIGHT: "0"
       # P2.3 — Switch Parse vers DeepSeek-V3.1 (revert rollback A4.8, valide car RRF
       # actif détruit le couplage subject_canonical exact qui avait fait régresser).
       V6_PARSE_LLM_DEEPSEEK: "1"
