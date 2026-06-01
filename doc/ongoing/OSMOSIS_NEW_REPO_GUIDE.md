@@ -3,6 +3,22 @@
 > **Statut** : document de travail (doc/ongoing). Source de vérité pour la migration `SAP_KB` → `osmosis`.
 > **Date** : 2026-05-31. **Branche d'audit** : `feat/phase-b-augmentee`.
 > **Périmètre** : ce guide synthétise la cartographie + la classification par bloc (api-routers, runtime, ingestion, extraction-kg/relations, common) et les vérifications grep associées. Il est **actionnable** : suivez-le étape par étape.
+>
+> **⚠️ Source de vérité de la CLASSIFICATION** : `doc/ongoing/OSMOSIS_REACHABILITY_MAP.md` (re-contrôle par reachability BFS, 31/05). En cas de divergence avec le §3 ci-dessous, **la carte prime**. Ce guide reste le plan d'action ; la carte est l'arbitre.
+
+---
+
+## 0. Décisions produit FINALES (Fred, 31/05) — priment sur tout le reste
+
+Ces décisions sont **arrêtées** et remplacent toute classification contraire plus bas (un statut « ALIVE » technique ≠ « à garder » produit) :
+
+1. **Moteur d'answering** : le chat de prod `/search` n'utilise PAS `runtime_a3` (= notre travail qualité KG-first). **Décision : brancher l'UI chat sur `runtime_a3` renommé `answering`** ; `/search` (cascade legacy) et l'UI debug `runtime_v2` deviennent transitoires puis **retirés**. ⚠️ Le nom `runtime_a3`/`a3`/`v6` est **proscrit** : nommage métier `answering` (cf. §5.4).
+2. **Wiki** → **RETIRÉ** (étiqueté legacy dans la nav ; non migré). Nav end-user vivante = **Chat, Compare/Vérifier, Atlas** uniquement.
+3. **RFP Excel** → **RETIRÉ** (feature UI-orpheline, cf. §3.3). Aucune page, pipeline, job, proxy Excel ne part dans Osmosis.
+4. **Documents UI** (`/documents/import`, `/documents/status`) → **RETIRÉ**. ⚠️ **Garder le backend d'ingestion** (`folder_watcher` → queue → ClaimFirst via `docs_in`) qui est le vrai chemin d'import. Seules les **pages UI** d'import/suivi disparaissent.
+5. **Pages admin/analytics mortes ou cassées** (`/admin/markers`, `/admin/living-ontology`, lien cassé `/admin/runtime-calibration`, `/analytics*`) → **PURGÉES** : `osmosis-cockpit` ne récupère que les pages admin réellement atteignables depuis une route vivante.
+
+> Conséquence : partout où §3/§4/§5/§7 mentionnent encore `wiki`, `rfp-excel`, `documents/import|status`, `analytics`, `markers` comme à migrer, **c'est caduc** — voir ce §0.
 
 ---
 
@@ -74,9 +90,14 @@ Quatre statuts, appliqués fichier par fichier (jamais « par dossier en bloc »
 
 ### 3.2 Bloc `api-routers` (50 routers, `main.py:229-303`)
 
-**✅ ALIVE (≈30 routers end-user/core)** : `search` (⚠️ **vrai endpoint chat de prod**, `chat/page.tsx`→`/search`), `ingest`, `status`, `imports`, `solutions`, `downloads`, `token_analysis`, `facts`, `ontology`, `entities`, `entity_types`, `jobs`, `document_types`, `documents`, `auth`, `concepts`, `domain_context`, `insights`, `sessions`, `claims`*, `entity_resolution`, `navigation`, `analytics`, `markers`, `relations_explorer`, `challenge`, `verify`, `wiki`, `atlas`, `runtime_v6` (stratégique, exercé via cockpit bench), `claimfirst`* (pipeline = core ; UI monitoring = cockpit), `admin`* (frontière core/cockpit).
+**✅ ALIVE (routers end-user/core)** : `search` (⚠️ **endpoint chat de prod actuel** ; **décision §0 : sera rebranché sur `answering`**), `ingest`, `status`, `imports`, `solutions`, `downloads`, `token_analysis`, `facts`, `ontology`, `entities`, `entity_types`, `jobs`, `document_types`, `auth`, `concepts`, `domain_context`, `insights`, `sessions`, `claims`*, `entity_resolution`, `navigation`, **`markers`** (⚠️ **router ALIVE — consommé par `/compare` (`compare/page.tsx`)** ; seule la **page `/admin/markers` est morte**, cf. §0.5), `relations_explorer`, `challenge`, `verify`, `atlas`, `runtime_v6` (→ `answering`, stratégique), `claimfirst`* (pipeline = core ; UI monitoring = cockpit), `admin`* (frontière core/cockpit).
 
 > *`claims`/`claimfirst`/`admin` = frontière à trancher (cf. §8).
+
+**🔴 RETIRÉS par décision produit (§0)** — *techniquement reachables depuis la nav vivante mais abandonnés par Fred* :
+- `wiki` → **retiré** (Wiki = legacy). ⚠️ **Caveat** : `/api/wiki` est aussi consommé par la page cockpit `admin/corpus-intelligence/page.tsx` — si on retire le backend wiki, **décâbler ou retirer aussi cet écran cockpit** (génération d'articles wiki). À trancher côté cockpit.
+- `documents` (router) → **les PAGES UI `/documents/import|status` sont retirées** ; le router `documents.py` ne sert plus que ces pages + les proxies Excel (eux aussi retirés). → **router à RETIRER** sauf consommateur résiduel à vérifier (≠ backend d'ingestion `folder_watcher`→queue, qui lui reste ALIVE et n'a pas besoin du router HTTP).
+- `analytics` → **orphelin** (pages `app/analytics/**` sans lien dans `TopNavigation`) → **purgé**.
 
 **✅ ALIVE (mécanisme, effet dormant)** : `domain_packs` — **CORRECTION (vérif Fred 31/05)** : le *mécanisme* est câblé dans le pipeline ClaimFirst PAR DÉFAUT (`claimfirst/orchestrator.py:664-667` Phase 4.5 `_run_domain_pack_enrichment` appelé **inconditionnellement**, `:515` chargement `context_defaults.json`, `resolution/subject_resolver_v2.py:276`, `constants.py:136`). C'est **ALIVE / core** (à migrer obligatoirement, sinon l'extraction casse) ; seul son *effet* est dormant tant qu'aucun pack n'est installé. Le **router** `domain_packs.py` (upload/install/uninstall) = gestion → frontière core/cockpit (la gestion de packs reste une feature produit core multi-domaine, recommandation : core). *(Pas KEEP-DORMANT comme indiqué initialement.)*
 
@@ -139,9 +160,9 @@ Quatre statuts, appliqués fichier par fichier (jamais « par dossier en bloc »
 - **Ingestion** : folder_watcher, queue (dispatcher/job d'ingestion/worker/connection), `extraction_v2` (Docling+Vision), `pass05_coref`, `document_valid_from_extractor`, resilience, `generate_document_summary` (extrait d'osmose_enrichment). *(PAS les pipelines Excel/RFP — voir §3.3 : feature UI-orpheline = legacy, sauf décision de la ressusciter.)*
 - **domain_packs** (registry + pack_manager + enrichment) : mécanisme multi-domaine câblé dans l'extraction ClaimFirst (Phase 4.5). ALIVE.
 - **Extraction-KG** : `claimfirst/**` (avec staged pipeline par défaut), `semantic/{utils,inference,insights,ontology}`, relations cross-doc (c4/c6) + `types`.
-- **Answering** : `runtime_a3/**` (renommé `answering/`), router answer.
-- **API end-user** : les ~30 routers ALIVE (§3.2).
-- **Frontend end-user** : `app/{chat,documents,rfp-excel,verify,atlas,wiki,solutions,...}`, `components/{chat,graph,ui,...}` (hors `app/admin/**`), `lib`, `stores`, `types`.
+- **Answering** : `runtime_a3/**` (renommé `answering/`), router `answer.py`. **L'UI chat est rebranchée sur `answering`** (décision §0.1) ; `/search` cascade + UI `runtime_v2` retirés une fois la bascule validée.
+- **API end-user** : les routers ALIVE (§3.2), **hors** `wiki`, `analytics`, `documents` (UI), proxies Excel.
+- **Frontend end-user** : `app/{chat,compare,verify,atlas,solutions,...}`, `components/{chat,graph,ui,...}` (hors `app/admin/**`), `lib`, `stores`, `types`. **Exclus (décision §0)** : `app/wiki/**`, `app/rfp-excel/**`, `app/documents/{import,status}/**`, `app/analytics/**`, et `components/layout/ContextualSidebar.tsx` (mort). La nav `TopNavigation` est élaguée de Wiki + Documents.
 - **Infra commune** (cf. §4.4).
 
 ### 4.2 `osmosis-cockpit` (ops/admin/qualité)
@@ -194,8 +215,7 @@ osmosis/
 │   │   ├── watcher.py               # ex folder_watcher
 │   │   ├── queue/                   # dispatcher.py, document_ingestion_job.py, worker.py, connection.py
 │   │   ├── extraction/              # ex extraction_v2 (Docling+Vision)
-│   │   ├── pipelines/               # excel_pipeline.py, rfp_autofill_pipeline.py
-│   │   └── resilience/
+│   │   └── resilience/              # (PAS de pipelines/ Excel — RFP Excel retiré, décision §0.3)
 │   ├── extraction/                  # ex claimfirst (claim-centric)
 │   │   ├── orchestrator.py
 │   │   ├── extractors/              # staged pipeline par défaut
@@ -258,7 +278,7 @@ osmosis-cockpit/
 | `osmose_agentique/utils/integration/persistence` | (suppression) | Legacy stratified. |
 | `pass2/3/4_jobs.py`, `pass35_jobs.py` | `kg_reprocessing/*_job.py` (cockpit) ou suppression | Nom par fonction. |
 | `ingestion/burst/` | `osmosis-cockpit/services/compute_burst/` | Ops compute. |
-| `smart_fill_excel_pipeline.py` (+ `fill_excel_pipeline.py`) | `rfp_autofill_pipeline.py` (fonctions fusionnées) | Nom métier ; conserver les fonctions partagées. |
+| ~~`smart_fill_excel_pipeline.py` / `fill_excel_pipeline.py`~~ | **(suppression)** | RFP Excel retiré (§0.3) — ne pas migrer. |
 | `challenge.py` (route `/api/v2/challenge`) | `text_challenge.py` (route `/api/text-challenge`) | Retirer `v2`. |
 | `config/sap_solutions.yaml` | `config/domain_catalog.yaml` | Domain-agnostic. |
 | `bench_a38_runtime_v6.py` | `osmosis-bench/bench_answering.py` | Retirer `a38/v6`. |
@@ -298,7 +318,7 @@ osmosis-cockpit/
 6. **Câbler `main.py` core** : monter uniquement les ~30 routers ALIVE + KEEP-DORMANT. Décrocher les routers legacy/cockpit.
 7. **Cockpit** : déplacer routers/services/frontend ops dans `osmosis-cockpit`, préfixe `/api/cockpit/*`, compose monitoring.
 8. **Bench** : déplacer scripts + gold-sets + evaluators dans `osmosis-bench`.
-9. **Smoke end-to-end** : ingérer 1-2 docs (cache préservé) → vérifier `:Claim` créés → poser une question via `/api/answer` → vérifier citations + abstention honnête. Smoke RFP Excel. Smoke search chat.
+9. **Smoke end-to-end** : ingérer 1-2 docs **via `docs_in` (folder_watcher, pas d'UI Documents)** (cache préservé) → vérifier `:Claim` créés → poser une question via l'UI chat **branchée sur `/api/answer` (`answering`)** → vérifier citations + abstention honnête. *(Pas de smoke RFP Excel ni Documents UI — retirés §0.)*
 10. **CI** : pytest (cibler les tests des modules vivants seulement), ruff, mypy, `npm run build` frontend. Logger la config retrieval/LLM en début de tout bench (leçon A4.15).
 11. **Secrets via vault** : clés API hors `.env` committé ; documenter les variables requises.
 12. **Bench de non-régression** vs baseline OSMOSIS connue (exact_id_recall ≈ 0.788, abstention_correct ≈ 0.96, C1 ≈ 0.48-0.52).
@@ -308,8 +328,9 @@ osmosis-cockpit/
 - [ ] `/api/answer` répond, premise+grounding verifiers ON, citations présentes.
 - [ ] Ingestion par défaut = ClaimFirst **staged** ; 0 appel au pipeline stratified.
 - [ ] `exact_id_recall` ≥ baseline (≈0.788) ; `abstention_correct` ≥ 0.95.
-- [ ] Search chat end-user fonctionnel (`/search`).
-- [ ] RFP autofill Excel fonctionnel.
+- [ ] **UI chat end-user branchée sur `/api/answer` (`answering`)** ; `/search` cascade + UI `runtime_v2` retirés.
+- [ ] Aucune page/route Wiki, RFP Excel, Documents UI, analytics dans le core (décision §0). Backend d'ingestion `folder_watcher`→queue→ClaimFirst **présent et fonctionnel**.
+- [ ] Router `markers` **présent** (back `/compare`) ; page `/admin/markers` absente.
 - [ ] Aucun import résiduel vers `runtime_v3/v4/v4_poc/v4_2/v5`, `osmose_*`, `facts_first`.
 - [ ] `nli_judge` et `llm_client` extraits ; `grounding_verifier`/`atlas`/`query_decomposer` OK.
 - [ ] Collections Qdrant + constraints Neo4j recréées ; caches `.knowcache.json` préservés.
@@ -322,7 +343,7 @@ osmosis-cockpit/
 
 **UNSURE / à trancher** :
 
-1. **UI runtime_v2** : c'est la **seule UI d'answering/exploration câblée** (le runtime de prod `a3` n'est exposé qu'en cockpit/bench). Options : (a) **migrer cette UI vers `/api/answer`** puis retirer le pipeline v2 ; (b) garder v2 comme UI de prod transitoire. **Recommandation** : (a) — construire une UI chat sur `answering` avant de couper v2. Tant que non tranché, `/api/runtime_v2/answer` reste ALIVE.
+1. ~~**UI runtime_v2**~~ — **TRANCHÉ (§0.1)** : l'UI chat est **rebranchée sur `/api/answer` (`answering`)** ; `/search` cascade legacy et l'UI debug `runtime_v2` sont **transitoires puis retirés**. Action migration : construire/câbler l'UI chat sur `answering` AVANT de couper v2 + `/search` (éviter une fenêtre sans answering). `runtime_v2/llm_client.py` reste extrait comme util partagé (§4.4).
 2. **`admin.py`** : op core (purge/health data) ou cockpit ? Frontière. **Recommandation** : scinder — purge/health data dans le core (maintenance), dashboards dans le cockpit.
 3. **`claimfirst.py` router** (monitoring jobs) : pipeline = core, mais son UI = `/admin/claimfirst`. **Recommandation** : router monitoring → cockpit ; pipeline `extraction/` → core.
 4. **Couche Canonical** (`/claims/consolidate,/concept,/conflicts`) : non lue par le runtime mais câblée frontend. La garder (cockpit) ou la retirer ? **Recommandation** : cockpit tant que des écrans l'utilisent ; sinon legacy.
