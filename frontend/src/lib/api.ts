@@ -183,27 +183,95 @@ export const api = {
     },
   },
 
-  // Chat - Using the direct /search endpoint (more logical)
+  // Chat — OSMOSE 31/05/2026 : le chat de prod tape désormais runtime_a3
+  // (answering KG-first) et NON plus /search (cascade legacy). runtime_a3 apporte
+  // ce que /search n'avait pas : citations claim-level (verbatim+doc+page),
+  // abstention disciplinée (ne pas répondre quand il ne sait pas) et détection de
+  // faux présupposé. On assume une latence plus élevée (réponse fiable+tracée >
+  // rapide+fausse) → timeout porté à ~320s. /search reste dispo en backend (rollback).
   chat: {
     send: (
       message: string,
-      language?: string,
-      mime?: string,
-      solution?: string,
-      useGraphContext?: boolean,
-      graphEnrichmentLevel?: 'none' | 'light' | 'standard' | 'deep',
-      sessionId?: string
+      _language?: string,
+      _mime?: string,
+      _solution?: string,
+      _useGraphContext?: boolean,
+      _graphEnrichmentLevel?: 'none' | 'light' | 'standard' | 'deep',
+      _sessionId?: string
     ) =>
-      apiClient.post('/search', {
-        question: message,
-        language,
-        mime,
-        solution,
-        use_graph_context: useGraphContext,
-        graph_enrichment_level: graphEnrichmentLevel,
-        session_id: sessionId,
-        use_kg_traversal: useGraphContext !== false,  // 🔗 OSMOSE: Traversée KG multi-hop, liée au toggle Graph Context
-      }),
+      apiClient
+        .post<any>(
+          '/runtime_v6/answer',
+          {
+            question: message,
+            tenant_id: 'default',
+            response_mode: 'structured',
+            include_trace: true,
+          },
+          { timeout: 320000 }
+        )
+        .then((res) => {
+          if (!res.success || !res.data) return res
+          const d: any = res.data
+          const abstention =
+            d.uncovered_sub_goals_warning || d.conflict_pending_warning || null
+          // Citations : numéroter par ordre d'apparition dans cited_claims, puis
+          // remplacer les marqueurs inline [claim_id=X] du texte par des références
+          // académiques propres [n] reliées à la liste numérotée du panneau.
+          const rawClaims: any[] = d.cited_claims || []
+          const idToNum: Record<string, number> = {}
+          rawClaims.forEach((c: any, i: number) => {
+            if (c && c.claim_id) idToNum[c.claim_id] = i + 1
+          })
+          let nextNum = rawClaims.length
+          const rawAnswer = d.answer_text || abstention || '(pas de réponse)'
+          const cleanedAnswer = rawAnswer.replace(
+            /\[claim_id=([^\]]+)\]/g,
+            (_m: string, id: string) => {
+              let n = idToNum[id]
+              if (!n) {
+                nextNum += 1
+                idToNum[id] = nextNum
+                n = nextNum
+              }
+              return `[${n}]`
+            }
+          )
+          const numberedClaims = rawClaims.map((c: any, i: number) => ({
+            ...c,
+            n: i + 1,
+          }))
+          // Normalisation → forme SearchResponse (le rendu existant lit
+          // synthesis.synthesized_answer) + namespace runtime_a3 pour le panneau.
+          return {
+            success: true,
+            data: {
+              status: 'success',
+              results: [],
+              synthesis: {
+                synthesized_answer: cleanedAnswer,
+                sources_used: rawClaims
+                  .map((c: any) => c.doc_title)
+                  .filter(Boolean),
+                confidence: d.citation_coverage_rate ?? null,
+              },
+              runtime_a3: {
+                mode: d.mode,
+                cited_claims: numberedClaims,
+                abstention,
+                uncovered_warning: d.uncovered_sub_goals_warning || null,
+                conflict_warning: d.conflict_pending_warning || null,
+                warnings: d.synthesize_warnings || [],
+                citation_coverage_rate: d.citation_coverage_rate ?? null,
+                total_duration_s: d.total_duration_s,
+                n_iterations: d.n_iterations,
+                terminated_reason: d.terminated_reason,
+                iterations_trace: d.iterations_trace || null,
+                runtime_version: d.runtime_version,
+              },
+            },
+          }
+        }),
     history: () => apiClient.get('/chat/history'), // Not implemented in backend yet
     conversation: (id: string) => apiClient.get(`/chat/${id}`), // Not implemented in backend yet
   },

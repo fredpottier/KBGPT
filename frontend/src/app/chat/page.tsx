@@ -27,6 +27,7 @@ import { SearchResponse } from '@/types/api'
 import CopyButton from '@/components/ui/CopyButton'
 import AutoResizeTextarea from '@/components/ui/AutoResizeTextarea'
 import SearchResultDisplay from '@/components/ui/SearchResultDisplay'
+import RuntimeA3Panel from '@/components/chat/RuntimeA3Panel'
 import SessionSelector from '@/components/chat/SessionSelector'
 import SessionSummary from '@/components/chat/SessionSummary'
 import { ConceptCardPanel } from '@/components/concept'
@@ -255,12 +256,17 @@ const MessageBubble = ({
             }}
           >
             {message.role === 'assistant' && message.searchResult ? (
-              <SearchResultDisplay
-                searchResult={message.searchResult}
-                graphData={message.graphData}
-                explorationIntelligence={message.explorationIntelligence}
-                onSearch={onSearch}
-              />
+              <>
+                <SearchResultDisplay
+                  searchResult={message.searchResult}
+                  graphData={message.graphData}
+                  explorationIntelligence={message.explorationIntelligence}
+                  onSearch={onSearch}
+                />
+                <RuntimeA3Panel
+                  runtimeA3={(message.searchResult as any)?.runtime_a3}
+                />
+              </>
             ) : (
               <Text
                 fontSize="sm"
