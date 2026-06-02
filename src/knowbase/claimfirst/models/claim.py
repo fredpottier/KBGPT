@@ -79,6 +79,31 @@ class ClaimScope(BaseModel):
         description="Conditions supplémentaires de validité"
     )
 
+    @field_validator("conditions", mode="before")
+    @classmethod
+    def _coerce_conditions(cls, v):
+        """Coerce les conditions en List[str].
+
+        RÉGRESSION (02/06/2026) : le prompt enrichi (P1.2/P1.3.5) fait parfois
+        émettre les conditions en dicts riches (ex {'condition': '...',
+        'confidence': 0.95} ou {'qualifier_type': 'condition', 'value': '...'}).
+        Le champ étant typé List[str], la validation Pydantic échouait et le claim
+        ENTIER était jeté → 0 claim sur les documents conditionnels (réglementaire).
+        On extrait le texte de chaque condition, quelle que soit sa forme.
+        """
+        if v is None:
+            return []
+        if isinstance(v, (str, dict)):
+            v = [v]
+        out: List[str] = []
+        for c in v:
+            if isinstance(c, dict):
+                c = c.get("condition") or c.get("value") or c.get("text") or ""
+            s = str(c).strip()
+            if s:
+                out.append(s)
+        return out
+
     def to_scope_key(self) -> str:
         """Génère une clé de scope pour déduplication."""
         parts = [

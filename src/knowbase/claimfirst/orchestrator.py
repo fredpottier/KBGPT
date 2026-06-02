@@ -870,7 +870,7 @@ class ClaimFirstOrchestrator:
                 from knowbase.ingestion.resilience import JobCheckpoint, JobStateEnum
                 existing = job_manager.get_state(doc_id)
                 if existing is None:
-                    job_manager.create_job(doc_id=doc_id, file_path=cache_result.cache_path or "unknown")
+                    job_manager.create_job(doc_id=doc_id, file_path=cache_result.source_path or "unknown")
                 job_manager.update_state(doc_id, JobStateEnum.PROCESSING, checkpoint=JobCheckpoint(phase="extract", progress=0.0))
             except Exception as exc:
                 logger.warning(f"[OSMOSE:ClaimFirst] JobManager init failed: {exc}")
