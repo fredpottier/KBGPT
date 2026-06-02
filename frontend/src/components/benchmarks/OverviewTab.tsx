@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Box,
   HStack,
@@ -15,596 +15,439 @@ import {
   Th,
   Td,
   Tooltip,
+  Spinner,
+  Icon,
+  Wrap,
+  WrapItem,
 } from '@chakra-ui/react'
 import {
-  FiTrendingUp,
-  FiTrendingDown,
-  FiMinus,
   FiActivity,
-  FiClock,
   FiCheckCircle,
   FiAlertTriangle,
   FiXCircle,
+  FiHelpCircle,
+  FiClock,
+  FiInfo,
+  FiZap,
+  FiGitMerge,
 } from 'react-icons/fi'
-import { ScoreGauge } from '../benchmarks/ScoreGauge'
-import { LaunchPanel } from '../benchmarks/LaunchPanel'
+import { ScoreGauge } from './ScoreGauge'
 
-// ── Types ──────────────────────────────────────────────────────────────
-
-interface OverviewTabProps {
-  ragasReport: any | null
-  t2t5Report: any | null
-  robustnessReport: any | null
-  recentRuns: Array<{
-    type: string
-    tag: string
-    score: number
-    delta: number | null
-    timestamp: string
-    filename: string
-    synthesis_model?: string
-  }>
-  onLaunch: (benchType: string, profile: string, tag: string, description: string) => void
-  isRunning: boolean
-  runProgress: any | null
-}
-
-// ── Design tokens ──────────────────────────────────────────────────────
-
-// Aligné sur preset-vars.css du thème actif
-const tokens = {
-  bgBase: 'var(--bg-canvas)',
+// ── Design tokens (alignés sur RuntimeV6Tab / page.tsx) ─────────────────
+const T = {
   bgCard: 'var(--bg-surface)',
   bgElevated: 'var(--bg-surface-alt)',
   borderSubtle: 'var(--border-default)',
   textPrimary: 'var(--fg-primary)',
   textSecondary: 'var(--fg-secondary)',
   textMuted: 'var(--fg-muted)',
-  accentBlue: '#5B7FFF',
-  accentPurple: '#7C3AED',
-  accentOrange: '#f97316',
+  accentOsm: '#5B7FFF',
+  accentRag: '#94a3b8',
+  accentConflict: '#7C3AED',
+  statusOk: '#22c55e',
+  statusWarn: '#eab308',
+  statusError: '#ef4444',
+}
+
+// Cible vision sur la précision des références (exact_id_recall — 0.75-0.80)
+const EIR_TARGET = 0.75
+// Cible honnêteté (abstention juste) — bon réflexe répondre/refuser
+const ABST_TARGET = 0.80
+
+// ── Type (miroir backend /api/benchmarks/a38) ──────────────────────────
+interface A38Run {
+  filename: string
+  arm: string
+  timestamp: string
+  total_duration_s?: number | null
+  exact_id_recall_mean?: number | null
+  n_with_expected_ids?: number | null
+  abstention_correct_rate?: number | null
+  C1_mean?: number | null
+  C3_lifecycle_mean?: number | null
+  judge_failure_rate?: number | null
+  latency_p50_s?: number | null
+  latency_p95_s?: number | null
+  n_total?: number | null
+  n_run_ok?: number | null
+  gates?: Record<string, any>
+  conflict_exposure_rate?: number | null
+}
+
+// Conserve la signature historique pour ne pas casser l'appelant — les props
+// V3 (ragas/t2t5/robustness) ne sont plus utilisées : ce widget lit le gold-set.
+interface OverviewTabProps {
+  [k: string]: any
+}
+
+// Libellés clairs des « gates » (objectifs cibles ADR) — sans le code GA3-x.
+const GATE_LABELS: Record<string, string> = {
+  'GA3-5_C1': 'Qualité globale ≥ 75%',
+  'GA3-6_C3_lifecycle': 'Évolution dans le temps ≥ 50%',
+  'GA3-7_latency': 'Temps de réponse sous les seuils',
+  'GA3-9_conflict_exposure': 'Contradictions signalées',
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
-
-function extractScore(report: any, path: string[]): number | null {
-  if (!report) return null
-  let obj = report
-  for (const key of path) {
-    if (obj == null || typeof obj !== 'object') return null
-    obj = obj[key]
-  }
-  return typeof obj === 'number' ? obj : null
+function fmtTs(ts: string): string {
+  const m = ts.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})/)
+  if (m) return `${m[3]}/${m[2]} ${m[4]}:${m[5]}`
+  try { return new Date(ts).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) }
+  catch { return ts }
+}
+function pct(v: number | null | undefined): string {
+  return v == null ? '--' : `${Math.round(v * 100)}%`
+}
+function deltaColor(d: number): string {
+  return d > 0.01 ? T.statusOk : d < -0.01 ? T.statusError : T.textMuted
+}
+function fmtDeltaPp(d: number | null): string {
+  if (d == null) return '--'
+  const pp = Math.round(d * 100)
+  return pp > 0 ? `+${pp} pts` : pp < 0 ? `${pp} pts` : '='
+}
+function armLabel(arm: string): string {
+  return arm === 'osmosis' ? 'OSMOSIS' : arm === 'classic_rag' ? 'RAG classique' : arm
 }
 
-function formatTimestamp(ts: string | undefined | null): string {
-  if (!ts) return '--'
-  try {
-    const d = new Date(ts)
-    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-  } catch {
-    return ts
-  }
-}
-
-function formatDelta(delta: number | null): { text: string; color: string; Icon: React.ElementType } {
-  if (delta == null) return { text: '--', color: tokens.textMuted, Icon: FiMinus }
-  const sign = delta > 0 ? '+' : ''
-  const pct = `${sign}${(delta * 100).toFixed(1)}%`
-  if (delta > 0.01) return { text: pct, color: '#22c55e', Icon: FiTrendingUp }
-  if (delta < -0.01) return { text: pct, color: '#ef4444', Icon: FiTrendingDown }
-  return { text: pct, color: tokens.textMuted, Icon: FiMinus }
-}
-
-function benchTypeLabel(type: string): { label: string; color: string } {
-  switch (type) {
-    case 'ragas': return { label: 'RAGAS', color: tokens.accentBlue }
-    case 't2t5': return { label: 'Contradictions', color: tokens.accentPurple }
-    case 'robustness': return { label: 'Robustesse', color: tokens.accentOrange }
-    default: return { label: type, color: tokens.textSecondary }
-  }
-}
-
+// ── Santé système (calculée depuis les données, jamais figée) ───────────
 type HealthLevel = 'green' | 'yellow' | 'red' | 'unknown'
-
-function computeSystemHealth(scores: (number | null)[]): HealthLevel {
-  const valid = scores.filter((s): s is number => s != null)
-  if (valid.length === 0) return 'unknown'
-  if (valid.some(s => s < 0.50)) return 'red'
-  if (valid.some(s => s < 0.65)) return 'yellow'
-  return 'green'
+function computeHealth(osm: A38Run | null): HealthLevel {
+  if (!osm) return 'unknown'
+  const eir = osm.exact_id_recall_mean
+  const abst = osm.abstention_correct_rate
+  if (eir == null && abst == null) return 'unknown'
+  const e = eir ?? 0, a = abst ?? 0
+  if (e >= EIR_TARGET && a >= ABST_TARGET) return 'green'
+  if (e >= 0.5 && a >= 0.6) return 'yellow'
+  return 'red'
+}
+const healthConfig: Record<HealthLevel, { label: string; color: string; Icon: React.ElementType }> = {
+  green: { label: 'Sain', color: '#22c55e', Icon: FiCheckCircle },
+  yellow: { label: 'À surveiller', color: '#eab308', Icon: FiAlertTriangle },
+  red: { label: 'Critique', color: '#ef4444', Icon: FiXCircle },
+  unknown: { label: 'Pas de données', color: T.textMuted, Icon: FiActivity },
 }
 
-const healthConfig: Record<HealthLevel, { label: string; color: string; bg: string; Icon: React.ElementType }> = {
-  green: { label: 'Sain', color: '#22c55e', bg: '#22c55e18', Icon: FiCheckCircle },
-  yellow: { label: 'Attention', color: '#eab308', bg: '#eab30818', Icon: FiAlertTriangle },
-  red: { label: 'Critique', color: '#ef4444', bg: '#ef444418', Icon: FiXCircle },
-  unknown: { label: 'Pas de donnees', color: tokens.textMuted, bg: `${tokens.textMuted}18`, Icon: FiActivity },
-}
-
-// ── Score Card ─────────────────────────────────────────────────────────
-
-function ScoreCard({
-  title,
-  mainScore,
-  mainLabel,
-  accent,
-  secondaryLines,
-  delta,
-  timestamp,
-  target,
-}: {
-  title: string
-  mainScore: number | null
-  mainLabel: string
-  accent: string
-  secondaryLines: { label: string; value: string }[]
-  delta: number | null
-  timestamp: string | undefined | null
-  target?: number
-}) {
-  const deltaInfo = formatDelta(delta)
-
+// ── Petit composant infobulle « ? » ─────────────────────────────────────
+function InfoLabel({ text, help }: { text: string; help: string }) {
   return (
-    <Box
-      bg={tokens.bgCard}
-      border="1px solid"
-      borderColor={tokens.borderSubtle}
-      rounded="xl"
-      p={5}
-      position="relative"
-      overflow="hidden"
-      _before={{
-        content: '""',
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: '2px',
-        bg: accent,
-        opacity: 0.7,
-      }}
-    >
-      <Text
-        fontSize="xs"
-        fontWeight="700"
-        color={accent}
-        textTransform="uppercase"
-        letterSpacing="0.05em"
-        mb={3}
-      >
-        {title}
-      </Text>
-
-      <HStack spacing={4} align="center" mb={3}>
-        <Box flexShrink={0}>
-          {mainScore != null ? (
-            <ScoreGauge value={mainScore} label={mainLabel} color={accent} size={110} target={target} />
-          ) : (
-            <VStack spacing={1}>
-              <Box
-                w="110px"
-                h="82px"
-                display="flex"
-                alignItems="center"
-                justifyContent="center"
-              >
-                <Text
-                  fontFamily="'Fira Code', monospace"
-                  fontSize="2xl"
-                  fontWeight="700"
-                  color={tokens.textMuted}
-                >
-                  --
-                </Text>
-              </Box>
-              <Text fontSize="xs" color={tokens.textSecondary}>{mainLabel}</Text>
-            </VStack>
-          )}
-        </Box>
-
-        <VStack align="start" spacing={1.5} flex={1} minW={0}>
-          {secondaryLines.map((line, i) => (
-            <HStack key={i} spacing={2} w="100%">
-              <Text
-                fontSize="11px"
-                color={tokens.textMuted}
-                whiteSpace="nowrap"
-                minW="90px"
-              >
-                {line.label}
-              </Text>
-              <Text
-                fontSize="12px"
-                fontFamily="'Fira Code', monospace"
-                fontWeight="600"
-                color={tokens.textSecondary}
-              >
-                {line.value}
-              </Text>
-            </HStack>
-          ))}
-
-          <HStack spacing={1.5} mt={1}>
-            <deltaInfo.Icon size={12} color={deltaInfo.color} />
-            <Text
-              fontSize="11px"
-              fontFamily="'Fira Code', monospace"
-              fontWeight="600"
-              color={deltaInfo.color}
-            >
-              {deltaInfo.text}
-            </Text>
-            <Text fontSize="10px" color={tokens.textMuted}>vs RAG pur</Text>
-          </HStack>
-        </VStack>
-      </HStack>
-
-      <HStack spacing={1} mt={1}>
-        <FiClock size={10} color={tokens.textMuted} />
-        <Text fontSize="10px" color={tokens.textMuted}>
-          {formatTimestamp(timestamp)}
-        </Text>
-      </HStack>
-    </Box>
-  )
-}
-
-// ── Health Pill ────────────────────────────────────────────────────────
-
-function HealthPill({ level }: { level: HealthLevel }) {
-  const cfg = healthConfig[level]
-  return (
-    <HStack
-      spacing={2}
-      bg={cfg.bg}
-      border="1px solid"
-      borderColor={`${cfg.color}30`}
-      rounded="full"
-      px={4}
-      py={1.5}
-    >
-      <cfg.Icon size={14} color={cfg.color} />
-      <Text fontSize="xs" fontWeight="700" color={cfg.color}>
-        Systeme: {cfg.label}
-      </Text>
+    <HStack spacing={1}>
+      <Text as="span">{text}</Text>
+      <Tooltip label={help} fontSize="xs" maxW="280px" hasArrow placement="top">
+        <Box as="span" display="inline-flex" cursor="help"><Icon as={FiInfo} boxSize="11px" color={T.textMuted} /></Box>
+      </Tooltip>
     </HStack>
   )
 }
 
-// ── Recent Runs Table ──────────────────────────────────────────────────
-
-function RecentRunsTable({ runs }: { runs: OverviewTabProps['recentRuns'] }) {
-  if (!runs || runs.length === 0) {
-    return (
-      <Box
-        bg={tokens.bgCard}
-        border="1px solid"
-        borderColor={tokens.borderSubtle}
-        rounded="xl"
-        p={5}
-      >
-        <Text fontSize="sm" fontWeight="700" color={tokens.textPrimary} mb={3}>
-          Derniers runs
-        </Text>
-        <Text fontSize="xs" color={tokens.textMuted} textAlign="center" py={6}>
-          Aucun run enregistre
-        </Text>
-      </Box>
-    )
-  }
-
+function Card({ children, accent }: { children: React.ReactNode; accent?: string }) {
   return (
     <Box
-      bg={tokens.bgCard}
-      border="1px solid"
-      borderColor={tokens.borderSubtle}
-      rounded="xl"
-      p={5}
-      overflowX="auto"
+      bg={T.bgCard} border="1px solid" borderColor={T.borderSubtle} rounded="xl" p={4}
+      position="relative" overflow="hidden"
+      _before={accent ? { content: '""', position: 'absolute', top: 0, left: 0, right: 0, height: '2px', bg: accent, opacity: 0.7 } : undefined}
     >
-      <Text fontSize="sm" fontWeight="700" color={tokens.textPrimary} mb={3}>
-        Derniers runs
-      </Text>
-      <Table size="sm" variant="unstyled">
-        <Thead>
-          <Tr>
-            <Th color={tokens.textMuted} fontSize="10px" textTransform="uppercase" borderBottom="1px solid" borderColor={tokens.borderSubtle} pb={2}>
-              Type
-            </Th>
-            <Th color={tokens.textMuted} fontSize="10px" textTransform="uppercase" borderBottom="1px solid" borderColor={tokens.borderSubtle} pb={2}>
-              Tag
-            </Th>
-            <Th color={tokens.textMuted} fontSize="10px" textTransform="uppercase" borderBottom="1px solid" borderColor={tokens.borderSubtle} pb={2} isNumeric>
-              Score
-            </Th>
-            <Th color={tokens.textMuted} fontSize="10px" textTransform="uppercase" borderBottom="1px solid" borderColor={tokens.borderSubtle} pb={2} isNumeric>
-              Delta
-            </Th>
-            <Th color={tokens.textMuted} fontSize="10px" textTransform="uppercase" borderBottom="1px solid" borderColor={tokens.borderSubtle} pb={2}>
-              Modele
-            </Th>
-            <Th color={tokens.textMuted} fontSize="10px" textTransform="uppercase" borderBottom="1px solid" borderColor={tokens.borderSubtle} pb={2}>
-              Date
-            </Th>
-          </Tr>
-        </Thead>
-        <Tbody>
-          {runs.slice(0, 5).map((run, i) => {
-            const bt = benchTypeLabel(run.type)
-            const deltaInfo = formatDelta(run.delta)
-            return (
-              <Tr key={`${run.filename}-${i}`} _hover={{ bg: tokens.bgElevated }}>
-                <Td borderBottom="1px solid" borderColor={tokens.borderSubtle} py={2.5}>
-                  <Badge
-                    fontSize="10px"
-                    fontWeight="700"
-                    bg={`${bt.color}18`}
-                    color={bt.color}
-                    border="1px solid"
-                    borderColor={`${bt.color}30`}
-                    px={2}
-                    py={0.5}
-                    rounded="md"
-                  >
-                    {bt.label}
-                  </Badge>
-                </Td>
-                <Td borderBottom="1px solid" borderColor={tokens.borderSubtle} py={2.5}>
-                  <Tooltip label={run.filename} fontSize="xs" bg={tokens.bgElevated} color={tokens.textPrimary}>
-                    <Text
-                      fontSize="xs"
-                      fontFamily="'Fira Code', monospace"
-                      color={tokens.textSecondary}
-                      maxW="140px"
-                      isTruncated
-                    >
-                      {run.tag || '--'}
-                    </Text>
-                  </Tooltip>
-                </Td>
-                <Td isNumeric borderBottom="1px solid" borderColor={tokens.borderSubtle} py={2.5}>
-                  <Text
-                    fontSize="xs"
-                    fontFamily="'Fira Code', monospace"
-                    fontWeight="700"
-                    color={tokens.textPrimary}
-                  >
-                    {(run.score * 100).toFixed(1)}%
-                  </Text>
-                </Td>
-                <Td isNumeric borderBottom="1px solid" borderColor={tokens.borderSubtle} py={2.5}>
-                  <HStack spacing={1} justify="flex-end">
-                    <deltaInfo.Icon size={11} color={deltaInfo.color} />
-                    <Text
-                      fontSize="11px"
-                      fontFamily="'Fira Code', monospace"
-                      fontWeight="600"
-                      color={deltaInfo.color}
-                    >
-                      {deltaInfo.text}
-                    </Text>
-                  </HStack>
-                </Td>
-                <Td borderBottom="1px solid" borderColor={tokens.borderSubtle} py={2.5}>
-                  <Text fontSize="10px" fontFamily="'Fira Code', monospace" color={tokens.textMuted}>
-                    {run.synthesis_model ? run.synthesis_model.replace('claude-haiku-4-5-20251001', 'Haiku').replace('gpt-4o-mini', '4o-mini') : '-'}
-                  </Text>
-                </Td>
-                <Td borderBottom="1px solid" borderColor={tokens.borderSubtle} py={2.5}>
-                  <Text fontSize="11px" color={tokens.textMuted}>
-                    {formatTimestamp(run.timestamp)}
-                  </Text>
-                </Td>
-              </Tr>
-            )
-          })}
-        </Tbody>
-      </Table>
+      {children}
     </Box>
   )
 }
 
-// ── Main Component ─────────────────────────────────────────────────────
+// ── Carte-pilier à jauge ─────────────────────────────────────────────────
+function GaugePillar({ title, help, value, accent, target, foot, badge }: {
+  title: string; help: string; value: number | null | undefined; accent: string
+  target?: number; foot?: string; badge?: string
+}) {
+  return (
+    <Card accent={accent}>
+      <HStack justify="space-between" align="start" mb={1}>
+        <Text fontSize="11px" fontWeight="700" color={accent} textTransform="uppercase" letterSpacing="0.04em">
+          <InfoLabel text={title} help={help} />
+        </Text>
+        {badge && (
+          <Badge fontSize="9px" bg={`${T.textMuted}1a`} color={T.textMuted} rounded="md" px={1.5}>{badge}</Badge>
+        )}
+      </HStack>
+      <VStack spacing={1.5} py={1}>
+        {value != null ? (
+          <ScoreGauge value={value} label="" color={accent} size={92} target={target} />
+        ) : (
+          <Box h="70px" display="flex" alignItems="center"><Text fontSize="2xl" color={T.textMuted} fontFamily="'Fira Code', monospace">--</Text></Box>
+        )}
+        {foot && <Text fontSize="10px" color={T.textMuted} textAlign="center" lineHeight="1.3">{foot}</Text>}
+      </VStack>
+    </Card>
+  )
+}
 
-const BENCH_TYPES = [
-  { key: 'ragas', label: 'RAGAS', color: tokens.accentBlue },
-  { key: 't2t5', label: 'Contradictions', color: tokens.accentPurple },
-  { key: 'robustness', label: 'Robustesse', color: tokens.accentOrange },
-]
+// ── Carte-pilier à statistique (évite la jauge trompeuse, ex. taux conflits) ──
+function StatPillar({ title, help, big, accent, foot, gate }: {
+  title: string; help: string; big: string; accent: string; foot?: string; gate?: any
+}) {
+  const gp = gate?.passed
+  const gc = gp === true ? T.statusOk : gp == null ? T.textMuted : T.statusError
+  return (
+    <Card accent={accent}>
+      <Text fontSize="11px" fontWeight="700" color={accent} textTransform="uppercase" letterSpacing="0.04em" mb={1}>
+        <InfoLabel text={title} help={help} />
+      </Text>
+      <VStack spacing={1.5} py={2} align="center" justify="center" minH="92px">
+        <Text fontSize="34px" fontWeight="800" lineHeight="1" color={T.textPrimary} fontFamily="'Fira Code', monospace">{big}</Text>
+        {foot && <Text fontSize="10px" color={T.textMuted} textAlign="center" lineHeight="1.3">{foot}</Text>}
+        {gate != null && (
+          <HStack spacing={1}>
+            <Icon as={gp === true ? FiCheckCircle : gp == null ? FiHelpCircle : FiXCircle} boxSize="11px" color={gc} />
+            <Text fontSize="10px" fontWeight="600" color={gc}>{gp === true ? 'objectif atteint' : gp == null ? 'non mesuré' : 'objectif non atteint'}</Text>
+          </HStack>
+        )}
+      </VStack>
+    </Card>
+  )
+}
 
-const PROFILES = [
-  { key: 'default', label: 'Defaut (100q)' },
-  { key: 'quick', label: 'Quick (25q)' },
-  { key: 'full', label: 'Full (275q)' },
-]
+// ── Ligne comparative OSMOSIS vs RAG (barres empilées, pleine largeur) ──
+function CompareRow({ label, help, osmVal, ragVal }: {
+  label: string; help: string; osmVal: number | null | undefined; ragVal: number | null | undefined
+}) {
+  const delta = osmVal != null && ragVal != null ? osmVal - ragVal : null
+  const Bar = ({ v, color, name }: { v: number | null | undefined; color: string; name: string }) => (
+    <HStack spacing={2} w="100%">
+      <Text fontSize="10px" color={T.textMuted} minW="92px" flexShrink={0}>{name}</Text>
+      <Box flex={1} bg={T.bgElevated} rounded="full" h="14px" overflow="hidden">
+        <Box h="100%" w={`${Math.round((v ?? 0) * 100)}%`} bg={color} rounded="full" transition="width .4s" />
+      </Box>
+      <Text fontSize="11px" fontWeight="700" fontFamily="'Fira Code', monospace" color={T.textSecondary} minW="38px" textAlign="right">{pct(v)}</Text>
+    </HStack>
+  )
+  return (
+    <Box>
+      <HStack justify="space-between" mb={1.5}>
+        <Text fontSize="12px" fontWeight="700" color={T.textPrimary}><InfoLabel text={label} help={help} /></Text>
+        {delta != null && (
+          <Text fontSize="11px" fontWeight="700" fontFamily="'Fira Code', monospace" color={deltaColor(delta)}>{fmtDeltaPp(delta)}</Text>
+        )}
+      </HStack>
+      <VStack spacing={1}>
+        <Bar v={osmVal} color={T.accentOsm} name="OSMOSIS" />
+        <Bar v={ragVal} color={T.accentRag} name="RAG classique" />
+      </VStack>
+    </Box>
+  )
+}
 
-export function OverviewTab({
-  ragasReport,
-  t2t5Report,
-  robustnessReport,
-  recentRuns,
-  onLaunch,
-  isRunning,
-  runProgress,
-}: OverviewTabProps) {
-  const [selectedProfile, setSelectedProfile] = useState('default')
-  const [tag, setTag] = useState('')
-  const [description, setDescription] = useState('')
+// ══════════════════════════════════════════════════════════════════════
+export function OverviewTab(_props: OverviewTabProps) {
+  const [runs, setRuns] = useState<A38Run[]>([])
+  const [loading, setLoading] = useState(true)
 
-  // ── Extract scores ──────────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/benchmarks/a38', { cache: 'no-store' })
+        const data = await res.json()
+        if (!cancelled) setRuns(data?.runs ?? [])
+      } catch { if (!cancelled) setRuns([]) }
+      finally { if (!cancelled) setLoading(false) }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
-  const ragasFaithChunks = extractScore(ragasReport, ['systems', 'osmosis', 'scores', 'faithfulness'])
-  const ragasFaithTotal = extractScore(ragasReport, ['systems', 'osmosis', 'scores', 'faithfulness_total'])
-  // Utiliser faith_total si disponible (mesure correcte incluant le KG)
-  const ragasFaithfulness = ragasFaithTotal ?? ragasFaithChunks
-  const ragasContextRelevance = extractScore(ragasReport, ['systems', 'osmosis', 'scores', 'context_relevance'])
-  // CH-40.1 — FactualCorrectness : score reference-based (vs ground_truth_answer)
-  // null si pas de gold-set utilisé. À traiter comme N/A dans la moyenne.
-  const ragasFactualCorrectness = extractScore(ragasReport, ['systems', 'osmosis', 'scores', 'factual_correctness'])
-  const ragasSampleCount = ragasReport?.systems?.osmosis?.sample_count
-  const ragasDiagnostic = ragasReport?.systems?.osmosis?.diagnostic
+  const osm = useMemo(() => runs.find(r => r.arm === 'osmosis') ?? null, [runs])
+  const rag = useMemo(() => runs.find(r => r.arm === 'classic_rag') ?? null, [runs])
 
-  // Score global RAGAS = moyenne faithfulness + context_relevance + factual_correctness (si dispo)
-  const ragasAllMetrics = [ragasFaithfulness, ragasContextRelevance, ragasFactualCorrectness].filter(v => v != null) as number[]
-  const ragasGlobalScore = ragasAllMetrics.length > 0 ? ragasAllMetrics.reduce((a, b) => a + b, 0) / ragasAllMetrics.length : null
-
-  const t2BothSides = extractScore(t2t5Report, ['scores', 'both_sides_surfaced'])
-  const t2TensionMentioned = extractScore(t2t5Report, ['scores', 'tension_mentioned'])
-  const t2BothSourcesCited = extractScore(t2t5Report, ['scores', 'both_sources_cited'])
-  const t5ChainCoverage = extractScore(t2t5Report, ['scores', 'chain_coverage'])
-  const t5MultiDocCited = extractScore(t2t5Report, ['scores', 'multi_doc_cited'])
-  const t5ProactiveDetection = extractScore(t2t5Report, ['scores', 'proactive_detection'])
-
-  // Score global contradictions = moyenne des 6 metriques T2+T5
-  const t2t5AllMetrics = [t2BothSides, t2TensionMentioned, t2BothSourcesCited, t5ChainCoverage, t5MultiDocCited, t5ProactiveDetection].filter(v => v != null) as number[]
-  const t2t5GlobalScore = t2t5AllMetrics.length > 0 ? t2t5AllMetrics.reduce((a, b) => a + b, 0) / t2t5AllMetrics.length : null
-
-  const robGlobal = extractScore(robustnessReport, ['scores', 'global_score'])
-  const robParaphrase = extractScore(robustnessReport, ['scores', 'paraphrase_score'])
-  const robNegation = extractScore(robustnessReport, ['scores', 'negation_score'])
-
-  // ── Compute deltas vs RAG pur ──────────────────────────────────────
-  // Calcul sur les scores globaux (memes metriques) pour coherence avec l'onglet dedie
-
-  // RAGAS : delta vs RAG pur du dernier run avec baseline
-  const ragasRagPurFaith = extractScore(ragasReport, ['systems', 'baseline', 'scores', 'faithfulness'])
-  const ragasRagPurCtxRel = extractScore(ragasReport, ['systems', 'baseline', 'scores', 'context_relevance'])
-  const ragasRagPurMetrics = [ragasRagPurFaith, ragasRagPurCtxRel].filter(v => v != null) as number[]
-  const ragasRagPurGlobal = ragasRagPurMetrics.length > 0 ? ragasRagPurMetrics.reduce((a, b) => a + b, 0) / ragasRagPurMetrics.length : null
-  const ragasDeltaVsRag = ragasGlobalScore != null && ragasRagPurGlobal != null ? ragasGlobalScore - ragasRagPurGlobal : null
-
-  // T2/T5 : delta vs RAG pur du dernier run avec scores_rag (meme calcul global)
-  const t2t5RagScores = t2t5Report?.scores_rag ?? null
-  const t2t5RagAllMetrics = t2t5RagScores
-    ? [t2t5RagScores.both_sides_surfaced, t2t5RagScores.tension_mentioned, t2t5RagScores.both_sources_cited,
-       t2t5RagScores.chain_coverage, t2t5RagScores.multi_doc_cited, t2t5RagScores.proactive_detection]
-        .filter((v: number | undefined) => v != null) as number[]
-    : []
-  const t2t5RagGlobal = t2t5RagAllMetrics.length > 0 ? t2t5RagAllMetrics.reduce((a, b) => a + b, 0) / t2t5RagAllMetrics.length : null
-  const t2t5DeltaVsRag = t2t5GlobalScore != null && t2t5RagGlobal != null ? t2t5GlobalScore - t2t5RagGlobal : null
-
-  function latestDelta(type: string): number | null {
-    if (type === 'ragas') return ragasDeltaVsRag
-    if (type === 't2t5') return t2t5DeltaVsRag
-    // Robustness : pas de RAG pur, fallback recentRuns
-    const run = recentRuns?.find(r => r.type === type)
-    return run?.delta ?? null
+  if (loading) {
+    return <HStack py={10} justify="center"><Spinner color={T.accentOsm} /><Text color={T.textMuted}>Chargement…</Text></HStack>
+  }
+  if (!osm && !rag) {
+    return (
+      <Card>
+        <VStack py={8} spacing={3}>
+          <FiZap size={26} color={T.textMuted} />
+          <Text fontWeight="700" color={T.textPrimary}>Aucun test gold-set trouvé</Text>
+          <Text fontSize="13px" color={T.textSecondary} textAlign="center" maxW="520px">
+            Lancez une évaluation :<br />
+            <Text as="span" fontFamily="'Fira Code', monospace" fontSize="11px">docker exec knowbase-app python scripts/bench_a38_runtime_v6.py</Text>
+          </Text>
+        </VStack>
+      </Card>
+    )
   }
 
-  // ── System health ───────────────────────────────────────────────────
-
-  const healthLevel = computeSystemHealth([ragasGlobalScore, t2t5GlobalScore, robGlobal])
-
-  // ── Render ──────────────────────────────────────────────────────────
+  const ref = osm ?? rag!
+  const nTotal = ref.n_total ?? 50
+  const health = computeHealth(osm)
+  const hc = healthConfig[health]
+  const gates = osm?.gates ?? {}
+  const confRate = osm?.conflict_exposure_rate
+  const lat = osm?.gates?.['GA3-7_latency']
 
   return (
     <VStack spacing={5} align="stretch" w="100%">
-      {/* Health pill + titre */}
-      <HStack justify="space-between" align="center">
-        <Text fontSize="md" fontWeight="700" color={tokens.textPrimary}>
-          Vue d&apos;ensemble
-        </Text>
-        <HealthPill level={healthLevel} />
+      {/* En-tête + santé (calculée) */}
+      <HStack justify="space-between" align="center" flexWrap="wrap" rowGap={2}>
+        <Text fontSize="md" fontWeight="800" color={T.textPrimary}>Vue d&apos;ensemble — Qualité OSMOSIS</Text>
+        <HStack spacing={3}>
+          <Text fontSize="10px" color={T.textMuted}>gold-set · {nTotal} questions</Text>
+          <HStack spacing={1.5} bg={`${hc.color}14`} border="1px solid" borderColor={`${hc.color}33`} rounded="full" px={3} py={1}>
+            <Icon as={hc.Icon} boxSize="13px" color={hc.color} />
+            <Text fontSize="xs" fontWeight="700" color={hc.color}>Système : {hc.label}</Text>
+          </HStack>
+        </HStack>
       </HStack>
 
-      {/* Score Cards */}
-      <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
-        <ScoreCard
-          title="RAGAS"
-          mainScore={ragasGlobalScore}
-          mainLabel="Score global"
-          accent={tokens.accentBlue}
-          target={0.80}
-          delta={latestDelta('ragas')}
-          timestamp={ragasReport?.timestamp}
-          secondaryLines={[
-            {
-              label: 'Faithfulness',
-              value: ragasFaithfulness != null ? `${(ragasFaithfulness * 100).toFixed(1)}%` : '--',
-            },
-            {
-              label: 'Ctx relevance',
-              value: ragasContextRelevance != null ? `${(ragasContextRelevance * 100).toFixed(1)}%` : '--',
-            },
-            {
-              // CH-40.1 — FactualCorrectness vs ground_truth_answer (gold-set v4)
-              label: 'Factual correct.',
-              value: ragasFactualCorrectness != null ? `${(ragasFactualCorrectness * 100).toFixed(1)}%` : 'N/A',
-            },
-          ]}
+      {/* 4 piliers — responsive : 1 col (mobile) → 2×2 → 4×1 (très large) */}
+      <SimpleGrid columns={{ base: 1, sm: 2, '2xl': 4 }} spacing={3}>
+        <GaugePillar
+          title="Précision des références"
+          help="exact_id_recall — part des codes/identifiants attendus (transactions, n° de norme, dates) effectivement retrouvés dans la réponse. Mesure déterministe, sans IA."
+          value={osm?.exact_id_recall_mean}
+          accent={T.accentOsm}
+          target={EIR_TARGET}
+          foot={osm?.n_with_expected_ids != null ? `sur ${osm.n_with_expected_ids} questions à identifiants` : undefined}
         />
-
-        <ScoreCard
-          title="Contradictions"
-          mainScore={t2t5GlobalScore}
-          mainLabel="Score global"
-          accent={tokens.accentPurple}
-          target={0.80}
-          delta={latestDelta('t2t5')}
-          timestamp={t2t5Report?.timestamp}
-          secondaryLines={[
-            {
-              label: 'Both sides',
-              value: t2BothSides != null ? `${(t2BothSides * 100).toFixed(1)}%` : '--',
-            },
-            {
-              label: 'Tension',
-              value: t2TensionMentioned != null ? `${(t2TensionMentioned * 100).toFixed(1)}%` : '--',
-            },
-          ]}
+        <GaugePillar
+          title="Honnêteté"
+          help="abstention_correct — répond quand l'information est dans le corpus, s'abstient quand elle n'y est pas. Le bon réflexe répondre/refuser au bon moment."
+          value={osm?.abstention_correct_rate}
+          accent={T.statusOk}
+          target={ABST_TARGET}
+          foot="abstention juste"
         />
-
-        <ScoreCard
-          title="Robustesse"
-          mainScore={robGlobal}
-          mainLabel="Global"
-          accent={tokens.accentOrange}
-          target={0.75}
-          delta={latestDelta('robustness')}
-          timestamp={robustnessReport?.timestamp}
-          secondaryLines={[
-            {
-              label: 'Paraphrase',
-              value: robParaphrase != null ? `${(robParaphrase * 100).toFixed(1)}%` : '--',
-            },
-            {
-              label: 'Negation',
-              value: robNegation != null ? `${(robNegation * 100).toFixed(1)}%` : '--',
-            },
-          ]}
+        <StatPillar
+          title="Contradictions exposées"
+          help="conflict_exposure — part des questions où des sources se contredisent (ex. FAA vs EASA) pour lesquelles OSMOSIS met le désaccord en avant au lieu de trancher arbitrairement."
+          big={pct(confRate)}
+          accent={T.accentConflict}
+          foot="désaccords entre sources signalés"
+          gate={gates['GA3-9_conflict_exposure']}
+        />
+        <GaugePillar
+          title="Qualité jugée"
+          help="C1 — qualité globale de la réponse estimée par un juge IA. Indicateur secondaire (bruité) : piloter au déterministe ci-contre, pas à ce score."
+          value={osm?.C1_mean}
+          accent={T.statusWarn}
+          badge="juge IA"
+          foot={osm?.C3_lifecycle_mean != null ? `évolution dans le temps : ${pct(osm.C3_lifecycle_mean)}` : undefined}
         />
       </SimpleGrid>
 
-      {/* Recent Runs */}
-      <RecentRunsTable runs={recentRuns} />
+      {/* Objectifs (gates) + latence — badges qui s'enroulent (largeur contrainte) */}
+      {(Object.keys(gates).length > 0 || lat) && (
+        <Card>
+          <Text fontSize="11px" fontWeight="700" color={T.textMuted} textTransform="uppercase" letterSpacing="0.04em" mb={2}>
+            Objectifs cibles
+          </Text>
+          <Wrap spacing={2}>
+            {Object.entries(gates).map(([k, g]: [string, any]) => {
+              const gp = g?.passed
+              const color = gp === true ? T.statusOk : gp == null ? T.textMuted : T.statusError
+              const IconC = gp === true ? FiCheckCircle : gp == null ? FiHelpCircle : FiXCircle
+              return (
+                <WrapItem key={k}>
+                  <Tooltip label={`${GATE_LABELS[k] ?? k} — ${gp === true ? 'atteint' : gp == null ? 'non mesuré' : 'non atteint'}`} fontSize="xs" hasArrow>
+                    <HStack spacing={1.5} bg={`${color}14`} border="1px solid" borderColor={`${color}33`} rounded="md" px={2} py={1}>
+                      <Icon as={IconC} boxSize="12px" color={color} />
+                      <Text fontSize="10px" fontWeight="600" color={color}>{GATE_LABELS[k] ?? k}</Text>
+                    </HStack>
+                  </Tooltip>
+                </WrapItem>
+              )
+            })}
+            {(osm?.latency_p50_s != null) && (
+              <WrapItem>
+                <HStack spacing={1.5} bg={T.bgElevated} border="1px solid" borderColor={T.borderSubtle} rounded="md" px={2} py={1}>
+                  <Icon as={FiClock} boxSize="12px" color={T.textMuted} />
+                  <Text fontSize="10px" fontWeight="600" color={T.textSecondary}>
+                    Latence p50 {osm.latency_p50_s!.toFixed(0)}s · p95 {osm.latency_p95_s != null ? `${osm.latency_p95_s.toFixed(0)}s` : '--'}
+                  </Text>
+                </HStack>
+              </WrapItem>
+            )}
+          </Wrap>
+        </Card>
+      )}
 
-      {/* Quick Launch */}
-      <LaunchPanel
-        profiles={PROFILES}
-        selectedProfile={selectedProfile}
-        onProfileChange={setSelectedProfile}
-        tag={tag}
-        onTagChange={setTag}
-        description={description}
-        onDescriptionChange={setDescription}
-        onLaunch={(benchType) => onLaunch(benchType, selectedProfile, tag, description)}
-        benchTypes={BENCH_TYPES}
-        isRunning={isRunning}
-        runProgress={runProgress}
-        onLaunchAll={async () => {
-          // Sequential, awaited — sinon les setStates s'ecrasent et les
-          // erreurs (ex: 409 stale state) sont silencieuses.
-          for (const bt of ['ragas', 't2t5', 'robustness']) {
-            try {
-              await onLaunch(bt, selectedProfile, tag, description)
-            } catch (err) {
-              console.error(`[LaunchAll] Failed to launch ${bt}:`, err)
-            }
-            await new Promise(r => setTimeout(r, 500))
-          }
-        }}
-      />
+      {/* OSMOSIS vs RAG classique — la preuve de valeur */}
+      {rag && (
+        <Card accent={T.accentOsm}>
+          <HStack spacing={2} mb={3}>
+            <FiGitMerge size={14} color={T.accentOsm} />
+            <Text fontSize="13px" fontWeight="800" color={T.textPrimary}>OSMOSIS vs moteur de recherche classique</Text>
+          </HStack>
+          <VStack spacing={3.5} align="stretch">
+            <CompareRow
+              label="Précision des références"
+              help="À architecture de réponse identique, seul le moteur de récupération change. Le KG d'OSMOSIS retrouve les bons identifiants là où un RAG par chunks échoue."
+              osmVal={osm?.exact_id_recall_mean}
+              ragVal={rag.exact_id_recall_mean}
+            />
+            <CompareRow
+              label="Honnêteté (abstention juste)"
+              help="Un RAG classique s'abstient souvent à tort (le chunk n'a pas le fait précis) ; OSMOSIS répond quand le KG contient le fait, et s'abstient seulement quand il est absent."
+              osmVal={osm?.abstention_correct_rate}
+              ragVal={rag.abstention_correct_rate}
+            />
+          </VStack>
+        </Card>
+      )}
+
+      {/* Derniers runs */}
+      <Card>
+        <Text fontSize="13px" fontWeight="700" color={T.textPrimary} mb={2}>Derniers tests</Text>
+        <Box overflowX="auto">
+          <Table size="sm" variant="unstyled" minW="540px">
+            <Thead>
+              <Tr>
+                {['Test', 'Précision réfs', 'Honnêteté', 'Qualité (IA)', 'Latence p50', 'Date'].map((h, i) => (
+                  <Th key={h} color={T.textMuted} fontSize="9px" textTransform="uppercase" borderBottom="1px solid" borderColor={T.borderSubtle} pb={2} isNumeric={i > 0 && i < 5}>
+                    {h}
+                  </Th>
+                ))}
+              </Tr>
+            </Thead>
+            <Tbody>
+              {runs.slice(0, 6).map((r, i) => (
+                <Tr key={`${r.filename}-${i}`} _hover={{ bg: T.bgElevated }}>
+                  <Td borderBottom="1px solid" borderColor={T.borderSubtle} py={2}>
+                    <Badge fontSize="10px" fontWeight="700"
+                      bg={`${r.arm === 'osmosis' ? T.accentOsm : T.accentRag}1a`}
+                      color={r.arm === 'osmosis' ? T.accentOsm : T.accentRag}
+                      rounded="md" px={2}>
+                      {armLabel(r.arm)}
+                    </Badge>
+                  </Td>
+                  <Td isNumeric borderBottom="1px solid" borderColor={T.borderSubtle} py={2}>
+                    <Text fontSize="xs" fontFamily="'Fira Code', monospace" fontWeight="700" color={T.textPrimary}>{pct(r.exact_id_recall_mean)}</Text>
+                  </Td>
+                  <Td isNumeric borderBottom="1px solid" borderColor={T.borderSubtle} py={2}>
+                    <Text fontSize="xs" fontFamily="'Fira Code', monospace" color={T.textSecondary}>{pct(r.abstention_correct_rate)}</Text>
+                  </Td>
+                  <Td isNumeric borderBottom="1px solid" borderColor={T.borderSubtle} py={2}>
+                    <Text fontSize="xs" fontFamily="'Fira Code', monospace" color={T.textMuted}>{r.C1_mean != null ? r.C1_mean.toFixed(2) : '--'}</Text>
+                  </Td>
+                  <Td isNumeric borderBottom="1px solid" borderColor={T.borderSubtle} py={2}>
+                    <Text fontSize="xs" fontFamily="'Fira Code', monospace" color={T.textMuted}>{r.latency_p50_s != null ? `${r.latency_p50_s.toFixed(0)}s` : '--'}</Text>
+                  </Td>
+                  <Td borderBottom="1px solid" borderColor={T.borderSubtle} py={2}>
+                    <Text fontSize="11px" color={T.textMuted}>{fmtTs(r.timestamp)}</Text>
+                  </Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        </Box>
+      </Card>
+
+      {/* Note méthodo (intemporelle) */}
+      <HStack spacing={2} align="start" px={1}>
+        <Box pt="2px"><FiInfo size={13} color={T.textMuted} /></Box>
+        <Text fontSize="11px" color={T.textMuted} lineHeight="1.6">
+          Indicateurs mesurés sur le gold-set (questions dont la bonne réponse est connue). Les deux mesures
+          déterministes — précision des références et honnêteté — priment ; la « qualité jugée » par IA est
+          indicative. Le détail par type de question est dans l&apos;onglet <b>Runtime v6</b>.
+        </Text>
+      </HStack>
     </VStack>
   )
 }

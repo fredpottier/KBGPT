@@ -126,7 +126,7 @@ type TabKey = 'runtime_v6' | 'overview' | 'ragas' | 'contradictions' | 'robustne
 
 const TABS: { key: TabKey; label: string; Icon: React.ElementType; accent: string; group: 'current' | 'archive' }[] = [
   { key: 'runtime_v6', label: 'Runtime v6', Icon: FiZap, accent: T.accentRagas, group: 'current' },
-  { key: 'overview', label: 'Vue d\'ensemble (V3)', Icon: FiActivity, accent: T.textMuted, group: 'archive' },
+  { key: 'overview', label: 'Vue d\'ensemble', Icon: FiActivity, accent: T.accentRagas, group: 'current' },
   { key: 'ragas', label: 'RAGAS', Icon: FiBarChart2, accent: T.textMuted, group: 'archive' },
   { key: 'contradictions', label: 'Contradictions', Icon: FiAlertTriangle, accent: T.textMuted, group: 'archive' },
   { key: 'robustness', label: 'Robustesse', Icon: FiShield, accent: T.textMuted, group: 'archive' },
@@ -331,7 +331,8 @@ export default function BenchmarksPage() {
     setRunType(benchType)
     setRunProgress({ phase: 'starting', progress: 0, total: 0 })
 
-    const resp = await apiFetch(url, {
+    // fetch brut (et non apiFetch) pour conserver le détail HTTP en cas d'échec
+    const resp = await fetch(`${API}${url}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ profile, tag: tag || undefined, description: description || undefined }),
@@ -1018,7 +1019,7 @@ function ContradictionsTab({
             Contradictions — {latest?.tag || 'Dernier run'}
           </Text>
           <Text fontSize="xs" color={T.textMuted}>
-            {scores.total_evaluated ?? scores.t2_count + scores.t5_count ?? '--'} questions
+            {scores.total_evaluated ?? (((scores.t2_count ?? 0) + (scores.t5_count ?? 0)) || '--')} questions
             {latest?.duration_s ? ` — ${Math.round(latest.duration_s)}s` : ''}
           </Text>
           {(ragGlobal != null || baseGlobal > 0) && (
