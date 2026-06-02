@@ -378,18 +378,18 @@ def run_question(orch, question: str, tenant_id: str = "default") -> Dict[str, A
 # ============================================================================
 
 
-def run_bench_50q(orch, gold_path: Path, limit: Optional[int]) -> List[Dict[str, Any]]:
+def run_bench_50q(orch, gold_path: Path, limit: Optional[int], tenant_id: str = "default") -> List[Dict[str, Any]]:
     with open(gold_path, "r", encoding="utf-8") as f:
         questions = json.load(f)
     if limit:
         questions = questions[:limit]
-    logger.info("Bench 50q: %d questions to run", len(questions))
+    logger.info("Bench 50q: %d questions to run (tenant=%s)", len(questions), tenant_id)
 
     results: List[Dict[str, Any]] = []
     for i, q in enumerate(questions, 1):
         logger.info("[50q %d/%d] type=%s id=%s", i, len(questions),
                     q.get("primary_type"), q.get("id"))
-        run = run_question(orch, q["question"])
+        run = run_question(orch, q["question"], tenant_id)
         # LLM-judge C1 vs ground_truth.answer (+ métadonnées anti-overfit abstention)
         gt = q.get("ground_truth", {})
         gt_answer = gt.get("answer", "")
@@ -422,17 +422,17 @@ def run_bench_50q(orch, gold_path: Path, limit: Optional[int]) -> List[Dict[str,
     return results
 
 
-def run_bench_30q_cp(orch, gold_path: Path, limit: Optional[int]) -> List[Dict[str, Any]]:
+def run_bench_30q_cp(orch, gold_path: Path, limit: Optional[int], tenant_id: str = "default") -> List[Dict[str, Any]]:
     with open(gold_path, "r", encoding="utf-8") as f:
         questions = json.load(f)
     if limit:
         questions = questions[:limit]
-    logger.info("Bench 30q CP: %d questions to run", len(questions))
+    logger.info("Bench 30q CP: %d questions to run (tenant=%s)", len(questions), tenant_id)
 
     results: List[Dict[str, Any]] = []
     for i, q in enumerate(questions, 1):
         logger.info("[30q-CP %d/%d] cp_id=%s", i, len(questions), q.get("cp_id"))
-        run = run_question(orch, q["question"])
+        run = run_question(orch, q["question"], tenant_id)
         cp_exposed = has_conflict_exposure(
             run.get("answer_text", ""),
             run.get("conflict_pending_warning"),
@@ -606,7 +606,34 @@ def main():
                         help="Limit n questions per set (smoke test)")
     parser.add_argument("--skip-50q", action="store_true")
     parser.add_argument("--skip-30q-cp", action="store_true")
+    # Protocole non-régression multi-corpus : tenant (corpus chargé) + label corpus.
+    parser.add_argument("--tenant", default="default",
+                        help="Tenant KG à interroger (corpus). Permet de benchmarker plusieurs corpus coexistants.")
+    parser.add_argument("--corpus", default="",
+                        help="Label lisible du corpus (ex: aero_seats, sap_presales). Défaut = valeur de --tenant.")
     args = parser.parse_args()
+
+    corpus_label = args.corpus or args.tenant
+
+    # Empreinte du CODE (git sha) — clé du protocole : attribuer une régression au
+    # code (même corpus, sha différent) vs au corpus (même sha, corpus différent).
+    def _git_sha() -> str:
+        # Le conteneur /app n'a pas de .git → priorité à l'env GIT_SHA passé depuis l'hôte
+        # (ex: docker exec -e GIT_SHA=$(git rev-parse --short HEAD) …), fallback git local.
+        import os as _os, subprocess
+        env_sha = _os.getenv("GIT_SHA")
+        if env_sha:
+            return env_sha.strip()
+        for cwd in ("/app", "/app/src", "."):
+            try:
+                return subprocess.check_output(
+                    ["git", "rev-parse", "--short", "HEAD"], cwd=cwd, text=True,
+                    stderr=subprocess.DEVNULL,
+                ).strip()
+            except Exception:
+                continue
+        return "unknown"
+    git_sha = _git_sha()
 
     from knowbase.runtime_a3.orchestrator import Orchestrator
     orch = Orchestrator()
@@ -618,9 +645,9 @@ def main():
     results_30q_cp: List[Dict[str, Any]] = []
 
     if not args.skip_50q:
-        results_50q = run_bench_50q(orch, args.gold_50q, args.limit)
+        results_50q = run_bench_50q(orch, args.gold_50q, args.limit, args.tenant)
     if not args.skip_30q_cp:
-        results_30q_cp = run_bench_30q_cp(orch, args.gold_30q_cp, args.limit)
+        results_30q_cp = run_bench_30q_cp(orch, args.gold_30q_cp, args.limit, args.tenant)
 
     agg_50q = aggregate_50q(results_50q) if results_50q else {}
     agg_30q_cp = aggregate_30q_cp(results_30q_cp) if results_30q_cp else {}
@@ -676,6 +703,10 @@ def main():
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump({
             "timestamp": timestamp,
+            "corpus": corpus_label,
+            "tenant": args.tenant,
+            "git_sha": git_sha,
+            "gold_50q_file": str(args.gold_50q),
             "total_duration_s": total_duration,
             "agg_50q": agg_50q,
             "agg_30q_cp": agg_30q_cp,
