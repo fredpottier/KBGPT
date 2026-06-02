@@ -273,11 +273,14 @@ ENTITY_STOPLIST_RESIDUAL = frozenset({
     "system", "systems", "information", "data", "service", "services",
     "process", "document", "user", "users", "application",
     "value", "values", "type", "object", "item", "items",
-    "element", "elements", "component", "result", "results",
+    "element", "elements", "component", "components", "result", "results",
     "file", "files", "option", "options", "method",
     "step", "steps", "case", "action", "entry",
     "use", "used", "uses", "using", "set", "get", "run",
     "make", "need", "needs",
+    # Termes métier/technique génériques (filet anti join_key spurieux sans IDF)
+    "customer", "customers", "function", "functions",
+    "integration", "integrations", "monitoring", "report", "reports",
 })
 
 

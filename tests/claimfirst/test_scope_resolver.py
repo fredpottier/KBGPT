@@ -165,7 +165,7 @@ class TestScopeResolverV2:
 
     def test_v2_without_llm_same_as_v1(self):
         """Sans use_llm, v2 se comporte comme v1."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             resolve_scope_v2(
                 claim=FakeClaim(),
                 use_llm=False,
@@ -175,7 +175,7 @@ class TestScopeResolverV2:
 
     def test_v2_claim_explicit_priority(self):
         """claim_explicit a toujours priorité sur claim_llm."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             resolve_scope_v2(
                 claim=FakeClaim(text="Talent Management requires S_RFC"),
                 scope_evidence="Talent Management",
@@ -195,7 +195,7 @@ class TestScopeResolverV2:
             "confidence": 0.92,
         }
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             resolve_scope_v2(
                 claim=FakeClaim(text="Talent Management requires S_RFC authorization"),
                 use_llm=True,
@@ -215,7 +215,7 @@ class TestScopeResolverV2:
             "confidence": 0.95,
         }
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             resolve_scope_v2(
                 claim=FakeClaim(text="GDPR requires data deletion within 30 days"),
                 use_llm=True,
@@ -233,7 +233,7 @@ class TestScopeResolverV2:
         }
 
         passage = FakePassage(section_title="Security Section")
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             resolve_scope_v2(
                 claim=FakeClaim(text="Some generic claim about security"),
                 passage=passage,
@@ -248,7 +248,7 @@ class TestScopeResolverV2:
         mock_llm.return_value = None
 
         doc_ctx = FakeDocContext(primary_subject="MyPlatform")
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             resolve_scope_v2(
                 claim=FakeClaim(text="Some claim text here"),
                 doc_context=doc_ctx,
@@ -268,7 +268,7 @@ class TestScopeResolverV2:
         }
 
         entity = FakeEntity("e1", "Widget", FakeEntityType.PRODUCT)
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             resolve_scope_v2(
                 claim=FakeClaim(text="Widget requires special config"),
                 entities=[entity],
@@ -288,7 +288,7 @@ class TestScopeResolverV2:
             "confidence": 0.99,
         }
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             resolve_scope_v2(
                 claim=FakeClaim(text="Product does X"),
                 use_llm=True,

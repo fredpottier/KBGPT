@@ -12,9 +12,10 @@ import pytest
 
 from knowbase.claimfirst.linkers.passage_linker import PassageLinker
 from knowbase.claimfirst.linkers.entity_linker import EntityLinker
-from knowbase.claimfirst.linkers.facet_matcher import FacetMatcher
+from knowbase.claimfirst.linkers.facet_matcher import FacetMatcher, DEFAULT_MIN_SCORE
 from knowbase.claimfirst.models.claim import Claim, ClaimType
 from knowbase.claimfirst.models.entity import Entity, EntityType
+from knowbase.claimfirst.models.facet import Facet
 from knowbase.claimfirst.models.passage import Passage
 from knowbase.stratified.pass1.assertion_unit_indexer import (
     AssertionUnitIndexer,
@@ -289,16 +290,33 @@ class TestEntityLinker:
         assert stats["links_created"] == 0
 
 
+def _make_facet(domain: str, keywords: list, facet_id: str = None) -> Facet:
+    """Construit une Facet validée pour injection dans le FacetMatcher."""
+    return Facet(
+        facet_id=facet_id or f"facet_{domain.replace('.', '_')}",
+        tenant_id="default",
+        facet_name=domain.split(".")[-1].title(),
+        domain=domain,
+        keywords=keywords,
+    )
+
+
 class TestFacetMatcher:
-    """Tests for FacetMatcher."""
+    """Tests for FacetMatcher.
+
+    NOTE : FacetMatcher est désormais un matcher PUR. Les facettes validées sont
+    INJECTÉES (depuis FacetRegistry) via `validated_facets`. Le matcher ne génère
+    plus de facettes en interne (ni patterns intégrés, ni predefined) — cette
+    responsabilité a migré vers FacetRegistry.
+    """
 
     def test_matcher_initialization(self):
-        """Test matcher initialization."""
-        matcher = FacetMatcher(include_predefined=True)
-        assert matcher.min_confidence == 0.5
+        """Test matcher initialization (API injection : min_score)."""
+        matcher = FacetMatcher()
+        assert matcher.min_score == DEFAULT_MIN_SCORE
 
-    def test_pattern_matching(self):
-        """Test pattern-based facet matching."""
+    def test_keyword_facet_matching(self):
+        """Une claim sécurité matche une facette sécurité injectée (mode post-import)."""
         matcher = FacetMatcher()
 
         claims = [
@@ -322,20 +340,25 @@ class TestFacetMatcher:
             ),
         ]
 
-        facets, links = matcher.match(claims, tenant_id="default")
+        validated_facets = [
+            _make_facet("security.encryption", ["tls", "encryption"]),
+        ]
 
-        # Should create facets from patterns
-        assert len(facets) > 0
-        assert len(links) > 0
+        facets, links = matcher.match(
+            claims, tenant_id="default", validated_facets=validated_facets
+        )
 
-        # Check facet domains
+        # match() retourne les facettes injectées
+        assert len(facets) == 1
         domains = [f.domain for f in facets]
-        # Should have security-related facets due to "TLS" and "encryption"
         assert any("security" in d for d in domains)
+        # La claim sécurité est liée, pas la claim backups
+        linked_claim_ids = {cid for cid, _ in links}
+        assert "claim_001" in linked_claim_ids
 
-    def test_predefined_facets_included(self):
-        """Test predefined facets are included."""
-        matcher = FacetMatcher(include_predefined=True)
+    def test_returns_injected_facets(self):
+        """match() retourne les facettes injectées (pas de génération interne)."""
+        matcher = FacetMatcher()
 
         claims = [
             Claim(
@@ -348,15 +371,22 @@ class TestFacetMatcher:
                 passage_id="p1",
             ),
         ]
+        validated_facets = [_make_facet("security", ["security", "secure"])]
 
-        facets, links = matcher.match(claims, tenant_id="default")
+        facets, _links = matcher.match(
+            claims, tenant_id="default", validated_facets=validated_facets
+        )
 
-        # Should have predefined facets
         domains = [f.domain for f in facets]
         assert "security" in domains
 
+        # Sans facettes injectées, aucune facette n'est créée
+        facets_empty, links_empty = matcher.match(claims, tenant_id="default")
+        assert facets_empty == []
+        assert links_empty == []
+
     def test_keyword_matching(self):
-        """Test keyword-based facet matching."""
+        """Test keyword-based facet matching (facette injectée)."""
         matcher = FacetMatcher()
 
         claims = [
@@ -370,8 +400,13 @@ class TestFacetMatcher:
                 passage_id="p1",
             ),
         ]
+        validated_facets = [
+            _make_facet("compliance.gdpr", ["gdpr", "data protection"]),
+        ]
 
-        facets, links = matcher.match(claims, tenant_id="default")
+        facets, links = matcher.match(
+            claims, tenant_id="default", validated_facets=validated_facets
+        )
 
         # Should match GDPR-related facets
         linked_claim_ids = [cid for cid, _ in links]
@@ -384,4 +419,5 @@ class TestFacetMatcher:
         stats = matcher.get_stats()
 
         assert stats["claims_processed"] == 0
-        assert stats["patterns_matched"] == 0
+        assert stats["links_created"] == 0
+        assert stats["signals_used"]["keyword_matching"] == 0

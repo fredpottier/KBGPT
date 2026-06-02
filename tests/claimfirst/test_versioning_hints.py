@@ -110,9 +110,9 @@ class TestDomainContextProfileVersioningHints:
         assert restored.versioning_hints == ""
 
     def test_max_length_validation(self):
-        """versioning_hints > 500 chars est rejeté."""
+        """versioning_hints > 1000 chars est rejeté (max_length=1000)."""
         with pytest.raises(Exception):
-            _make_profile(versioning_hints="x" * 501)
+            _make_profile(versioning_hints="x" * 1001)
 
 
 # ── Tests Injector ────────────────────────────────────────

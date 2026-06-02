@@ -15,8 +15,21 @@ sys_path_added = False
 import sys
 import os
 
-# Le script est dans app/scripts/ — on l'importe comme module
-SCRIPT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "app", "scripts")
+# Le script est dans app/scripts/ — on l'importe comme module.
+# Le layout diffère hôte vs conteneur (où ./app est monté en /app, donc scripts
+# est frère de tests). On essaie les deux candidats.
+_here = os.path.dirname(__file__)
+SCRIPT_DIR = next(
+    (
+        os.path.abspath(c)
+        for c in (
+            os.path.join(_here, "..", "..", "app", "scripts"),  # layout hôte (racine repo)
+            os.path.join(_here, "..", "..", "scripts"),          # layout conteneur (/app)
+        )
+        if os.path.isdir(c)
+    ),
+    os.path.join(_here, "..", "..", "app", "scripts"),
+)
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
@@ -65,10 +78,17 @@ class TestAliasIdentityMatch:
     """Tests de la méthode A — Alias Identity Match."""
 
     def test_alias_matches_normalized_name(self):
-        """'SAP Fiori' avec alias 'Fiori' matche Entity 'Fiori'."""
+        """Un alias synonyme (NON sous-chaîne) matche l'Entity homonyme.
+
+        NOTE (FIX C.2) : un alias strictement contenu dans le nom (ex 'Fiori' ⊂
+        'SAP Fiori') relève du sub-concept et n'est PAS fusionné ici — c'est le
+        prefix dedup (méthode B) qui gère le drop de préfixe vendeur. Voir
+        test_prefix_dedup_links_stripped_entity et test_full_pipeline_sap_fiori.
+        La méthode A (alias_identity) ne fusionne que les vrais synonymes.
+        """
         entities = [
-            _make_entity("e1", "SAP Fiori", aliases=["Fiori"]),
-            _make_entity("e2", "Fiori"),
+            _make_entity("e1", "Lighthouse", aliases=["Beacon Platform"]),
+            _make_entity("e2", "Beacon Platform"),
         ]
         norm_index, alias_index, prefix_freq = build_indexes(entities)
         edges = build_candidate_edges(entities, norm_index, alias_index, prefix_freq)
@@ -80,10 +100,10 @@ class TestAliasIdentityMatch:
         assert methods[pair] == "alias_identity"
 
     def test_alias_bidirectional(self):
-        """Si E2 a un alias qui normalise en normalized_name de E1, ça matche."""
+        """Si E2 a un alias synonyme (non sous-chaîne) = normalized_name de E1, ça matche."""
         entities = [
-            _make_entity("e1", "Fiori"),
-            _make_entity("e2", "SAP Fiori UX", aliases=["Fiori"]),
+            _make_entity("e1", "Beacon Platform"),
+            _make_entity("e2", "Lighthouse", aliases=["Beacon Platform"]),
         ]
         norm_index, alias_index, prefix_freq = build_indexes(entities)
         edges = build_candidate_edges(entities, norm_index, alias_index, prefix_freq)
@@ -91,6 +111,24 @@ class TestAliasIdentityMatch:
         pair = frozenset({"e1", "e2"})
         pairs = {frozenset({e[0], e[1]}) for e in edges}
         assert pair in pairs
+
+    def test_subconcept_alias_not_merged_via_alias_identity(self):
+        """FIX C.2 : un alias strictement contenu dans le nom (sub-concept) n'est
+        PAS fusionné par alias_identity — relation de spécialisation, pas synonymie.
+
+        Ex : Entity('processing of personal data') ayant 'personal data' en alias
+        ne doit pas être fusionnée avec Entity('personal data')."""
+        entities = [
+            _make_entity("e1", "Processing Of Personal Data", aliases=["Personal Data"]),
+            _make_entity("e2", "Personal Data"),
+        ]
+        norm_index, alias_index, prefix_freq = build_indexes(entities)
+        edges = build_candidate_edges(entities, norm_index, alias_index, prefix_freq)
+
+        alias_pairs = {
+            frozenset({e[0], e[1]}) for e in edges if e[2] == "alias_identity"
+        }
+        assert frozenset({"e1", "e2"}) not in alias_pairs
 
     def test_no_self_match(self):
         """Une Entity ne matche pas avec elle-même."""

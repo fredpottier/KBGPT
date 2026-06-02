@@ -26,6 +26,7 @@ from knowbase.claimfirst.extractors.facet_candidate_extractor import (
     FacetCandidateExtractor,
     _parse_llm_response,
     _normalize_dimension_key,
+    _get_max_facets_per_doc,
 )
 from knowbase.claimfirst.linkers.facet_registry import (
     FacetRegistry,
@@ -275,7 +276,11 @@ class TestParseLLMResponse:
         assert len(candidates) == 1
         assert candidates[0].dimension_key == "security.access"
 
-    def test_max_6_facets(self):
+    def test_max_facets_cap_enforced(self):
+        """Le cap par doc (configurable via feature_flags) est appliqué au parsing."""
+        cap = _get_max_facets_per_doc()
+        # On fournit strictement plus de facettes que le cap pour vérifier la troncature
+        n_input = cap + 5
         facets = [
             {
                 "canonical_name": f"Facet {i}",
@@ -284,11 +289,11 @@ class TestParseLLMResponse:
                 "keywords": [f"kw{i}"],
                 "confidence": 0.8,
             }
-            for i in range(10)
+            for i in range(n_input)
         ]
         response = json.dumps({"facets": facets})
         candidates = _parse_llm_response(response, "doc_001")
-        assert len(candidates) == 6
+        assert len(candidates) == cap
 
     def test_dedup_by_dimension_key(self):
         response = json.dumps({
@@ -370,16 +375,20 @@ class TestFacetRegistry:
         facet = registry.get_facet_by_key("security.access")
         assert facet.source_doc_count == 1
 
-    def test_promotion_at_3_docs(self):
+    def test_promotion_at_threshold_docs(self):
+        """Promotion VALIDATED dès PROMOTION_THRESHOLD docs distincts."""
         registry = FacetRegistry("test")
-        for i in range(3):
+        threshold = registry.PROMOTION_THRESHOLD
+        # Enregistre assez de docs distincts pour dépasser le seuil
+        for i in range(threshold + 1):
             registry.register_candidates([
                 _make_candidate("compliance.gdpr", doc_id=f"doc_{i:03d}")
             ])
         facet = registry.get_facet_by_key("compliance.gdpr")
         assert facet.lifecycle == FacetLifecycle.VALIDATED
         assert facet.promoted_at is not None
-        assert "3 docs" in facet.promotion_reason
+        # La raison est capturée au moment de la promotion (au seuil)
+        assert f"{threshold} docs" in facet.promotion_reason
 
     def test_promotion_requires_diversity(self):
         """3 docs du même doc_id → pas de promotion."""

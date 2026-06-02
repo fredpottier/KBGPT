@@ -198,13 +198,17 @@ class TestSlotEnricherPrompt:
     """Tests sur le prompt template."""
 
     def test_prompt_contains_all_predicates(self):
-        CANONICAL_PREDICATES = frozenset({
-            "USES", "REQUIRES", "BASED_ON", "SUPPORTS", "ENABLES",
-            "PROVIDES", "EXTENDS", "REPLACES", "PART_OF",
-            "INTEGRATED_IN", "COMPATIBLE_WITH", "CONFIGURES",
-        })
-        for pred in CANONICAL_PREDICATES:
-            assert pred in SLOT_ENRICHMENT_PROMPT, f"Missing predicate {pred} in prompt"
+        """Les prédicats canoniques sont injectés dynamiquement dans la table
+        (`_predicates_table`), pas codés en dur dans le template. On vérifie la
+        table effectivement envoyée au LLM."""
+        enricher = SlotEnricher()
+        predicates_table = enricher._predicates_table
+        # Tout prédicat canonique disposant d'une description doit figurer dans la table
+        for pred in enricher.canonical_predicates:
+            if pred in enricher.predicate_descriptions:
+                assert pred in predicates_table, f"Missing predicate {pred} in predicates table"
+        # Garde-fou : EXTENDS (régression historique) doit être présent
+        assert "EXTENDS" in predicates_table
 
     def test_prompt_format_placeholder(self):
         assert "{claims_block}" in SLOT_ENRICHMENT_PROMPT
