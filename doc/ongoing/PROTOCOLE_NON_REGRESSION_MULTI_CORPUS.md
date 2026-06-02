@@ -45,7 +45,7 @@ Deux axes de comparaison (`compare_runs.py`) :
 | Corpus | Tenant | Gold-set | Statut |
 |--------|--------|----------|--------|
 | Aéro (sièges/crashworthiness) | `default` | `gold_set_aero_50q.json` / `_150q.json` | ✅ chargé, baseline 02/06 (exact_id 0.92) |
-| SAP presales | `sap_ref` | `gold_set_a38_50q.json` (+ `_30q_cp.json`) | ✅ **importé** depuis backup via `import_corpus_as_tenant.py` (38 595 claims + embeddings). Baseline 02/06 : exact_id 0.66 (⚠️ sans contexte domaine SAP — à restaurer depuis `postgres_export.json` pour un baseline fidèle) |
+| SAP presales | `sap_ref` | `gold_set_a38_50q.json` (+ `_30q_cp.json`) | ✅ **importé** depuis backup via `import_corpus_as_tenant.py` (38 595 claims + embeddings). Baseline 02/06 : exact_id **0.66 — fidèle** (le runtime n'utilise PAS le contexte domaine, cf note ci-dessous ; 0.66 est donc directement comparable). Écart vs 0.788 de mai = évolution du code, comparaison « mixte » non isolable. |
 | Médical (futur) | `medical` | à créer | 🔜 à l'import |
 
 **Action structurante** : les prochains imports de corpus se font **sous un tenant dédié** (ex.
@@ -65,6 +65,14 @@ python scripts/compare_runs.py --corpus aero_seats   # non-régression
 python scripts/compare_runs.py --typology            # effet corpus
 ```
 Sans `GIT_SHA`, le sha tombe à `unknown` et l'attribution code-vs-corpus n'est plus fiable.
+
+## Note — le runtime n'utilise pas le contexte domaine
+
+`runtime_a3` (pipeline de **réponse** : parse/plan/execute/evaluate/synthesize) **ne lit pas** le
+contexte domaine (table PG `domain_contexts`). Le `DomainContextInjector` n'intervient qu'à
+l'**ingestion** ClaimFirst. Conséquence : seeder/restaurer un contexte ne change rien au bench ;
+la baseline d'un corpus est donc fidèle indépendamment du contexte. Le contexte ne redevient utile
+que si le corpus est **ré-ingéré** sous son tenant.
 
 ## Limite connue
 
