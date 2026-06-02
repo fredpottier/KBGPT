@@ -1,0 +1,983 @@
+[
+  {
+    "id": "AERO_FACT_0013",
+    "question": "What is required for meeting the injury assessment criteria for side-facing seats according to the regulation?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Meeting the requirement for side-facing seats requires injury assessments beyond those specifically cited in §25.562.",
+      "exact_identifiers": [
+        "§25.562"
+      ],
+      "supporting_doc_ids": [
+        "side_facing_seat_research_ada1d53b"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0002",
+    "question": "What did the research evaluate regarding the seat configurations identified in the previous FAA study?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "The research evaluated the overall injury risks of the seat configurations identified from the previous study conducted by the FAA in 2005 as having the greatest injury potential.",
+      "exact_identifiers": [
+        "2005"
+      ],
+      "supporting_doc_ids": [
+        "side_facing_seat_research_ada1d53b"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0038",
+    "question": "What are the design requirements for seats, berths, safety belts, harnesses, and adjacent parts of the airplane at stations designated as occupiable during takeoff and landing?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "They must be designed to prevent serious injury from inertia forces specified in § 25.561.",
+      "exact_identifiers": [
+        "§ 25.561"
+      ],
+      "supporting_doc_ids": [
+        "AC_25-17A_55f08065"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0023",
+    "question": "What does the document specify regarding HIC?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "The maximum value of the set of computations obtained from the procedure is the HIC.",
+      "exact_identifiers": [
+        "HIC"
+      ],
+      "supporting_doc_ids": [
+        "AC_25.562-1A_773d8266"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0011",
+    "question": "What lateral bending moment value is considered a threshold according to the regulation?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "1018 in-lb",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "side_facing_seat_research_ada1d53b"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0005",
+    "question": "According to the regulation, which type of seats is not covered by this standard due to their installation angle?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Seats with installation limitations of angles more than 18 degrees from the aircraft centre line",
+      "exact_identifiers": [
+        "18 degrees"
+      ],
+      "supporting_doc_ids": [
+        "ETSO-C127b_8c0c076e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0003",
+    "question": "What is the reduced lumbar load in pounds for Test 1 with a peak pulse of 15g, according to the regulation?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "1484 lbs",
+      "exact_identifiers": [
+        "15g"
+      ],
+      "supporting_doc_ids": [
+        "AC_25.562-1B_e14eda4f"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0019",
+    "question": "What requirement must the insulation on electrical wires and cables meet according to the regulation?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Transport airplane insulation on electrical wire and electrical cable must be self-extinguishing when tested in accordance with the applicable portions of Appendix F, Part I of CS-25.",
+      "exact_identifiers": [
+        "CS-25"
+      ],
+      "supporting_doc_ids": [
+        "ETSO-C127b_8c0c076e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0025",
+    "question": "How many EASA Operators' aircraft were used to obtain data in 2012?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "1,937",
+      "exact_identifiers": [
+        "2012"
+      ],
+      "supporting_doc_ids": [
+        "NPA_2013-20_seat_crashworthiness_fdd93d4d"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0033",
+    "question": "According to the regulation, which class requirements are used to measure head accelerations for calculating the Head Injury Criterion (HIC) in ATD?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Channel Class 1000",
+      "exact_identifiers": [
+        "HIC"
+      ],
+      "supporting_doc_ids": [
+        "AC_25.562-1B_e14eda4f"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0040",
+    "question": "Which section of the regulation provides an exception to the equipment requirements specified in § 121.313(f)?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "§ 121.583(a)",
+      "exact_identifiers": [
+        "§ 121.313",
+        "§ 121.583"
+      ],
+      "supporting_doc_ids": [
+        "AC_25-17A_55f08065"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0001",
+    "question": "According to the regulation, which paragraph specifies the instructions for seat static load testing up to 9g in the forward direction?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Paragraph 25.561 of EASA CS-25 and FAR Part 25",
+      "exact_identifiers": [
+        "CS-25",
+        "9g"
+      ],
+      "supporting_doc_ids": [
+        "NPA_2013-20_seat_crashworthiness_fdd93d4d"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0009",
+    "question": "What safety feature might be required in certain seat rows to comply with CS 25.562 regarding head injury criteria?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Airbags",
+      "exact_identifiers": [
+        "CS 25.562"
+      ],
+      "supporting_doc_ids": [
+        "NPA_2013-20_seat_crashworthiness_fdd93d4d"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0044",
+    "question": "Which sections of 14 CFR define the certification requirements for Head Injury Criteria?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "§§ 23.562(c)(5), 25.562(c)(5), 27.562(c)(5) and 29.562(c)(5)",
+      "exact_identifiers": [
+        "§§ 23.562"
+      ],
+      "supporting_doc_ids": [
+        "AC_20-146_cancelled_5fb3ed5e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_FACT_0021",
+    "question": "What potential impact could a seatbelt design change have according to TSO-C127?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "It may affect compliance to the requirements of TSO-C127.",
+      "exact_identifiers": [
+        "TSO-C127"
+      ],
+      "supporting_doc_ids": [
+        "AC_21-25B_b33368fc"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "factual"
+  },
+  {
+    "id": "AERO_LIST_0013",
+    "question": "What will require additional testing according to the regulation?",
+    "primary_type": "list",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "A new configuration or combination of foam, fire blocking layer, and dress cover",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_21-25B_b33368fc"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "list"
+  },
+  {
+    "id": "AERO_LIST_0007",
+    "question": "According to SAE J211 practice, what does the data channel include?",
+    "primary_type": "list",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "all instrumentation components from the transducer through the final data measurement, including connecting cables and analytical procedures",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_23.562-1_0d9f78dc"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "list"
+  },
+  {
+    "id": "AERO_LIST_0004",
+    "question": "What are some examples of non-TSO functions provided by components in an aircraft seat certification context?",
+    "primary_type": "list",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "in-flight entertainment (IFE) systems, floor proximity lighting, and reading lights",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_21-25B_b33368fc"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "list"
+  },
+  {
+    "id": "AERO_LIST_0005",
+    "question": "What are the two types of vertical test facilities mentioned in the regulation?",
+    "primary_type": "list",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "drop towers and vertical accelerators",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_23.562-1_0d9f78dc"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "list"
+  },
+  {
+    "id": "AERO_LIST_0003",
+    "question": "What characteristic must the static friction force of the energy absorber's materials have in relation to the dynamic friction force when the rotor is rotating?",
+    "primary_type": "list",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "The static friction force must be equal to or close to the dynamic friction force when the rotor is in rotation.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "patent_US9399518_energy_absorber_crashworthy_seat_bdef6e4f"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "list"
+  },
+  {
+    "id": "AERO_LIFE_0011",
+    "question": "What alternative exit requirement must be installed for airplanes that cannot accommodate overwing exits due to wing positioning?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "An exit of at least the dimensions of a Type III exit must be installed instead of each Type IV exit.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_25-17A_55f08065"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "lifecycle"
+  },
+  {
+    "id": "AERO_LIFE_0005",
+    "question": "What change did this amendment make to the regulation regarding test criteria?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "moved the test criteria to a new Appendix J",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_25-17A_55f08065"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "lifecycle"
+  },
+  {
+    "id": "AERO_LIFE_0019",
+    "question": "Which Advisory Circular cancels AC 20-146, Methodology for Dynamic Seat Certification by Analysis for Use in Parts 23, 25, 27, and 29 Airplanes and Rotorcraft, dated May 19, 2003?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "This AC",
+      "exact_identifiers": [
+        "AC 20-146",
+        "2003"
+      ],
+      "supporting_doc_ids": [
+        "AC_20-146A_5f12eed3"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "lifecycle"
+  },
+  {
+    "id": "AERO_LIFE_0017",
+    "question": "What happened to Advisory Circular 25.562-1?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Advisory Circular 25.562-1 is cancelled.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_25.562-1A_773d8266"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "lifecycle"
+  },
+  {
+    "id": "AERO_LIFE_0014",
+    "question": "What must replace the reference to 'AS8049C' to meet the oblique-facing seat requirements of Table 4 in the Appendix of this ETSO?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "AS8049C as modified by Table 1 of the Appendix to this ETSO",
+      "exact_identifiers": [
+        "AS8049C",
+        "4 in"
+      ],
+      "supporting_doc_ids": [
+        "ETSO-C127c_amd17_d2c85ef0"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "lifecycle"
+  },
+  {
+    "id": "AERO_LIFE_0001",
+    "question": "What process is used to adjust the heart path data from previous tests due to changes in SRP?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "The longitudinal heart path analysis modifies the heart path collected in previous tests to account for the change in SRP.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_25.562-1B_e14eda4f"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "lifecycle"
+  },
+  {
+    "id": "AERO_LIFE_0012",
+    "question": "When did the guidance on 'Emergency Evacuation Provisions' become effective according to Amendment 4b-5?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "April 9, 1957",
+      "exact_identifiers": [
+        "1957"
+      ],
+      "supporting_doc_ids": [
+        "AC_25-17A_55f08065"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "lifecycle"
+  },
+  {
+    "id": "AERO_CMP_0004",
+    "question": "What is the difference between FAA and EASA requirements for the Head Injury Criterion (HIC) in aircraft seat certification?",
+    "primary_type": "comparison",
+    "secondary_types": [
+      "contradiction"
+    ],
+    "language": "en",
+    "ground_truth": {
+      "answer": "FAA measures HIC according to Channel Class 1000 requirements, while EASA mandates that the HIC value must not exceed 1000 regardless of the type of head contact.",
+      "exact_identifiers": [
+        "HIC"
+      ],
+      "supporting_doc_ids": [
+        "AC_25.562-1B_e14eda4f",
+        "ETSO-C127c_amd17_d2c85ef0"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "faa_easa_comparison"
+  },
+  {
+    "id": "AERO_CMP_0008",
+    "question": "What is the difference between FAA and EASA requirements for demonstrating the safety of side-facing seats in terms of occupant injury criteria?",
+    "primary_type": "comparison",
+    "secondary_types": [
+      "contradiction"
+    ],
+    "language": "en",
+    "ground_truth": {
+      "answer": "FAA allows the use of computer modeling to demonstrate incidental body-to-body contact, while EASA requires that side-facing seating systems meet specific occupant injury criteria.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_20-146A_5f12eed3",
+        "ETSO-C127c_amd17_d2c85ef0"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "faa_easa_comparison"
+  },
+  {
+    "id": "AERO_CMP_0012",
+    "question": "What is the difference between FAA and EASA requirements regarding the assessment of head injury potential in aircraft seats?",
+    "primary_type": "comparison",
+    "secondary_types": [
+      "contradiction"
+    ],
+    "language": "en",
+    "ground_truth": {
+      "answer": "FAA requires representing the exposed surface to assess head injury potential, while EASA allows for a representative impact surface to be attached to the test fixture for direct measurement of head acceleration.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_25-17A_55f08065",
+        "ETSO-C127b_8c0c076e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "faa_easa_comparison"
+  },
+  {
+    "id": "AERO_CMP_0002",
+    "question": "What does EASA recommend regarding additional guidance for acceptable seat belt geometry in aircraft seats?",
+    "primary_type": "comparison",
+    "secondary_types": [
+      "contradiction"
+    ],
+    "language": "en",
+    "ground_truth": {
+      "answer": "See the FAA AC 21-34 for additional guidance for acceptable seat belt geometry.",
+      "exact_identifiers": [
+        "AC 21-34"
+      ],
+      "supporting_doc_ids": [
+        "AC_25.562-1B_e14eda4f",
+        "ETSO-C127b_8c0c076e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "faa_easa_comparison"
+  },
+  {
+    "id": "AERO_CMP_0001",
+    "question": "What is the difference between FAA's requirements for aircraft seats in emergency landings and EASA's concern regarding seat belts in the same scenario?",
+    "primary_type": "comparison",
+    "secondary_types": [
+      "contradiction"
+    ],
+    "language": "en",
+    "ground_truth": {
+      "answer": "FAA requires seats to be designed to prevent serious injury and eliminate hazardous objects within the head's striking radius, whereas EASA focuses on the potential for seat belt slack to increase during an emergency landing.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_25-17A_55f08065",
+        "ETSO-C127b_8c0c076e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "faa_easa_comparison"
+  },
+  {
+    "id": "AERO_CMP_0013",
+    "question": "What is the difference between FAA and EASA requirements regarding the observation of pelvic restraint system webbing movement during testing?",
+    "primary_type": "comparison",
+    "secondary_types": [
+      "contradiction"
+    ],
+    "language": "en",
+    "ground_truth": {
+      "answer": "FAA requires documentation cameras to capture the movement, while EASA specifies the application of test criteria from ARP5526C, subsection 3.7.2 for seats with baggage restraint allowing a foot step load.",
+      "exact_identifiers": [
+        "ARP5526C"
+      ],
+      "supporting_doc_ids": [
+        "AC_25.562-1A_773d8266",
+        "ETSO-C127b_8c0c076e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "faa_easa_comparison"
+  },
+  {
+    "id": "AERO_CMP_0018",
+    "question": "What is the difference between FAA and EASA regulations regarding the protection provided by seats during emergency landings?",
+    "primary_type": "comparison",
+    "secondary_types": [
+      "contradiction"
+    ],
+    "language": "en",
+    "ground_truth": {
+      "answer": "FAA does not require the forces specified in emergency landing conditions to be applied to certain stowage compartments, whereas EASA states that the protection provided by seats for passengers and cabin crews is not optimal on some large aeroplanes during emergency landings.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_25-17A_55f08065",
+        "NPA_2013-20_seat_crashworthiness_fdd93d4d"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "faa_easa_comparison"
+  },
+  {
+    "id": "AERO_MH_0007",
+    "question": "According to the document dated December 2016, which section specifies the application of all subsections of Section 3 unless disregarded or modified?",
+    "primary_type": "multi_hop",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Section 3 of AS6316",
+      "exact_identifiers": [
+        "AS6316",
+        "2016"
+      ],
+      "supporting_doc_ids": [
+        "ETSO-C127c_amd17_d2c85ef0"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "multi_hop"
+  },
+  {
+    "id": "AERO_MH_0002",
+    "question": "What was the threshold lateral bending moment value used in the research to evaluate the injury risks of seat configurations identified from the previous FAA study?",
+    "primary_type": "multi_hop",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "1018 in-lb",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "side_facing_seat_research_ada1d53b"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "multi_hop"
+  },
+  {
+    "id": "AERO_MH_0012",
+    "question": "What type of sensor is required to be placed at the center of the head form to ensure the data necessary for the HIC computation is collected, according to the regulation?",
+    "primary_type": "multi_hop",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Accelerometers",
+      "exact_identifiers": [
+        "HIC"
+      ],
+      "supporting_doc_ids": [
+        "AC_23.562-1_0d9f78dc"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "multi_hop"
+  },
+  {
+    "id": "AERO_MH_0004",
+    "question": "What is the requirement for floor rails or floor fittings used to attach pilot seats to the test fixture in terms of alignment?",
+    "primary_type": "multi_hop",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "The rails or fittings must be misaligned with respect to the adjacent set of rails or fittings by at least 10 degrees vertically.",
+      "exact_identifiers": [
+        "10 degrees"
+      ],
+      "supporting_doc_ids": [
+        "AC_25-17A_55f08065"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "multi_hop"
+  },
+  {
+    "id": "AERO_MH_0005",
+    "question": "According to the regulation, which type of seat cushion system must be tested for fire protection provisions, and which seats are not covered by the standard due to their installation angles exceeding 18 degrees from the aircraft center line?",
+    "primary_type": "multi_hop",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Type A Transport flight attendant seat cushion systems shall be tested for fire protection provisions, while seats installed at angles more than 18 degrees from the aircraft centre line are not covered by the standard.",
+      "exact_identifiers": [
+        "18 degrees"
+      ],
+      "supporting_doc_ids": [
+        "ETSO-C127b_8c0c076e"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "multi_hop"
+  },
+  {
+    "id": "AERO_CONT_0006",
+    "question": "What should be done with the ATD's hands if crew seat tests are conducted in a mockup that includes airplane controls?",
+    "primary_type": "contextual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "The ATD's hands should be lightly tied to the controls.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_25.562-1A_773d8266"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "contextual"
+  },
+  {
+    "id": "AERO_CONT_0003",
+    "question": "What is required for the representative impact surface in the certification process of aircraft seats?",
+    "primary_type": "contextual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "It should be attached at the orientation and distance from the seat representing the airplane installation.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "AC_25.562-1A_773d8266"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "contextual"
+  },
+  {
+    "id": "AERO_CONT_0005",
+    "question": "What factor determines the maximum brake torque applied by brake 20 to the winding drum 10?",
+    "primary_type": "contextual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "The force Fmax applied to the traction line",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [
+        "patent_US9399518_energy_absorber_crashworthy_seat_bdef6e4f"
+      ],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "contextual"
+  },
+  {
+    "id": "AERO_FP_0007",
+    "question": "Which annex of ETSO-C127c lists the 19g emergency landing condition?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "ETSO-C127c does not contain a 19g condition; the 25.562 emergency-landing dynamic conditions are 16g horizontal and 14g vertical.",
+      "exact_identifiers": [
+        "ETSO-C127c",
+        "19g",
+        "16g",
+        "14g"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "false_premise"
+  },
+  {
+    "id": "AERO_FP_0013",
+    "question": "Which FAA rule mandates a 5th-percentile female ATD for every 25.562 dynamic test?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "The 25.562 dynamic tests use a 50th-percentile anthropomorphic test dummy (Hybrid II/equivalent); a 5th-percentile female ATD is not mandated for every test.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "false_premise"
+  },
+  {
+    "id": "AERO_FP_0015",
+    "question": "What is the maximum 0.5-second HIC window allowed by AC 20-146A?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "HIC is computed over a 36-millisecond window (HIC36), not a 0.5-second window; AC 20-146A does not redefine the HIC window.",
+      "exact_identifiers": [
+        "AC 20-146A",
+        "HIC",
+        "HIC36"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "false_premise"
+  },
+  {
+    "id": "AERO_FP_0003",
+    "question": "What is the 30g horizontal test pulse required by 14 CFR 25.562?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "14 CFR 25.562 does not require a 30g horizontal pulse: the horizontal dynamic test uses a minimum 16g peak deceleration.",
+      "exact_identifiers": [
+        "14 CFR 25.562",
+        "30g",
+        "16g"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "false_premise"
+  },
+  {
+    "id": "AERO_FP_0001",
+    "question": "Which paragraph of AC 25.562-1C defines the 25g vertical sled test?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "There is no AC 25.562-1C: the current revision is AC 25.562-1B. The 25.562 dynamic tests are 16g (horizontal) and 14g (vertical), not a 25g vertical test.",
+      "exact_identifiers": [
+        "AC 25.562-1C",
+        "AC 25.562-1B",
+        "25g",
+        "16g",
+        "14g"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "false_premise"
+  },
+  {
+    "id": "AERO_UN_0006",
+    "question": "Which test laboratory performed the validation campaign behind AC 20-146A?",
+    "primary_type": "unanswerable",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "The identity of specific test laboratories is not recorded in the regulatory corpus.",
+      "exact_identifiers": [
+        "AC 20-146A"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "unanswerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "unanswerable"
+  },
+  {
+    "id": "AERO_UN_0001",
+    "question": "What is the unit purchase price of a Safran Z600 business-class seat for Emirates?",
+    "primary_type": "unanswerable",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Commercial pricing of seat units is not contained in the regulatory corpus.",
+      "exact_identifiers": [],
+      "supporting_doc_ids": [],
+      "answerability": "unanswerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "unanswerable"
+  },
+  {
+    "id": "AERO_UN_0005",
+    "question": "What is the production lead time for an ETSO-C127c certified seat?",
+    "primary_type": "unanswerable",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Manufacturing lead times are commercial data absent from the regulatory corpus.",
+      "exact_identifiers": [
+        "ETSO-C127c"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "unanswerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded",
+    "category": "unanswerable"
+  }
+]
