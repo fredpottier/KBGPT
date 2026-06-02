@@ -155,6 +155,21 @@ class RobustnessReport:
 
 
 @dataclass
+class A38Report:
+    """Gold-set (bench a38 runtime_v6) — remplace les rapports V3 RAGAS/T2T5/Robustesse."""
+    exact_id_recall: float = 0.0       # déterministe — précision des références
+    abstention_correct: float = 0.0    # déterministe — honnêteté répondre/abstenir
+    c1_mean: float = 0.0               # juge LLM (bruité, indicatif)
+    n_total: int = 0
+    n_with_ids: int = 0
+    latency_p50: float = 0.0
+    latency_p95: float = 0.0
+    arm: str = "osmosis"
+    timestamp: str = ""
+    diagnostic: str = ""
+
+
+@dataclass
 class SmartEvent:
     timestamp: str
     severity: str  # info|warning|critical
@@ -172,9 +187,10 @@ class CockpitState:
     knowledge: KnowledgeStatus = field(default_factory=KnowledgeStatus)
     llm_session: LLMSessionStatus = field(default_factory=LLMSessionStatus)
     llm_balances: LLMBalanceStatus = field(default_factory=LLMBalanceStatus)
-    ragas: Optional[RagasReport] = None
-    t2t5: Optional[T2T5Report] = None
-    robustness: Optional[RobustnessReport] = None
+    a38: Optional[A38Report] = None          # gold-set (bench décisionnel actuel)
+    ragas: Optional[RagasReport] = None      # V3 legacy (conservé, non affiché)
+    t2t5: Optional[T2T5Report] = None        # V3 legacy
+    robustness: Optional[RobustnessReport] = None  # V3 legacy
     events: list[SmartEvent] = field(default_factory=list)
 
     def to_json(self) -> str:

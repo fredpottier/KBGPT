@@ -28,6 +28,7 @@ from cockpit.collectors.llm_budget_collector import LLMBudgetCollector
 from cockpit.collectors.ragas_collector import RagasCollector
 from cockpit.collectors.robustness_collector import RobustnessCollector
 from cockpit.collectors.t2t5_collector import T2T5Collector
+from cockpit.collectors.a38_collector import A38Collector
 from cockpit.engine.eta import ETAEngine
 from cockpit.engine.events import SmartEventEngine
 
@@ -51,6 +52,7 @@ class Aggregator:
         self.burst_collector = BurstCollector()
         self.knowledge_collector = KnowledgeCollector()
         self.llm_collector = LLMBudgetCollector()
+        self.a38_collector = A38Collector()
         self.ragas_collector = RagasCollector()
         self.t2t5_collector = T2T5Collector()
         self.robustness_collector = RobustnessCollector()
@@ -144,9 +146,10 @@ class Aggregator:
             except Exception as e:
                 logger.warning(f"[COCKPIT:AGG] LLM collect failed: {e}")
 
-        # RAGAS + T2/T5 — lecture fichier, très léger
+        # Qualité — gold-set (a38) affiché ; V3 (RAGAS/T2T5/Robustesse) conservé en arrière-plan
         if now - self._last_ragas_ts >= RAGAS_COLLECT_INTERVAL:
             try:
+                self._state.a38 = self.a38_collector.collect()
                 self._state.ragas = self.ragas_collector.collect()
                 self._state.t2t5 = self.t2t5_collector.collect()
                 self._state.robustness = self.robustness_collector.collect()

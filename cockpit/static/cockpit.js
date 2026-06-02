@@ -134,7 +134,7 @@
         renderPipelines(s.pipelines || []);
         renderContainers(s.container_groups);
         renderKnowledge(s.knowledge);
-        renderQuality(s.ragas, s.t2t5, s.robustness);
+        renderQuality(s.a38);
         renderEvents(s.events);
     }
 
@@ -755,80 +755,36 @@
         return metrics.reduce((a, b) => a + b, 0) / metrics.length;
     }
 
-    function renderQuality(ragas, t2t5, robustness) {
-        const ragasEl = document.getElementById('ragas-section');
-        const t2t5El = document.getElementById('t2t5-section');
-        const robEl = document.getElementById('robustness-section');
-        if (!ragasEl || !t2t5El) return;
-
-        // ── RAGAS section ──
+    // ── W5: Qualité Osmosis — gold-set (bench a38). Remplace l'affichage V3. ──
+    function renderQuality(a38) {
+        const el = document.getElementById('a38-section');
+        if (!el) return;
         try {
-            if (!ragas || (ragas.sample_count === 0 && ragas.faithfulness === 0)) {
-                ragasEl.innerHTML = '<div style="color:var(--text-tertiary);font-size:15px;padding:8px 0;">Pas de rapport RAGAS</div>';
-            } else {
-                let rHtml = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                    <span style="font-family:var(--font-sans);font-size:16px;font-weight:600;color:var(--text-primary);">RAGAS</span>
-                    <span style="font-family:var(--font-mono);font-size:14px;color:var(--text-tertiary);">${ragas.sample_count}q</span>
-                </div>`;
-                if (ragas.faithfulness != null) rHtml += qualityBar('Faithfulness', ragas.faithfulness);
-                if (ragas.context_relevance != null) rHtml += qualityBar('Ctx Relevance', ragas.context_relevance);
-
-                if (ragas.timestamp) {
-                    const ts = ragas.timestamp.replace('T', ' ').split('.')[0];
-                    rHtml += `<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-tertiary);text-align:right;margin-top:4px;">${escapeHtml(ts)}</div>`;
-                }
-                ragasEl.innerHTML = rHtml;
+            if (!a38 || (!a38.n_total && !a38.exact_id_recall)) {
+                el.innerHTML = '<div style="color:var(--text-tertiary);font-size:15px;padding:8px 0;">Pas de run gold-set</div>';
+                return;
             }
-        } catch (err) {
-            ragasEl.innerHTML = `<div style="color:red;font-size:11px;">RAGAS error: ${err.message}</div>`;
-        }
-
-        // ── T2/T5 + Robustesse : 2 jauges SVG cote a cote dans t2t5-section ──
-        // (robustness-section est laisse vide, tout est rendu dans t2t5-section)
-        try {
-            const hasT2 = t2t5 && t2t5.total_evaluated > 0;
-            const hasRob = robustness && robustness.total_evaluated > 0;
-
-            if (!hasT2 && !hasRob) {
-                t2t5El.innerHTML = '<div style="color:var(--text-tertiary);font-size:15px;padding:8px 0;">Pas de rapport T2/T5 ni Robustesse</div>';
-            } else {
-                let html = `<div style="border-top:1px solid var(--border-dim);padding-top:12px;margin-top:10px;">
-                    <div style="display:flex;gap:8px;justify-content:space-around;align-items:flex-start;">`;
-
-                if (hasT2) {
-                    const globalT2 = t2t5GlobalScore(t2t5);
-                    html += qualityGauge('T2/T5', globalT2 != null ? globalT2 : 0, `${t2t5.total_evaluated}q`, 92);
-                } else {
-                    html += '<div style="flex:1;text-align:center;color:var(--text-tertiary);font-size:12px;padding:30px 0;">Pas de T2/T5</div>';
-                }
-
-                if (hasRob) {
-                    html += qualityGauge('Robustesse', robustness.global_score, `${robustness.total_evaluated}q`, 92);
-                } else {
-                    html += '<div style="flex:1;text-align:center;color:var(--text-tertiary);font-size:12px;padding:30px 0;">Pas de Robustesse</div>';
-                }
-
-                html += '</div>';
-
-                // Timestamps en petit, sur une ligne
-                const t2ts = hasT2 && t2t5.timestamp ? t2t5.timestamp.replace('T', ' ').split('.')[0] : '';
-                const robts = hasRob && robustness.timestamp ? robustness.timestamp.replace('T', ' ').split('.')[0] : '';
-                if (t2ts || robts) {
-                    html += `<div style="display:flex;justify-content:space-around;font-family:var(--font-mono);font-size:10px;color:var(--text-tertiary);margin-top:4px;">
-                        <span>${escapeHtml(t2ts)}</span>
-                        <span>${escapeHtml(robts)}</span>
-                    </div>`;
-                }
-
-                html += '</div>';
-                t2t5El.innerHTML = html;
+            let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <span style="font-family:var(--font-sans);font-size:16px;font-weight:600;color:var(--text-primary);">Gold-set</span>
+                <span style="font-family:var(--font-mono);font-size:14px;color:var(--text-tertiary);">${a38.n_total}q</span>
+            </div>`;
+            // 3 jauges : 2 déterministes (précision réf, honnêteté) + qualité jugée (indicatif)
+            h += `<div style="display:flex;gap:6px;justify-content:space-around;align-items:flex-start;">`;
+            h += qualityGauge('Précision réf.', a38.exact_id_recall, a38.n_with_ids ? `${a38.n_with_ids}q` : '', 84);
+            h += qualityGauge('Honnêteté', a38.abstention_correct, '', 84);
+            h += qualityGauge('Qualité IA', a38.c1_mean, 'juge', 84);
+            h += '</div>';
+            if (a38.latency_p50) {
+                h += `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);text-align:center;margin-top:6px;">latence p50 ${a38.latency_p50}s · p95 ${a38.latency_p95}s</div>`;
             }
+            if (a38.timestamp) {
+                const ts = String(a38.timestamp).replace('T', ' ').split('.')[0];
+                h += `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);text-align:center;margin-top:2px;">${escapeHtml(ts)}</div>`;
+            }
+            el.innerHTML = h;
         } catch (err) {
-            t2t5El.innerHTML = `<div style="color:red;font-size:11px;">Gauges error: ${err.message}</div>`;
+            el.innerHTML = `<div style="color:red;font-size:11px;">Gold-set error: ${err.message}</div>`;
         }
-
-        // robustness-section : vide maintenant (tout est dans t2t5-section)
-        if (robEl) robEl.innerHTML = '';
     }
 
     // ── W6: Events ────────────────────────────────────────────────
