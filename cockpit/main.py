@@ -137,21 +137,41 @@ async def cockpit_ws(websocket: WebSocket):
 
 # ── Static files & UI ─────────────────────────────────────────────────
 
+
+class NoCacheStaticFiles(StaticFiles):
+    """StaticFiles qui désactive le cache navigateur.
+
+    Le cockpit est un dashboard de dev : on veut TOUJOURS la dernière version des
+    assets (cockpit.js, css). Sans ça, Chrome sert un cockpit.js périmé après une
+    modif (piège vécu : widget « Qualité OSMOSIS » figé sur l'ancienne version).
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
+
 @app.get("/cockpit")
 async def cockpit_ui():
-    """Sert la page cockpit."""
+    """Sert la page cockpit (sans cache, pour les mêmes raisons que le static)."""
     index = STATIC_DIR / "index.html"
     if index.exists():
-        return FileResponse(index)
+        return FileResponse(
+            index,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
     return JSONResponse(
         content={"error": "UI not built yet — use /cockpit/state or /cockpit/ws"},
         status_code=404,
     )
 
 
-# Mount static files (CSS, JS, SVG)
+# Mount static files (CSS, JS, SVG) — sans cache (cf NoCacheStaticFiles)
 if STATIC_DIR.exists():
-    app.mount("/cockpit/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.mount("/cockpit/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # ── Entrypoint ────────────────────────────────────────────────────────
