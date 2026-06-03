@@ -28,15 +28,23 @@ DOC_IDS = [
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tenant", default="default",
+                    help="Tenant cible (ex. staged_val pour une validation isolée — NE PAS polluer default)")
+    ap.add_argument("doc_ids", nargs="*", help='doc_ids à traiter, ou "ALL" pour tout le cache')
+    args = ap.parse_args()
+
     staged = os.getenv("CLAIMFIRST_STAGED_PIPELINE", "0") == "1"
     grounding = os.getenv("CLAIMFIRST_GROUNDING_GATE", "1") == "1"
+    tenant_id = args.tenant
     # doc_ids : "ALL" → tout le cache (corpus complet) ; sinon argv ; sinon défaut (3 docs)
-    if len(sys.argv) == 2 and sys.argv[1].upper() == "ALL":
+    if len(args.doc_ids) == 1 and args.doc_ids[0].upper() == "ALL":
         from knowbase.claimfirst.worker_job import _build_cache_map
         doc_ids = sorted(_build_cache_map("/data/extraction_cache").keys())
     else:
-        doc_ids = sys.argv[1:] if len(sys.argv) > 1 else DOC_IDS
-    print(f"[REINGEST] staged={staged} grounding={grounding} docs={len(doc_ids)}")
+        doc_ids = args.doc_ids if args.doc_ids else DOC_IDS
+    print(f"[REINGEST] staged={staged} grounding={grounding} tenant={tenant_id} docs={len(doc_ids)}")
     for d in doc_ids:
         print(f"  - {d}")
 
@@ -59,7 +67,7 @@ def main():
 
     t0 = time.time()
     res = claimfirst_process_job(
-        doc_ids=doc_ids, tenant_id="default", cache_dir="/data/extraction_cache"
+        doc_ids=doc_ids, tenant_id=tenant_id, cache_dir="/data/extraction_cache"
     )
     dt = time.time() - t0
     print(f"\n[REINGEST] terminé en {dt:.0f}s")

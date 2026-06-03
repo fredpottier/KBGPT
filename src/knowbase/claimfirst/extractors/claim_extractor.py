@@ -395,9 +395,13 @@ class ClaimExtractor:
         )
 
         # P1.4b — pipeline d'extraction multi-étapes (Sélection -> Décomposition).
-        # Opt-in (défaut OFF via env), pour ne pas altérer le chemin legacy.
+        # DÉFAUT = ON depuis le 03/06/2026 : validation A/B sur 3 docs aéro réussie
+        # (volume ×1.21 vs legacy — anti-sur-extraction —, identifiants 46=46,
+        # qualifiers ×2.7, atomicité égale). Opt-out via CLAIMFIRST_STAGED_PIPELINE=0
+        # (le chemin legacy reste disponible en repli ; retrait prévu après la
+        # ré-ingestion complète validée).
         if use_staged_pipeline is None:
-            use_staged_pipeline = os.getenv("CLAIMFIRST_STAGED_PIPELINE", "0") == "1"
+            use_staged_pipeline = os.getenv("CLAIMFIRST_STAGED_PIPELINE", "1") == "1"
         self.use_staged_pipeline = bool(use_staged_pipeline)
 
         # Indexer pour segmentation. En staged : segmentation plus GROSSIÈRE (1 claim ≈ 1
