@@ -200,6 +200,13 @@ STEPS = [
         requires_llm=True,
     ),
     StepInfo(
+        id="explicit_lineage",
+        name="Lignée explicite (SUPERSEDES)",
+        description="Récolte la lignée de document énoncée explicitement dans les claims (« This AC cancels AC 21-25A »…) et matérialise SUPERSEDES_DOC au niveau document + DECLARES_SUPERSESSION (claim-preuve). Déterministe, sans LLM.",
+        order=12,
+        estimated_duration="< 10s",
+    ),
+    StepInfo(
         id="build_perspectives",
         name="Construction Perspectives V2",
         description="Reconstruit les Perspectives thématiques (HDBSCAN sur embeddings claims, labellisation LLM, linking sujets). Skippé si moins de 50 nouveaux claims depuis le dernier build.",
@@ -581,6 +588,8 @@ def _execute_step(step_id: str, tenant_id: str, on_progress=None) -> dict:
         return _run_c4_relations(tenant_id, progress)
     elif step_id == "c6_pivots":
         return _run_c6_pivots(tenant_id, progress)
+    elif step_id == "explicit_lineage":
+        return _run_explicit_lineage(tenant_id, progress)
     elif step_id == "build_perspectives":
         return _run_build_perspectives(tenant_id, progress)
     else:
@@ -1632,6 +1641,33 @@ def _persist_scanned_markers(
             r = session.run(query, batch=payload, tid=tenant_id).single()
             persisted += r["n"] if r else 0
     return persisted
+
+
+def _run_explicit_lineage(tenant_id: str, progress=None) -> dict:
+    """Récolte la lignée de document explicite (SUPERSEDES_DOC) depuis les claims.
+
+    Déterministe, sans LLM. Voir
+    src/knowbase/relations/explicit_lineage_detector.py.
+    """
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    from knowbase.relations.explicit_lineage_detector import ExplicitLineageDetector
+
+    _p = progress or (lambda pct, detail="": None)
+    driver = get_neo4j_client().driver
+
+    _p(10, "Scan des claims de supersession de document...")
+    det = ExplicitLineageDetector(driver, tenant_id=tenant_id)
+    edges, rejects = det.scan()
+
+    _p(60, f"{len(edges)} lignées détectées, matérialisation...")
+    res = det.apply(edges)
+
+    _p(100, f"{res['edges_written']} relations SUPERSEDES_DOC écrites")
+    return {
+        "edges_written": res["edges_written"],
+        "chains_detected": len(edges),
+        "candidates_rejected": len(rejects),
+    }
 
 
 def _run_c4_relations(tenant_id: str, progress=None) -> dict:
