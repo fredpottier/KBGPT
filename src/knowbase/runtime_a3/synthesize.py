@@ -730,6 +730,19 @@ class Synthesizer:
                     "synthesize: LLM attempt %d/%d failed: %s",
                     attempt + 1, self._max_retries, exc,
                 )
+            except Exception as exc:  # noqa: BLE001
+                # Erreur TRANSITOIRE (timeout réseau, 5xx provider, connexion) — la
+                # plus fréquente sur les gros prompts comparison/2-côtés. Avant ce fix,
+                # elle n'était PAS rattrapée par la boucle → repli template immédiat
+                # (≈25% des questions comparison du bench). On retente avec backoff.
+                last_error = exc
+                logger.warning(
+                    "synthesize: LLM attempt %d/%d transient error: %s",
+                    attempt + 1, self._max_retries, exc,
+                )
+                if attempt < self._max_retries - 1:
+                    import time as _time
+                    _time.sleep(2.0 * (attempt + 1))  # 2s, 4s
         logger.warning(
             "synthesize: all %d LLM attempts failed (last=%s)",
             self._max_retries, last_error,
@@ -968,6 +981,53 @@ class Synthesizer:
             schema_version="a3.0",
         )
 
+    def _build_authority_conflict_fallback(
+        self,
+        inp: SynthesizeInput,
+        claims: List[ClaimSummary],
+        authority_conflicts: List[Dict[str, Any]],
+    ) -> SynthesizeOutput:
+        """Repli déterministe 2-côtés pour les questions comparison inter-autorités.
+
+        Rend « <autorité A> (<doc A>) : <texte A> / <autorité B> (<doc B>) : <texte B> »
+        et cite les claims des deux documents (matchés par source_doc_id). Garantit
+        une réponse comparative attribuée même quand le LLM de synthèse échoue.
+        """
+        _wlbl = _i18n(_I18N_CONFLICT, inp.parse_output)
+        lines = [f"⚠ {_wlbl} :"]
+        docs_cited: set = set()
+        for ac in authority_conflicts[:4]:
+            a_lab = ac.get("authority_a") or ac.get("doc_a") or "?"
+            b_lab = ac.get("authority_b") or ac.get("doc_b") or "?"
+            lines.append(f"- {a_lab} ({ac.get('doc_a')}) : {ac.get('text_a')}")
+            lines.append(f"- {b_lab} ({ac.get('doc_b')}) : {ac.get('text_b')}")
+            docs_cited.add(ac.get("doc_a"))
+            docs_cited.add(ac.get("doc_b"))
+
+        # Citations : les claims des documents impliqués (preuve verbatim)
+        cited: List[CitedClaim] = []
+        for c in claims:
+            if getattr(c, "source_doc_id", None) in docs_cited:
+                verbatim = c.value or c.value_normalized or f"(claim {c.claim_id})"
+                cited.append(CitedClaim(
+                    claim_id=c.claim_id,
+                    claim_verbatim=str(verbatim),
+                    doc_title=None,
+                    section_id=None,
+                ))
+                if len(cited) >= 12:
+                    break
+
+        return SynthesizeOutput(
+            answer_text="\n".join(lines),
+            cited_claims=cited,
+            conflict_pending_warning=None,
+            mode="REASONED",
+            synthesize_warnings=["template_fallback_authority_conflict"],
+            citation_coverage_rate=1.0,
+            schema_version="a3.0",
+        )
+
     def _build_template_fallback(
         self,
         inp: SynthesizeInput,
@@ -980,6 +1040,14 @@ class Synthesizer:
         mode = _select_mode_from_verdict(inp.evaluate_output, n_claims=len(claims))
         if mode == "ABSTENTION":
             return self._build_abstention(inp)
+
+        # Repli COMPARISON-aware : si des contradictions inter-autorités existent
+        # (FAA vs EASA…), produire une réponse 2-côtés ATTRIBUÉE plutôt qu'une liste
+        # de claims bruts. Couvre exactement les questions comparison qui échouaient
+        # le plus (timeout synthèse sur gros prompt 2-côtés).
+        authority_conflicts = _aggregate_authority_conflicts(inp.execute_output)
+        if authority_conflicts:
+            return self._build_authority_conflict_fallback(inp, claims, authority_conflicts)
 
         cited: List[CitedClaim] = []
         lines: List[str] = []

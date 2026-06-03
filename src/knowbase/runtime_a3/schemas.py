@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ============================================================================
@@ -95,6 +95,22 @@ class SubGoal(BaseModel):
         le=2,
         description="1 = essentiel (sub_goal central), 2 = enrichissement (sub_goal secondaire).",
     )
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def _clamp_priority(cls, v):
+        """Clamp la priorité dans [1, 2].
+
+        Les LLM de Parse émettent parfois `priority=-1` (ou hors borne) ; sans ce
+        clamp, la validation Pydantic rejetait TOUT le Parse → repli déterministe
+        sans sujet → abstention sur questions répondables (vu sur comparison/multi_hop
+        au bench 150q). On normalise au lieu de jeter un Parse par ailleurs correct.
+        """
+        try:
+            iv = int(v)
+        except (TypeError, ValueError):
+            return 1
+        return max(1, min(2, iv))
 
 
 class ParseInput(BaseModel):
