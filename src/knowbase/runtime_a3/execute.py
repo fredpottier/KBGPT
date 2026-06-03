@@ -20,9 +20,11 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from knowbase.runtime_a3.schemas import (
+    AuthorityConflictSummary,
     ClaimSummary,
     ConflictPendingSummary,
     CoverageSignal,
+    DocLineageSummary,
     ExecuteOutput,
     ParseInput,
     ParseOutput,
@@ -173,6 +175,30 @@ OPTIONAL MATCH (a)-[:EVIDENCED_BY]->(sa:Section)
 OPTIONAL MATCH (b)-[:EVIDENCED_BY]->(sb:Section)
 RETURN a, b, r, collect(DISTINCT sa) AS sections_a, collect(DISTINCT sb) AS sections_b
 LIMIT 20
+"""
+
+# Side-effect lignée de DOCUMENT (#443) — chaîne SUPERSEDES_DOC des docs retrouvés
+CYPHER_DOC_LINEAGE = """
+UNWIND $doc_ids AS did
+MATCH (d:Document {tenant_id: $tenant_id, doc_id: did})
+WHERE (d)-[:SUPERSEDES_DOC]-()
+OPTIONAL MATCH (head:Document)-[:SUPERSEDES_DOC*0..]->(d)
+  WHERE NOT ( (:Document)-[:SUPERSEDES_DOC]->(head) )
+WITH did, d, collect(DISTINCT head.reg_key) AS heads
+OPTIONAL MATCH (d)-[:SUPERSEDES_DOC*1..]->(old:Document)
+WITH did, d, heads, collect(DISTINCT old.reg_key) AS superseded
+OPTIONAL MATCH (d)-[:SUPERSEDES_DOC]->(direct:Document)<-[:DECLARES_SUPERSESSION]-(cl:Claim)
+RETURN did AS doc_id, d.reg_key AS reg_key, heads, superseded,
+       collect(DISTINCT cl.text)[..3] AS evidence
+"""
+
+# Side-effect contradictions inter-autorités (#440) — CONTRADICTS adjacents aux claims retrouvés
+CYPHER_CLAIM_CONTRADICTIONS = """
+UNWIND $claim_ids AS cid
+MATCH (a:Claim {tenant_id: $tenant_id, claim_id: cid})-[r:CONTRADICTS]-(b:Claim {tenant_id: $tenant_id})
+WHERE a.invalidated_at IS NULL AND b.invalidated_at IS NULL
+RETURN a.claim_id AS a_id, a.doc_id AS a_doc, a.subject_canonical AS subj, a.text AS a_text,
+       b.claim_id AS b_id, b.doc_id AS b_doc, b.text AS b_text, r.confidence AS conf
 """
 
 # §4.5 conflict_pending_surface — transversal
@@ -574,6 +600,14 @@ class Executor:
         # pour les claims retrouvés membres d'une :Procedure (toggle, off défaut).
         if os.getenv("V6_PROCEDURE_CHAIN", "0") == "1":
             self._attach_procedure_chains(results, parse_input.tenant_id)
+
+        # 4) Side-effect lignée de document (#443) : chaîne SUPERSEDES_DOC en vigueur.
+        if os.getenv("V6_LINEAGE_SURFACE", "1") == "1":
+            self._attach_lineage(results, parse_input.tenant_id)
+
+        # 5) Side-effect contradictions inter-autorités (#440) : FAA vs EASA, etc.
+        if os.getenv("V6_AUTHORITY_CONFLICT", "1") == "1":
+            self._attach_authority_conflicts(results, parse_input.tenant_id)
 
         return ExecuteOutput(
             results=results,
@@ -1169,6 +1203,111 @@ class Executor:
                 if pid and pid not in seen_pids:
                     seen_pids.add(pid)
                     r.procedure_chains.append(chains[pid])
+
+    # ------------------------------------------------------------------
+    # Lignée de document side-effect (#443)
+    # ------------------------------------------------------------------
+
+    def _attach_lineage(self, results: List[ToolResult], tenant_id: str) -> None:
+        """Attache la chaîne SUPERSEDES_DOC (version en vigueur + superséd és +
+        preuve) pour les documents des claims retrouvés qui participent à une lignée.
+        """
+        doc_ids = {
+            c.source_doc_id
+            for r in results
+            for c in r.claims
+            if getattr(c, "source_doc_id", None)
+        }
+        if not doc_ids:
+            return
+        try:
+            rows = self._get_neo4j().execute_query(
+                CYPHER_DOC_LINEAGE, tenant_id=tenant_id, doc_ids=list(doc_ids)
+            )
+        except Exception:
+            logger.exception("execute: doc lineage lookup failed (non-fatal)")
+            return
+
+        lineages: Dict[str, DocLineageSummary] = {}
+        for row in rows:
+            did = row.get("doc_id")
+            if not did:
+                continue
+            reg_key = row.get("reg_key")
+            heads = [h for h in (row.get("heads") or []) if h]
+            in_force = heads[0] if heads else reg_key
+            lineages[did] = DocLineageSummary(
+                doc_id=did,
+                reg_key=reg_key,
+                in_force_reg_key=in_force,
+                is_in_force=(in_force == reg_key),
+                superseded=[s for s in (row.get("superseded") or []) if s],
+                evidence=[t for t in (row.get("evidence") or []) if t][:3],
+            )
+        if not lineages:
+            return
+        for r in results:
+            seen: set = set()
+            for c in r.claims:
+                did = getattr(c, "source_doc_id", None)
+                if did and did in lineages and did not in seen:
+                    seen.add(did)
+                    r.doc_lineages.append(lineages[did])
+
+    # ------------------------------------------------------------------
+    # Contradictions inter-autorités side-effect (#440)
+    # ------------------------------------------------------------------
+
+    def _attach_authority_conflicts(self, results: List[ToolResult], tenant_id: str) -> None:
+        """Attache les contradictions CONTRADICTS où les deux claims proviennent
+        de documents d'AUTORITÉS différentes (ex. FAA vs EASA), avec attribution.
+        """
+        from knowbase.relations.explicit_lineage_detector import regulatory_authority
+
+        claim_ids = {c.claim_id for r in results for c in r.claims if c.claim_id}
+        if not claim_ids:
+            return
+        try:
+            rows = self._get_neo4j().execute_query(
+                CYPHER_CLAIM_CONTRADICTIONS, tenant_id=tenant_id, claim_ids=list(claim_ids)
+            )
+        except Exception:
+            logger.exception("execute: authority conflict lookup failed (non-fatal)")
+            return
+
+        by_claim: Dict[str, List[AuthorityConflictSummary]] = {}
+        seen_pairs: set = set()
+        for row in rows:
+            aut_a = regulatory_authority(row.get("a_doc"))
+            aut_b = regulatory_authority(row.get("b_doc"))
+            if not (aut_a and aut_b and aut_a != aut_b):
+                continue  # on n'expose QUE les contradictions inter-autorités
+            pair_key = tuple(sorted([row.get("a_id") or "", row.get("b_id") or ""]))
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
+            summ = AuthorityConflictSummary(
+                subject=row.get("subj"),
+                authority_a=aut_a,
+                doc_a=row.get("a_doc"),
+                text_a=(row.get("a_text") or "")[:300],
+                authority_b=aut_b,
+                doc_b=row.get("b_doc"),
+                text_b=(row.get("b_text") or "")[:300],
+                confidence=row.get("conf"),
+            )
+            by_claim.setdefault(row.get("a_id"), []).append(summ)
+        if not by_claim:
+            return
+        for r in results:
+            seen: set = set()
+            for c in r.claims:
+                for summ in by_claim.get(c.claim_id, []):
+                    k = (summ.doc_a, summ.doc_b, summ.text_a[:40])
+                    if k in seen:
+                        continue
+                    seen.add(k)
+                    r.authority_conflicts.append(summ)
 
     # ------------------------------------------------------------------
     # Parsing utilities

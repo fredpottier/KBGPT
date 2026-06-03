@@ -153,6 +153,18 @@ RULES (NON-NEGOTIABLE):
   answer. The cited claims remain the evidence; the chain provides ordering and
   completeness. Still cite the underlying claims; do not invent steps absent
   from the chain.
+- If `doc_lineages` are present (document version chains): when the question asks
+  which version/edition is current or in force, or what a document replaced or
+  superseded, answer from the chain — name the in-force document (`in_force`) and,
+  in order, the documents it superseded (`supersedes`). Use the `evidence` verbatim
+  as the proof of supersession. Do NOT assert a version that is not in the chain;
+  if `is_in_force` is false, say which document supersedes it.
+- If `authority_conflicts` are present (two regulatory authorities/sources state
+  DIFFERENT requirements on the same point): expose BOTH explicitly with
+  attribution — e.g. "<authority_a> (<doc_a>) states <text_a>, whereas
+  <authority_b> (<doc_b>) states <text_b>" — then state the actual difference.
+  Never present one authority's rule as if it were universal. Surface this in
+  answer_text under "⚠ Divergence between authorities".
 - COMPARISON questions (the question contrasts two or more items, versions,
   editions, options, or documents): structure the answer to present EACH side
   EXPLICITLY and put them side by side (e.g. "Side A: <facts> ; Side B: <facts>"),
@@ -284,6 +296,47 @@ def _aggregate_procedure_chains(execute_output: ExecuteOutput) -> List[Dict[str,
     return out
 
 
+def _aggregate_doc_lineages(execute_output: ExecuteOutput) -> List[Dict[str, Any]]:
+    """Agrège les lignées de document dédupliquées (par doc_id, #443)."""
+    seen: Set[str] = set()
+    out: List[Dict[str, Any]] = []
+    for r in execute_output.results:
+        for dl in getattr(r, "doc_lineages", []) or []:
+            if dl.doc_id in seen:
+                continue
+            seen.add(dl.doc_id)
+            out.append({
+                "document": dl.reg_key or dl.doc_id,
+                "in_force": dl.in_force_reg_key,
+                "is_in_force": dl.is_in_force,
+                "supersedes": dl.superseded,
+                "evidence": dl.evidence,
+            })
+    return out
+
+
+def _aggregate_authority_conflicts(execute_output: ExecuteOutput) -> List[Dict[str, Any]]:
+    """Agrège les contradictions inter-autorités dédupliquées (#440)."""
+    seen: Set[tuple] = set()
+    out: List[Dict[str, Any]] = []
+    for r in execute_output.results:
+        for ac in getattr(r, "authority_conflicts", []) or []:
+            key = (ac.doc_a, ac.doc_b, ac.text_a[:40])
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({
+                "subject": ac.subject,
+                "authority_a": ac.authority_a,
+                "doc_a": ac.doc_a,
+                "text_a": ac.text_a,
+                "authority_b": ac.authority_b,
+                "doc_b": ac.doc_b,
+                "text_b": ac.text_b,
+            })
+    return out
+
+
 def _serialize_input(
     inp: SynthesizeInput,
     override_claims: Optional[List[ClaimSummary]] = None,
@@ -326,6 +379,8 @@ def _serialize_input(
 
     cps = _aggregate_conflict_pending_summaries(inp.execute_output)
     procedure_chains = _aggregate_procedure_chains(inp.execute_output)
+    doc_lineages = _aggregate_doc_lineages(inp.execute_output)
+    authority_conflicts = _aggregate_authority_conflicts(inp.execute_output)
 
     sub_goals_payload = []
     for idx, sg in enumerate(inp.parse_output.sub_goals):
@@ -350,6 +405,8 @@ def _serialize_input(
         "claims": claims_payload,
         "conflict_pendings": cps,
         "procedure_chains": procedure_chains,
+        "doc_lineages": doc_lineages,
+        "authority_conflicts": authority_conflicts,
     }
     return (
         "USER INPUT (JSON):\n"

@@ -328,6 +328,47 @@ class ProcedureChainSummary(BaseModel):
     entry_claim_ids: List[str] = Field(default_factory=list)
 
 
+class DocLineageSummary(BaseModel):
+    """Vue compacte de la lignée de DOCUMENT d'un claim retrouvé (#443 runtime).
+
+    Chargée en side-effect post-retrieval pour tout claim dont le document source
+    participe à une chaîne `:SUPERSEDES_DOC`. Donne à Synthesize la version EN
+    VIGUEUR + la chaîne des documents superséd és + la preuve verbatim, pour
+    répondre « quelle version est en vigueur / qu'a-t-elle remplacé » sans
+    dépendre du retrieval de chaque maillon.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    doc_id: str
+    reg_key: Optional[str] = None
+    in_force_reg_key: Optional[str] = None  # tête de chaîne (document en vigueur)
+    is_in_force: bool = True  # ce document est-il lui-même la tête ?
+    superseded: List[str] = Field(default_factory=list)  # reg_keys superséd és (transitif)
+    evidence: List[str] = Field(default_factory=list)  # verbatims des claims déclarants
+
+
+class AuthorityConflictSummary(BaseModel):
+    """Contradiction entre deux documents de SOURCES/AUTORITÉS différentes (#440).
+
+    Chargée en side-effect : pour un claim retrouvé portant une relation
+    `:CONTRADICTS` vers un claim d'un document d'autorité différente (ex. FAA vs
+    EASA), expose les DEUX positions avec attribution. Domain-agnostic : l'autorité
+    est une étiquette best-effort ; à défaut, l'attribution reste au niveau document.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    subject: Optional[str] = None
+    authority_a: Optional[str] = None
+    doc_a: Optional[str] = None
+    text_a: str = ""
+    authority_b: Optional[str] = None
+    doc_b: Optional[str] = None
+    text_b: str = ""
+    confidence: Optional[float] = None
+
+
 class ToolResult(BaseModel):
     """Résultat d'un ToolCall (cf ADR §2.3)."""
 
@@ -340,6 +381,8 @@ class ToolResult(BaseModel):
     conflict_pendings: List[ConflictPendingSummary] = Field(default_factory=list)
     relations_traced: List[RelationSummary] = Field(default_factory=list)
     procedure_chains: List[ProcedureChainSummary] = Field(default_factory=list)
+    doc_lineages: List[DocLineageSummary] = Field(default_factory=list)
+    authority_conflicts: List[AuthorityConflictSummary] = Field(default_factory=list)
     coverage_signal: CoverageSignal = "empty"
     duration_s: float = Field(default=0.0, ge=0.0)
     error: Optional[str] = None
