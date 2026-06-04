@@ -246,7 +246,20 @@ class SelectionGate:
             # 012/022 : ~39-58% des "gardées" étaient des rescapes de déchet à identifiant.
             has_id = judge_label == "DROP" and has_specific_identifier(txt)
             hard_junk = _is_hard_junk_category(category)
-            guard_override = has_id and not hard_junk
+            # GARDE SUPERSESSION (ADR_RESOLUTION_CONTRADICTIONS §7.I) : une déclaration
+            # de supersession DE DOCUMENT (« This AC cancels AC 21-25A… ») est une classe
+            # LIFECYCLE-CRITIQUE — elle override MÊME le déchet franc (le juge la classe
+            # typiquement en doc_meta, ce qui détruisait la lignée du corpus).
+            supersession = False
+            if judge_label == "DROP":
+                try:
+                    from knowbase.relations.explicit_lineage_detector import (
+                        is_doc_supersession_statement,
+                    )
+                    supersession = is_doc_supersession_statement(txt)
+                except Exception:
+                    supersession = False
+            guard_override = (has_id and not hard_junk) or supersession
             final = "KEEP" if (judge_label == "KEEP" or guard_override) else "DROP"
             v = UnitVerdict(uid, txt, final, judge_label, category, guard_override)
             result.verdicts.append(v)

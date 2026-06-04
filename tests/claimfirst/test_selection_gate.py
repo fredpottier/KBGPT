@@ -154,6 +154,28 @@ def test_guard_still_overrides_on_non_junk_category():
     assert res.guard_suppressed == 0
 
 
+def test_supersession_statement_overrides_even_hard_junk():
+    # Bug réel 04/06 (ADR_RESOLUTION_CONTRADICTIONS §7.I) : « This AC cancels
+    # AC 21-25A… » classée doc_meta (déchet franc) → jetée → lignée du corpus
+    # détruite. La garde supersession doit override MÊME le déchet franc.
+    units = [
+        ("u1", "This AC cancels AC 21-25A, Approval of Modified Seating Systems "
+               "Initially Approved Under a Technical Standard Order, dated 6/3/97."),
+        ("u2", "Advisory Circular 25.562-1 is cancelled."),
+        # Négation → PAS de rescue (pas une déclaration de supersession)
+        ("u3", "This policy memorandum does not supersede AC 25-17."),
+    ]
+    gate = SelectionGate(_llm_with_categories({
+        "u1": ("DROP", "doc_meta"),
+        "u2": ("DROP", "doc_meta"),
+        "u3": ("DROP", "doc_meta"),
+    }))
+    res = gate.classify(units)
+    assert "u1" in res.kept_ids
+    assert "u2" in res.kept_ids
+    assert "u3" not in res.kept_ids
+
+
 def test_guard_suppressed_cross_reference_and_legal():
     units = [
         ("u1", "For more information, see SAP Note 2590653."),  # cross-réf pure

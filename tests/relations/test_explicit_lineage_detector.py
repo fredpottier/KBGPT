@@ -147,3 +147,42 @@ def test_reject_no_verb():
     res = parse_lineage(txt, source_key="AC 21-25B")
     assert isinstance(res, LineageReject)
     assert "verbe" in res.reason
+
+
+def test_reject_negated_supersession():
+    # Bug réel 04/06 : « does not supersede » matchait le verbe → edge fantôme.
+    txt = ("This policy memorandum does not supersede any of the other methods of "
+           "compliance pertaining to AC 25-17.")
+    res = parse_lineage(txt, source_key="AC 25-17A")
+    assert isinstance(res, LineageReject)
+    assert "nié" in res.reason
+
+
+def test_negated_and_affirmative_mix_is_kept():
+    # Une occurrence affirmative suffit, même si une autre est niée.
+    txt = ("This AC does not supersede AC 21-49; however, this AC cancels AC 21-25A, "
+           "dated 6/3/97.")
+    res = parse_lineage(txt, source_key="AC 21-25B")
+    assert isinstance(res, LineageParse)
+    assert res.superseded_key in ("AC 21-25A", "AC 21-49")
+
+
+# --------------------------------------------------------------------------- #
+# is_doc_supersession_statement (garde lifecycle de la selection gate)
+# --------------------------------------------------------------------------- #
+from knowbase.relations.explicit_lineage_detector import is_doc_supersession_statement
+
+
+@pytest.mark.parametrize(
+    "txt,expected",
+    [
+        ("This AC cancels AC 21-25A, Approval of Modified Seating Systems, dated 6/3/97.", True),
+        ("Advisory Circular 25.562-1 is cancelled.", True),
+        ("This policy memorandum does not supersede AC 25-17.", False),  # nié
+        ("This guide is organized into five chapters.", False),  # doc_meta sans verbe
+        ("Items of mass may be replaced by ballast.", False),  # replace ≠ verbe de supersession
+        ("The system supersedes expectations.", False),  # verbe mais aucun identifiant de doc
+    ],
+)
+def test_is_doc_supersession_statement(txt, expected):
+    assert is_doc_supersession_statement(txt) is expected

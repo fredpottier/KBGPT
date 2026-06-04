@@ -151,6 +151,28 @@ _BY_AGENT = re.compile(
 _DATED = re.compile(r"dated\s+([A-Za-z0-9,/ .-]{6,30})", re.IGNORECASE)
 
 
+def is_doc_supersession_statement(text: str) -> bool:
+    """Vrai si `text` ressemble à une déclaration de supersession DE DOCUMENT
+    (verbe non nié + au moins un identifiant de document réglementaire).
+
+    Utilisé par la selection gate du pipeline staged : ces phrases sont une
+    classe LIFECYCLE-CRITIQUE qui ne doit JAMAIS être jetée comme « doc_meta »
+    (cf ADR_RESOLUTION_CONTRADICTIONS §7.I — bug du 04/06 : « This AC cancels
+    AC 21-25A » était droppée → lignée perdue).
+    """
+    if not text:
+        return False
+    verb_matches = list(_VERB.finditer(text))
+    if not verb_matches:
+        return False
+    def _neg(m: re.Match) -> bool:
+        window = text[max(0, m.start() - 24):m.start()]
+        return bool(re.search(r"\b(not|never|no longer|nor)\s+(?:\w+\s+){0,2}$", window, re.IGNORECASE))
+    if all(_neg(m) for m in verb_matches):
+        return False
+    return bool(find_reg_ids(text))
+
+
 @dataclass
 class LineageParse:
     """Résultat du parsing d'un claim de supersession de document."""
@@ -179,8 +201,18 @@ def parse_lineage(text: str, source_key: Optional[str]) -> LineageParse | Lineag
     if not text:
         return LineageReject("texte vide")
 
-    if not _VERB.search(text):
+    verb_matches = list(_VERB.finditer(text))
+    if not verb_matches:
         return LineageReject("aucun verbe de supersession")
+
+    # Garde de NÉGATION (ADR §7.I.2) : « does not supersede », « shall not cancel »…
+    # Si TOUTES les occurrences du verbe sont niées dans leur fenêtre gauche → rejet.
+    def _negated(m: re.Match) -> bool:
+        window = text[max(0, m.start() - 24):m.start()]
+        return bool(re.search(r"\b(not|never|no longer|nor)\s+(?:\w+\s+){0,2}$", window, re.IGNORECASE))
+
+    if all(_negated(m) for m in verb_matches):
+        return LineageReject("verbe de supersession nié (does not supersede…)")
 
     if _INCIDENTAL.search(text):
         return LineageReject("mention incidente (reference/paragraph/table…)")
@@ -367,6 +399,7 @@ class ExplicitLineageDetector:
     MERGE (sup)-[r:SUPERSEDES_DOC]->(old)
       ON CREATE SET r.explicit = true,
                     r.detected_at = datetime(),
+                    r.scope = 'full',
                     r.detection_source = 'explicit_lineage_detector',
                     r.confidence = $confidence,
                     r.pattern = $pattern,
