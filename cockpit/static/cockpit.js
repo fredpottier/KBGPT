@@ -756,6 +756,18 @@
     }
 
     // ── W5: Qualité Osmosis — gold-set (bench a38). Remplace l'affichage V3. ──
+    // Layout PORTRAIT (le widget est plus haut que large) : barres horizontales
+    // empilées pleine largeur (libellés lisibles) + badge diagnostic + métadonnées.
+    // Libellés en langage clair, terme technique en infobulle (title).
+
+    function formatRunTimestamp(ts) {
+        // "20260603_161338" -> "2026-06-03 16:13" ; sinon best-effort ISO.
+        const s = String(ts);
+        const m = s.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})/);
+        if (m) return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+        return s.replace('T', ' ').split('.')[0];
+    }
+
     function renderQuality(a38) {
         const el = document.getElementById('a38-section');
         if (!el) return;
@@ -764,22 +776,29 @@
                 el.innerHTML = '<div style="color:var(--text-tertiary);font-size:15px;padding:8px 0;">Pas de run gold-set</div>';
                 return;
             }
-            let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            // En-tête : titre + volume du run
+            let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                 <span style="font-family:var(--font-sans);font-size:16px;font-weight:600;color:var(--text-primary);">Gold-set</span>
-                <span style="font-family:var(--font-mono);font-size:14px;color:var(--text-tertiary);">${a38.n_total}q</span>
+                <span style="font-family:var(--font-mono);font-size:13px;color:var(--text-tertiary);">${a38.n_total}q</span>
             </div>`;
-            // 3 jauges : 2 déterministes (précision réf, honnêteté) + qualité jugée (indicatif)
-            h += `<div style="display:flex;gap:6px;justify-content:space-around;align-items:flex-start;">`;
-            h += qualityGauge('Précision réf.', a38.exact_id_recall, a38.n_with_ids ? `${a38.n_with_ids}q` : '', 84);
-            h += qualityGauge('Honnêteté', a38.abstention_correct, '', 84);
-            h += qualityGauge('Qualité IA', a38.c1_mean, 'juge', 84);
-            h += '</div>';
-            if (a38.latency_p50) {
-                h += `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);text-align:center;margin-top:6px;">latence p50 ${a38.latency_p50}s · p95 ${a38.latency_p95}s</div>`;
+            // Badge diagnostic (piloté par les métriques déterministes, calculé côté collecteur)
+            if (a38.diagnostic) {
+                const dc = (a38.exact_id_recall >= 0.75 && a38.abstention_correct >= 0.8)
+                    ? 'var(--success)'
+                    : (a38.exact_id_recall >= 0.5 ? 'var(--warning)' : 'var(--error, red)');
+                h += `<div style="display:inline-block;font-family:var(--font-sans);font-size:13px;font-weight:600;color:${dc};border:1px solid ${dc};border-radius:10px;padding:2px 10px;margin-bottom:12px;">${escapeHtml(a38.diagnostic)}</div>`;
             }
-            if (a38.timestamp) {
-                const ts = String(a38.timestamp).replace('T', ' ').split('.')[0];
-                h += `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);text-align:center;margin-top:2px;">${escapeHtml(ts)}</div>`;
+            // Barres horizontales empilées : 2 déterministes + 1 jugée (indicatif)
+            h += `<div title="exact_id_recall — part des identifiants attendus (références, codes, versions) retrouvés exactement dans la réponse. Mesure déterministe.">${qualityBar('Précision des références', a38.exact_id_recall || 0)}</div>`;
+            h += `<div title="abstention_correct_rate — répond quand le corpus le permet, s'abstient sinon. Mesure déterministe.">${qualityBar('Honnêteté (abstention)', a38.abstention_correct || 0)}</div>`;
+            h += `<div title="C1 — score moyen attribué par le juge LLM. Indicatif (bruité).">${qualityBar('Qualité jugée par IA', a38.c1_mean || 0)}</div>`;
+            // Métadonnées du run
+            const meta = [];
+            if (a38.n_with_ids) meta.push(`${a38.n_with_ids}q avec identifiants attendus`);
+            if (a38.latency_p50) meta.push(`latence p50 ${a38.latency_p50}s · p95 ${a38.latency_p95}s`);
+            if (a38.timestamp) meta.push(`run du ${escapeHtml(formatRunTimestamp(a38.timestamp))}`);
+            if (meta.length) {
+                h += `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);margin-top:10px;line-height:1.7;">${meta.join('<br>')}</div>`;
             }
             el.innerHTML = h;
         } catch (err) {
