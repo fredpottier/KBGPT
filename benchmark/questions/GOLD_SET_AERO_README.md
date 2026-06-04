@@ -36,3 +36,20 @@ contextual 10 · false_premise 15 · unanswerable 10
 - multi_hop = 13 (limité par le nb de paires de claims co-document exploitables).
 - Les 2 extraits réglementaires reconstruits par pypdf (CS-25/Part 25 sièges) ont produit
   0 claim (soft-hyphens) → la paire 25.562 *pure* nécessiterait des PDF natifs.
+
+## Révision 2026-06-05 — mise à niveau post-ré-ingestion staged (P1.4-bis)
+
+Le corpus aéro a été intégralement ré-ingéré avec le pipeline d'extraction staged
+(24 docs, ~17k claims, dont 4 nouveaux docs : AC 25-17 (1991), AC 25.785-1A/1B,
+ETSO-C39b). Audit du gold-set contre le nouveau KG (`audit_gold_set_vs_kg.py`) :
+**133/148 OK**, 5 false_premise conservées (identifiants absents par design),
+2 conservées (identifiant = nom de document, présent en métadonnées), 1 faux
+positif d'audit.
+
+**7 questions re-labellisées `answerable → unanswerable`** (champ `revision` sur
+chaque question) : leur phrase source (références croisées : AC 21-46, § 121.583,
+ARP6337, « 1957 », § 21.8, AC 21-34) existait dans l'extraction legacy mais a été
+filtrée par les gates staged. L'abstention devient la réponse correcte — véridique
+dans le corpus actuel, et ces questions testent désormais l'abstention calibrée.
+IDs : AERO_FACT_0028, AERO_FACT_0040, AERO_LIFE_0004, AERO_LIFE_0012,
+AERO_CONT_0001, AERO_CMP_0002, AERO_CMP_0020 (3 d'entre elles aussi dans le 50q).
