@@ -207,6 +207,13 @@ STEPS = [
         estimated_duration="< 10s",
     ),
     StepInfo(
+        id="lineage_resolution",
+        name="Résolution contradictions par lignée",
+        description="ADR_RESOLUTION_CONTRADICTIONS niveaux 1-2 : infère la lignée par convention de version (corroborée par dates), invalide les claims contredits des documents superséd és (CONTRADICTS→SUPERSEDES), et pose le marqueur épistémique 'withdrawn' sur le reste du doc annulé. Déterministe, sans LLM.",
+        order=12,
+        estimated_duration="< 30s",
+    ),
+    StepInfo(
         id="build_perspectives",
         name="Construction Perspectives V2",
         description="Reconstruit les Perspectives thématiques (HDBSCAN sur embeddings claims, labellisation LLM, linking sujets). Skippé si moins de 50 nouveaux claims depuis le dernier build.",
@@ -590,6 +597,8 @@ def _execute_step(step_id: str, tenant_id: str, on_progress=None) -> dict:
         return _run_c6_pivots(tenant_id, progress)
     elif step_id == "explicit_lineage":
         return _run_explicit_lineage(tenant_id, progress)
+    elif step_id == "lineage_resolution":
+        return _run_lineage_resolution(tenant_id, progress)
     elif step_id == "build_perspectives":
         return _run_build_perspectives(tenant_id, progress)
     else:
@@ -1668,6 +1677,23 @@ def _run_explicit_lineage(tenant_id: str, progress=None) -> dict:
         "chains_detected": len(edges),
         "candidates_rejected": len(rejects),
     }
+
+
+def _run_lineage_resolution(tenant_id: str, progress=None) -> dict:
+    """Résolution des contradictions par lignée documentaire (ADR niveaux 1-2).
+
+    Voir src/knowbase/relations/lineage_resolution.py + ADR_RESOLUTION_CONTRADICTIONS.
+    """
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    from knowbase.relations.lineage_resolution import LineageResolver
+
+    _p = progress or (lambda pct, detail="": None)
+    _p(10, "Inférence lignée par convention de version + résolution…")
+    resolver = LineageResolver(get_neo4j_client().driver, tenant_id=tenant_id)
+    report = resolver.run(dry_run=False)
+    _p(100, f"{report.pairs_resolved} paires résolues, "
+            f"{report.container_withdrawn} claims 'withdrawn'")
+    return report.summary()
 
 
 def _run_c4_relations(tenant_id: str, progress=None) -> dict:
