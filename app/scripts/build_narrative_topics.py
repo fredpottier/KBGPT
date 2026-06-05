@@ -280,9 +280,11 @@ def build_atlas_roots(
                 if ratio > 0:
                     specificity = 1.0 / root.affinity if root.affinity > 0 else 0
                     score = ratio * specificity
-                if score > best_score:
-                    best_score = score
-                    best_root = root
+                    # fix 06/06 : comparaison DANS le bloc ratio>0 (sinon
+                    # UnboundLocalError quand le 1er root a ratio==0)
+                    if score > best_score:
+                        best_score = score
+                        best_root = root
 
         if best_root and best_score > 0:
             best_root.topic_ids.append(t.topic_id)
@@ -518,7 +520,9 @@ Return ONLY a JSON object:
                 task_type=TaskType.KNOWLEDGE_EXTRACTION,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=100,
+                # fix 06/06 : 100 tokens tronquait parfois le JSON → regex sans
+                # match → label restait VIDE silencieusement (2 topics sans titre)
+                max_tokens=250,
             )
             import re
             m = re.search(r"\{[\s\S]*\}", raw)
@@ -527,6 +531,10 @@ Return ONLY a JSON object:
                 t.narrative_label = data.get("title", "")
                 t.narrative_summary = data.get("summary", "")
                 logger.info(f"  {t.topic_id}: {t.narrative_label}")
+            if not t.narrative_label:
+                # fix 06/06 : pas de match / titre vide → fallback explicite
+                # (avant : aucun fallback hors exception → topic sans titre)
+                raise ValueError("empty or unparseable label")
         except Exception as e:
             logger.warning(f"  {t.topic_id}: LLM labelling failed: {e}")
             subjects_str = ", ".join(t.subject_names) if t.subject_names else "transversal"
