@@ -143,6 +143,8 @@ def main():
     parser.add_argument("--top-k", type=int, default=12)
     parser.add_argument("--score-threshold", type=float, default=None)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--corpus", default="",
+                        help="Label corpus pour l'attribution (protocole non-régression).")
     args = parser.parse_args()
 
     rag = ClassicRAG(
@@ -189,6 +191,11 @@ def main():
         json.dump({
             "timestamp": timestamp,
             "arm": "classic_rag",
+            # Protocole non-régression multi-corpus : étiquetage corpus + sha
+            # (même convention que bench_a38_runtime_v6 → compare_runs.py).
+            "corpus": getattr(args, "corpus", "") or "aero_staged_150q_rag",
+            "git_sha": __import__("os").getenv("GIT_SHA", "unknown"),
+            "gold_50q_file": str(args.gold_50q),
             "config": {
                 "collection": args.collection,
                 "top_k": args.top_k,
