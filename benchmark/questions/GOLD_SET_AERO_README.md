@@ -53,3 +53,37 @@ filtrée par les gates staged. L'abstention devient la réponse correcte — vé
 dans le corpus actuel, et ces questions testent désormais l'abstention calibrée.
 IDs : AERO_FACT_0028, AERO_FACT_0040, AERO_LIFE_0004, AERO_LIFE_0012,
 AERO_CONT_0001, AERO_CMP_0002, AERO_CMP_0020 (3 d'entre elles aussi dans le 50q).
+
+## Révision 2026-06-05 (bis) — ré-ancrage sur le wording staged (triage des 56q faibles)
+
+Le bench run_20260604_223733 (post-staged) a montré des chutes C1 dont une partie
+venait du **désancrage du gold** (réponses rédigées sur le wording des claims
+legacy). Triage complet des 56 questions answerable à juge ≤ 0.5, chaque cas
+vérifié contre les claims staged (substring sur `Claim.text`) :
+
+**11 re-labellisées `answerable → unanswerable`** (ancre factuelle disparue du
+KG staged) : AERO_FACT_0014, AERO_MH_0007 (AS6316 §3), AERO_FACT_0026
+(memorandum 25.785(c)(2)), AERO_FACT_0042, AERO_MH_0010 (PSAIR100-9/8/2003),
+AERO_LIFE_0001 (heart path analysis), AERO_LIFE_0005 (Appendix J),
+AERO_LIFE_0006, AERO_LIFE_0013 (5e(5) deleted/redesignated), AERO_LIFE_0008
+(paragraph (c) deleted), AERO_LIST_0014 (wear and damage limits).
+
+**8 ré-ancrées/reciblées** (claim staged verbatim vérifié) : AERO_LIFE_0003
+(25.789→25.791), AERO_LIFE_0015 (slip resistant floors §25.793),
+AERO_FACT_0037 (« third standard » → UL 1439 explicite), AERO_FACT_0023 +
+AERO_FACT_0045 (désambiguïsation : question identique avec 2 golds différents),
+AERO_LIST_0006/0008/0015 (le but de l'assessment a été perdu par la
+décomposition staged → gold ré-ancré sur « require an assessment »).
+
+**Conservées telles quelles (vrais échecs système, ancres présentes vérifiées)** :
+AERO_FACT_0006/0019/0024, AERO_LIFE_0017, AERO_MH_0002/0003/0013,
+AERO_CMP_0012/0013/0017, AERO_FP_0002/0008/0012, et tous les juges 0.5
+« réponse plus large que l'ancre ».
+
+**En attente de décision** : AERO_CMP_0003/0007/0011 — paires comparison dont UN
+côté gold a disparu du staged ; question vague → ni relabel ni ré-ancrage propre.
+
+⚠ **Perte de couverture staged documentée** : ~10 ancres factuelles présentes en
+legacy ont été perdues par les gates staged (sélection ou décomposition), dont un
+cas typique de troncature Stage B (claim_1d990a6c8867_a : « require an
+assessment » sans le but de l'assessment). À traiter côté extraction (backlog).

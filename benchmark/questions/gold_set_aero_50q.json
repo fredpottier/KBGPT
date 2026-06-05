@@ -61,7 +61,7 @@
  },
  {
   "id": "AERO_FACT_0023",
-  "question": "What does the document specify regarding HIC?",
+  "question": "According to the HIC computation procedure described in the regulation, what is the HIC value defined as?",
   "primary_type": "factual",
   "secondary_types": [],
   "language": "en",
@@ -77,7 +77,13 @@
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "factual"
+  "category": "factual",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "desambiguisation : question identique a AERO_FACT_0045 ('What does the document specify regarding HIC?') avec un gold different ; scope precise sur l'ancre verifiee 'The maximum value of the set of computations obtained from this procedure is the HIC.'",
+   "previous_question": "What does the document specify regarding HIC?",
+   "previous_answer": "The maximum value of the set of computations obtained from the procedure is the HIC."
+  }
  },
  {
   "id": "AERO_FACT_0011",
@@ -424,11 +430,16 @@
    "supporting_doc_ids": [
     "AC_25-17A_55f08065"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "lifecycle"
+  "category": "lifecycle",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : aucun claim 'moved the test criteria to a new Appendix J'",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_LIFE_0019",
@@ -502,11 +513,16 @@
    "supporting_doc_ids": [
     "AC_25.562-1B_e14eda4f"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "lifecycle"
+  "category": "lifecycle",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : aucun claim 'longitudinal heart path analysis modifies...' (les claims heart path restants ne decrivent pas le processus d'ajustement)",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_LIFE_0012",
@@ -706,11 +722,16 @@
    "supporting_doc_ids": [
     "ETSO-C127c_amd17_d2c85ef0"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "multi_hop"
+  "category": "multi_hop",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : meme ancre AS6316 Section 3 que AERO_FACT_0014",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_MH_0002",

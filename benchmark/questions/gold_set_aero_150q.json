@@ -272,11 +272,16 @@
    "supporting_doc_ids": [
     "ETSO-C127c_amd17_d2c85ef0"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "factual"
+  "category": "factual",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : aucun claim AS6316 'all subsections of Section 3 apply unless otherwise specified'",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_FACT_0015",
@@ -440,7 +445,7 @@
  },
  {
   "id": "AERO_FACT_0023",
-  "question": "What does the document specify regarding HIC?",
+  "question": "According to the HIC computation procedure described in the regulation, what is the HIC value defined as?",
   "primary_type": "factual",
   "secondary_types": [],
   "language": "en",
@@ -456,7 +461,13 @@
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "factual"
+  "category": "factual",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "desambiguisation : question identique a AERO_FACT_0045 ('What does the document specify regarding HIC?') avec un gold different ; scope precise sur l'ancre verifiee 'The maximum value of the set of computations obtained from this procedure is the HIC.'",
+   "previous_question": "What does the document specify regarding HIC?",
+   "previous_answer": "The maximum value of the set of computations obtained from the procedure is the HIC."
+  }
  },
  {
   "id": "AERO_FACT_0024",
@@ -513,11 +524,16 @@
    "supporting_doc_ids": [
     "AC_25-17A_55f08065"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "factual"
+  "category": "factual",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : claim 'memorandum / Sec. 25.785(c)(2) of Amendment 25-32' non extrait (question contenait aussi l'OCR 'Amendment 2532')",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_FACT_0027",
@@ -728,7 +744,7 @@
  },
  {
   "id": "AERO_FACT_0037",
-  "question": "What is the third standard mentioned for testing the sharpness of edges on equipment according to the regulation?",
+  "question": "Which UL standard is mentioned for testing the sharpness of edges on equipment, and what are its edition and revision dates?",
   "primary_type": "factual",
   "secondary_types": [],
   "language": "en",
@@ -745,7 +761,13 @@
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "factual"
+  "category": "factual",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "reformulation : la notion de 'third standard' venait du wording legacy ; le claim staged enumere autrement ('either of the standards listed in NASA-STD-3000...') mais porte UL 1439 verbatim",
+   "previous_question": "What is the third standard mentioned for testing the sharpness of edges on equipment according to the regulation?",
+   "previous_answer": "UL 1439, Standard for Tests for Sharpness of Edges on Equipment, Edition 4, February 26, 1998, with revisions through 6/1/2004."
+  }
  },
  {
   "id": "AERO_FACT_0038",
@@ -847,11 +869,16 @@
    "supporting_doc_ids": [
     "AC_21-25B_b33368fc"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "factual"
+  "category": "factual",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : le memo PSAIR100-9/8/2003 n'apparait dans aucun claim (perte de couverture staged a tracer)",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_FACT_0043",
@@ -895,15 +922,13 @@
  },
  {
   "id": "AERO_FACT_0045",
-  "question": "What does the document specify regarding HIC?",
+  "question": "What is evaluated to generate the baseline certification tests?",
   "primary_type": "factual",
   "secondary_types": [],
   "language": "en",
   "ground_truth": {
-   "answer": "HIC is evaluated to generate the baseline certification tests.",
-   "exact_identifiers": [
-    "HIC"
-   ],
+   "answer": "The primary structural load path, and other components that influence occupant injury criteria, are evaluated to generate the baseline certification tests.",
+   "exact_identifiers": [],
    "supporting_doc_ids": [
     "AC_25.562-1B_e14eda4f"
    ],
@@ -911,7 +936,13 @@
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "factual"
+  "category": "factual",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "desambiguisation (doublon de AERO_FACT_0023) + re-ancrage sur les claims staged verbatim 'The primary structural load path is evaluated to generate the baseline certification tests.' / 'Other components that influence occupant injury criteria...'",
+   "previous_question": "What does the document specify regarding HIC?",
+   "previous_answer": "HIC is evaluated to generate the baseline certification tests."
+  }
  },
  {
   "id": "AERO_LIST_0001",
@@ -1010,7 +1041,7 @@
   "secondary_types": [],
   "language": "en",
   "ground_truth": {
-   "answer": "an assessment to verify the seating system structural integrity and occupant injury performance",
+   "answer": "An assessment is required: any changes to common components such as seatbelts, cushions, IFE system hardware, or seat back tray tables require an assessment.",
    "exact_identifiers": [],
    "supporting_doc_ids": [
     "AC_21-25B_b33368fc"
@@ -1019,7 +1050,13 @@
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "list"
+  "category": "list",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "re-ancrage : le but de l'assessment ('verify structural integrity and occupant injury performance') a ete perdu par la decomposition staged ; le claim restant dit seulement 'require an assessment' (perte de couverture a tracer)",
+   "previous_question": null,
+   "previous_answer": "an assessment to verify the seating system structural integrity and occupant injury performance"
+  }
  },
  {
   "id": "AERO_LIST_0007",
@@ -1046,7 +1083,7 @@
   "secondary_types": [],
   "language": "en",
   "ground_truth": {
-   "answer": "An assessment to verify the seating system structural integrity and occupant injury performance is required.",
+   "answer": "An assessment is required: any changes to common components such as seatbelts, cushions, IFE system hardware, or seat back tray tables require an assessment.",
    "exact_identifiers": [],
    "supporting_doc_ids": [
     "AC_21-25B_b33368fc"
@@ -1055,7 +1092,13 @@
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "list"
+  "category": "list",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "re-ancrage : meme ancre que AERO_LIST_0006 (claim staged 'require an assessment' sans le but de l'assessment)",
+   "previous_question": null,
+   "previous_answer": "An assessment to verify the seating system structural integrity and occupant injury performance is required."
+  }
  },
  {
   "id": "AERO_LIST_0009",
@@ -1161,11 +1204,16 @@
    "supporting_doc_ids": [
     "AC_21-25B_b33368fc"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "list"
+  "category": "list",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : aucun claim 'limits of wear and damage ... warrant replacement'",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_LIST_0015",
@@ -1174,7 +1222,7 @@
   "secondary_types": [],
   "language": "en",
   "ground_truth": {
-   "answer": "an assessment to verify the seating system structural integrity and occupant injury performance",
+   "answer": "An assessment is required: any changes to common components such as seatbelts, cushions, IFE system hardware, or seat back tray tables require an assessment.",
    "exact_identifiers": [],
    "supporting_doc_ids": [
     "AC_21-25B_b33368fc"
@@ -1183,7 +1231,13 @@
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "list"
+  "category": "list",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "re-ancrage : meme ancre que AERO_LIST_0006",
+   "previous_question": null,
+   "previous_answer": "an assessment to verify the seating system structural integrity and occupant injury performance"
+  }
  },
  {
   "id": "AERO_LIFE_0001",
@@ -1197,11 +1251,16 @@
    "supporting_doc_ids": [
     "AC_25.562-1B_e14eda4f"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "lifecycle"
+  "category": "lifecycle",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : aucun claim 'longitudinal heart path analysis modifies...' (les claims heart path restants ne decrivent pas le processus d'ajustement)",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_LIFE_0002",
@@ -1226,12 +1285,12 @@
  },
  {
   "id": "AERO_LIFE_0003",
-  "question": "What is the status of Section 25.789 before Amendment 25-32?",
+  "question": "What is the status of Section 25.791 before Amendment 25-32?",
   "primary_type": "lifecycle",
   "secondary_types": [],
   "language": "en",
   "ground_truth": {
-   "answer": "Section 25.789 did not exist prior to Amendment 25-32.",
+   "answer": "Section 25.791 did not exist prior to Amendment 25-32.",
    "exact_identifiers": [
     "Amendment 25-32"
    ],
@@ -1242,7 +1301,13 @@
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "lifecycle"
+  "category": "lifecycle",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "retarget 25.789→25.791 : le claim staged verbatim est 'Section 25.791 did not exist prior to Amendment 25-32.' (le 25.789 du gold legacy n'a pas d'equivalent staged)",
+   "previous_question": "What is the status of Section 25.789 before Amendment 25-32?",
+   "previous_answer": "Section 25.789 did not exist prior to Amendment 25-32."
+  }
  },
  {
   "id": "AERO_LIFE_0004",
@@ -1281,11 +1346,16 @@
    "supporting_doc_ids": [
     "AC_25-17A_55f08065"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "lifecycle"
+  "category": "lifecycle",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : aucun claim 'moved the test criteria to a new Appendix J'",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_LIFE_0006",
@@ -1299,11 +1369,16 @@
    "supporting_doc_ids": [
     "AC_25.562-1B_e14eda4f"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "lifecycle"
+  "category": "lifecycle",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : aucun claim 'paragraph 5e(5)(d) ... deleted' (seul 'New paragraph 5e(5)(d)1 includes...' subsiste)",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_LIFE_0007",
@@ -1339,11 +1414,16 @@
    "supporting_doc_ids": [
     "AC_25-17A_55f08065"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "lifecycle"
+  "category": "lifecycle",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : aucun claim 'paragraph (c) was deleted'",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_LIFE_0009",
@@ -1438,11 +1518,16 @@
    "supporting_doc_ids": [
     "AC_25.562-1B_e14eda4f"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "lifecycle"
+  "category": "lifecycle",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : aucun claim 'redesignated as 5e(5)(d)2/3'",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_LIFE_0014",
@@ -1467,14 +1552,14 @@
  },
  {
   "id": "AERO_LIFE_0015",
-  "question": "What is the status of Section 25.793 before Amendment 25-51?",
+  "question": "What new requirement was added concerning cabin areas likely to become wet in service?",
   "primary_type": "lifecycle",
   "secondary_types": [],
   "language": "en",
   "ground_truth": {
-   "answer": "Section 25.793 did not exist.",
+   "answer": "A new requirement that areas likely to become wet in service have slip resistant floors (§ 25.793).",
    "exact_identifiers": [
-    "Amendment 25-51"
+    "§ 25.793"
    ],
    "supporting_doc_ids": [
     "AC_25-17A_55f08065"
@@ -1483,7 +1568,13 @@
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "lifecycle"
+  "category": "lifecycle",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "retarget : 'Section 25.793 did not exist' absent du staged ; re-ancre sur le claim verbatim 'Added a new requirement that areas likely to become wet in service have slip resistant floors (§ 25.793).'",
+   "previous_question": "What is the status of Section 25.793 before Amendment 25-51?",
+   "previous_answer": "Section 25.793 did not exist."
+  }
  },
  {
   "id": "AERO_LIFE_0016",
@@ -2355,11 +2446,16 @@
    "supporting_doc_ids": [
     "ETSO-C127c_amd17_d2c85ef0"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "multi_hop"
+  "category": "multi_hop",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : meme ancre AS6316 Section 3 que AERO_FACT_0014",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_MH_0008",
@@ -2418,11 +2514,16 @@
    "supporting_doc_ids": [
     "AC_21-25B_b33368fc"
    ],
-   "answerability": "answerable",
+   "answerability": "unanswerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "multi_hop"
+  "category": "multi_hop",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "ancre absente du KG staged : meme ancre PSAIR100-9/8/2003 que AERO_FACT_0042",
+   "previous_answerability": "answerable"
+  }
  },
  {
   "id": "AERO_MH_0011",
