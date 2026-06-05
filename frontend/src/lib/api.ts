@@ -195,7 +195,7 @@ export const api = {
       _language?: string,
       _mime?: string,
       _solution?: string,
-      _useGraphContext?: boolean,
+      useGraphContext?: boolean,
       _graphEnrichmentLevel?: 'none' | 'light' | 'standard' | 'deep',
       _sessionId?: string
     ) =>
@@ -207,6 +207,9 @@ export const api = {
             tenant_id: 'default',
             response_mode: 'structured',
             include_trace: true,
+            // Toggle A/B du chat : KG éteint → bras RAG classique côté backend
+            // (le flag était ignoré depuis le branchement runtime_a3 du 31/05).
+            use_kg: useGraphContext !== false,
           },
           { timeout: 320000 }
         )

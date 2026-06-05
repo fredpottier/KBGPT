@@ -89,6 +89,8 @@ export default function RuntimeA3Panel({
     : 1
   const hasDivergence = !!runtimeA3.authority_divergence_warning
   const hasConflict = !!runtimeA3.conflict_warning || hasDivergence
+  // Bras RAG classique (toggle KG éteint) : narration KG inadaptée → bandeau dédié
+  const isClassicRag = runtimeA3.runtime_version === 'classic_rag'
   const reasoningSteps: { icon: any; color: string; text: string }[] = [
     {
       icon: FiSearch,
@@ -137,6 +139,36 @@ export default function RuntimeA3Panel({
           text: `Les sources couvrent la question : chaque affirmation est reliée à sa source, sans extrapolation.`,
         },
   ]
+
+  // Mode RAG seul : panneau minimal (pas de claims KG, citations [Source N] inline)
+  if (isClassicRag) {
+    return (
+      <VStack spacing={2} align="stretch" w="full" mt={2}>
+        <HStack spacing={2} fontSize="xs">
+          <Badge colorScheme="purple" variant="subtle" fontSize="xs">
+            RAG seul — Knowledge Graph désactivé
+          </Badge>
+          <Badge
+            colorScheme={isAbstained ? 'orange' : 'gray'}
+            variant="subtle"
+            fontSize="xs"
+          >
+            {runtimeA3.mode || 'answer'}
+          </Badge>
+          {typeof runtimeA3.total_duration_s === 'number' && (
+            <Text color="text.secondary">
+              {runtimeA3.total_duration_s.toFixed(1)}s
+            </Text>
+          )}
+        </HStack>
+        <Text fontSize="xs" color="text.secondary">
+          Réponse produite par recherche vectorielle directe (top-12 passages) +
+          synthèse, sans Knowledge Graph : pas de vérification claim par claim,
+          pas de détection de contradictions ni de lignée documentaire.
+        </Text>
+      </VStack>
+    )
+  }
 
   return (
     <VStack spacing={2} align="stretch" w="full" mt={2}>

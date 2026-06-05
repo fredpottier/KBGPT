@@ -80,6 +80,15 @@ class RuntimeV6Request(BaseModel):
             "client-facing pour réponses plus compactes."
         ),
     )
+    use_kg: bool = Field(
+        default=True,
+        description=(
+            "Si False, court-circuite le runtime KG-first et répond via le "
+            "pipeline RAG classique (Qdrant top-K chunks + synthèse directe, "
+            "même bras que le bench comparatif). Toggle A/B du chat : permet "
+            "de mesurer ce que le Knowledge Graph apporte à la réponse."
+        ),
+    )
 
 
 class CitedClaimRef(BaseModel):
@@ -209,7 +218,13 @@ async def answer(request: RuntimeV6Request) -> RuntimeV6Response:
 
     Boucle re-plan max 2 iterations, hard cap wall-clock 60s. Trace structurée
     optionnelle (include_trace=True).
+
+    `use_kg=false` → court-circuit RAG classique (toggle A/B du chat, 05/06) :
+    le flag du frontend était ignoré depuis le branchement du chat sur
+    runtime_a3 (31/05) — le KG était utilisé même toggle éteint.
     """
+    if not request.use_kg:
+        return _answer_classic_rag(request)
     try:
         orch = _get_orchestrator()
         result: OrchestratorResult = orch.run(
@@ -226,6 +241,49 @@ async def answer(request: RuntimeV6Request) -> RuntimeV6Response:
         )
 
     return _build_response(result, include_trace=request.include_trace)
+
+
+# ============================================================================
+# Bras RAG classique (toggle A/B — use_kg=false)
+# ============================================================================
+
+_classic_rag_instance = None
+
+
+def _get_classic_rag():
+    global _classic_rag_instance
+    if _classic_rag_instance is None:
+        from knowbase.runtime_a3.classic_rag import ClassicRAG
+        _classic_rag_instance = ClassicRAG()
+    return _classic_rag_instance
+
+
+def _answer_classic_rag(request: RuntimeV6Request) -> RuntimeV6Response:
+    """Réponse RAG vanille (Qdrant top-K chunks + synthèse directe, sans KG)."""
+    try:
+        out = _get_classic_rag().answer(
+            question=request.question,
+            tenant_id=request.tenant_id,
+        )
+    except Exception as exc:
+        logger.exception("runtime_v6/answer: classic_rag raised")
+        raise HTTPException(
+            status_code=500,
+            detail=f"ClassicRAG error: {str(exc)[:300]}",
+        )
+    return RuntimeV6Response(
+        answer_text=out.get("answer_text") or "(pas de réponse)",
+        cited_claims=[],  # pas de claims KG — citations [Source N] inline
+        mode=out.get("mode") if out.get("mode") in ("REASONED", "ANCHORED", "TEXT_ONLY", "ABSTENTION") else "TEXT_ONLY",
+        synthesize_warnings=["classic_rag_no_kg"],
+        citation_coverage_rate=None,
+        total_duration_s=out.get("duration_s") or 0.0,
+        n_iterations=1,
+        terminated_reason="classic_rag",
+        iterations_trace=None,
+        runtime_version="classic_rag",
+        schema_version="a3.0",
+    )
 
 
 # ============================================================================
