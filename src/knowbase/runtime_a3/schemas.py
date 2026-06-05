@@ -556,6 +556,15 @@ class SynthesizeOutput(BaseModel):
         default=None,
         description="Transparence : claims contradictoires non résolus exposés.",
     )
+    authority_divergence_warning: Optional[str] = Field(
+        default=None,
+        description=(
+            "Transparence : divergence RÉELLE entre autorités réglementaires "
+            "détectée et exposée dans la réponse (les équivalences d'unités "
+            "sont exclues — cf relations/value_equivalence). Signal structuré "
+            "pour matérialisation UI (picto/bandeau)."
+        ),
+    )
     mode: SynthesizeMode = Field(
         ...,
         description="Mode terminal de la réponse (cf VISION §4.5).",

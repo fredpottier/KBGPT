@@ -261,6 +261,7 @@ export const api = {
                 abstention,
                 uncovered_warning: d.uncovered_sub_goals_warning || null,
                 conflict_warning: d.conflict_pending_warning || null,
+                authority_divergence_warning: d.authority_divergence_warning || null,
                 warnings: d.synthesize_warnings || [],
                 citation_coverage_rate: d.citation_coverage_rate ?? null,
                 total_duration_s: d.total_duration_s,

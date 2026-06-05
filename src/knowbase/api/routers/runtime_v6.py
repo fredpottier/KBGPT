@@ -130,6 +130,13 @@ class RuntimeV6Response(BaseModel):
     # Transparence
     uncovered_sub_goals_warning: Optional[str] = Field(default=None)
     conflict_pending_warning: Optional[str] = Field(default=None)
+    authority_divergence_warning: Optional[str] = Field(
+        default=None,
+        description=(
+            "Divergence RÉELLE entre autorités réglementaires (les équivalences "
+            "d'unités sont exclues) — signal structuré pour picto/bandeau UI."
+        ),
+    )
     synthesize_warnings: List[str] = Field(default_factory=list)
     citation_coverage_rate: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
@@ -255,6 +262,7 @@ def _build_response(
         mode=synth.mode,
         uncovered_sub_goals_warning=synth.uncovered_sub_goals_warning,
         conflict_pending_warning=synth.conflict_pending_warning,
+        authority_divergence_warning=getattr(synth, "authority_divergence_warning", None),
         synthesize_warnings=synth.synthesize_warnings,
         citation_coverage_rate=synth.citation_coverage_rate,
         total_duration_s=result.total_duration_s,

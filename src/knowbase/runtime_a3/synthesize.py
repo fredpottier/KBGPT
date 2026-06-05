@@ -160,11 +160,17 @@ RULES (NON-NEGOTIABLE):
   as the proof of supersession. Do NOT assert a version that is not in the chain;
   if `is_in_force` is false, say which document supersedes it.
 - If `authority_conflicts` are present (two regulatory authorities/sources state
-  DIFFERENT requirements on the same point): expose BOTH explicitly with
-  attribution — e.g. "<authority_a> (<doc_a>) states <text_a>, whereas
-  <authority_b> (<doc_b>) states <text_b>" — then state the actual difference.
-  Never present one authority's rule as if it were universal. Surface this in
-  answer_text under "⚠ Divergence between authorities".
+  requirements on the same point), check the `equivalent` flag FIRST:
+  * `equivalent: true` — the two sides state the SAME value in different units
+    (e.g. 1,500 lb vs 680 kg). This is NOT a divergence: present it as a
+    cross-authority CONFIRMATION ("both <authority_a> and <authority_b> state
+    the same limit, expressed as <text_a fragment> and <text_b fragment>").
+    NEVER label an equivalent pair "divergence" or use the ⚠ marker for it.
+  * `equivalent: false` — a REAL difference: expose BOTH explicitly with
+    attribution — e.g. "<authority_a> (<doc_a>) states <text_a>, whereas
+    <authority_b> (<doc_b>) states <text_b>" — then state the actual difference.
+    Never present one authority's rule as if it were universal. Surface this in
+    answer_text under "⚠ Divergence between authorities".
 - CLAIM `status` (lifecycle):
   * `in_force` — current knowledge; answer normally.
   * `superseded` — a HISTORICAL fact, replaced by a successor document. NEVER
@@ -333,7 +339,16 @@ def _aggregate_doc_lineages(execute_output: ExecuteOutput) -> List[Dict[str, Any
 
 
 def _aggregate_authority_conflicts(execute_output: ExecuteOutput) -> List[Dict[str, Any]]:
-    """Agrège les contradictions inter-autorités dédupliquées (#440)."""
+    """Agrège les contradictions inter-autorités dédupliquées (#440).
+
+    Marqueur `equivalent` (05/06/2026, retour Fred) : une paire dont les deux
+    côtés énoncent les MÊMES valeurs dans des unités différentes (1,500 lb vs
+    680 kg) est une CONCORDANCE, pas une divergence — le prompt la présente en
+    confirmation inter-autorités, jamais sous « ⚠ Divergence ». Détection
+    déterministe (conversion d'unités), cf relations/value_equivalence.py.
+    """
+    from knowbase.relations.value_equivalence import quantities_equivalent
+
     seen: Set[tuple] = set()
     out: List[Dict[str, Any]] = []
     for r in execute_output.results:
@@ -342,6 +357,10 @@ def _aggregate_authority_conflicts(execute_output: ExecuteOutput) -> List[Dict[s
             if key in seen:
                 continue
             seen.add(key)
+            try:
+                equivalent = quantities_equivalent(ac.text_a, ac.text_b)
+            except Exception:
+                equivalent = False
             out.append({
                 "subject": ac.subject,
                 "authority_a": ac.authority_a,
@@ -350,6 +369,7 @@ def _aggregate_authority_conflicts(execute_output: ExecuteOutput) -> List[Dict[s
                 "authority_b": ac.authority_b,
                 "doc_b": ac.doc_b,
                 "text_b": ac.text_b,
+                "equivalent": equivalent,
             })
     return out
 
@@ -791,6 +811,25 @@ class Synthesizer:
         """Calcule citation_coverage_rate + ajoute warning si <95%.
         A4.5 : applique GroundingVerifier (NLI mDeBERTa) si activé.
         """
+        # Signal structuré de divergence d'autorités (05/06/2026, retour Fred) :
+        # posé DÉTERMINISTIQUEMENT (jamais par le LLM) quand au moins une paire
+        # inter-autorités NON-équivalente a été attachée au retrieval — l'UI peut
+        # matérialiser un picto/bandeau sans regex sur answer_text. Les paires
+        # `equivalent` (mêmes valeurs, unités différentes) ne déclenchent PAS.
+        try:
+            acs = _aggregate_authority_conflicts(inp.execute_output)
+            real = [ac for ac in acs if not ac.get("equivalent")]
+            if real:
+                pairs = ", ".join(
+                    f"{ac.get('authority_a') or ac.get('doc_a')}↔"
+                    f"{ac.get('authority_b') or ac.get('doc_b')}"
+                    for ac in real[:3]
+                )
+                out.authority_divergence_warning = (
+                    f"Divergence entre autorités réglementaires détectée ({pairs})."
+                )
+        except Exception:
+            pass
         rate = _compute_citation_coverage(out.answer_text)
         out.citation_coverage_rate = rate
         warnings = list(out.synthesize_warnings)
@@ -1024,13 +1063,28 @@ class Synthesizer:
         une réponse comparative attribuée même quand le LLM de synthèse échoue.
         """
         _wlbl = _i18n(_I18N_CONFLICT, inp.parse_output)
-        lines = [f"⚠ {_wlbl} :"]
+        # Équivalences d'unités (mêmes valeurs) ≠ divergences : présentées en
+        # concordance, jamais sous le marqueur ⚠ (retour Fred 05/06).
+        real = [ac for ac in authority_conflicts if not ac.get("equivalent")]
+        equiv = [ac for ac in authority_conflicts if ac.get("equivalent")]
+        lines: List[str] = []
         docs_cited: set = set()
-        for ac in authority_conflicts[:4]:
+        if real:
+            lines.append(f"⚠ {_wlbl} :")
+            for ac in real[:4]:
+                a_lab = ac.get("authority_a") or ac.get("doc_a") or "?"
+                b_lab = ac.get("authority_b") or ac.get("doc_b") or "?"
+                lines.append(f"- {a_lab} ({ac.get('doc_a')}) : {ac.get('text_a')}")
+                lines.append(f"- {b_lab} ({ac.get('doc_b')}) : {ac.get('text_b')}")
+                docs_cited.add(ac.get("doc_a"))
+                docs_cited.add(ac.get("doc_b"))
+        for ac in equiv[:4]:
             a_lab = ac.get("authority_a") or ac.get("doc_a") or "?"
             b_lab = ac.get("authority_b") or ac.get("doc_b") or "?"
-            lines.append(f"- {a_lab} ({ac.get('doc_a')}) : {ac.get('text_a')}")
-            lines.append(f"- {b_lab} ({ac.get('doc_b')}) : {ac.get('text_b')}")
+            lines.append(
+                f"✓ {a_lab} et {b_lab} énoncent la même valeur (unités différentes) : "
+                f"{a_lab} « {ac.get('text_a')} » / {b_lab} « {ac.get('text_b')} »"
+            )
             docs_cited.add(ac.get("doc_a"))
             docs_cited.add(ac.get("doc_b"))
 
@@ -1048,10 +1102,19 @@ class Synthesizer:
                 if len(cited) >= 12:
                     break
 
+        adw = None
+        if real:
+            pairs = ", ".join(
+                f"{ac.get('authority_a') or ac.get('doc_a')}↔"
+                f"{ac.get('authority_b') or ac.get('doc_b')}"
+                for ac in real[:3]
+            )
+            adw = f"Divergence entre autorités réglementaires détectée ({pairs})."
         return SynthesizeOutput(
             answer_text="\n".join(lines),
             cited_claims=cited,
             conflict_pending_warning=None,
+            authority_divergence_warning=adw,
             mode="REASONED",
             synthesize_warnings=["template_fallback_authority_conflict"],
             citation_coverage_rate=1.0,

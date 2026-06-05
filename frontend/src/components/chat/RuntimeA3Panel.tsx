@@ -54,6 +54,7 @@ export interface RuntimeA3Meta {
   abstention?: string | null
   uncovered_warning?: string | null
   conflict_warning?: string | null
+  authority_divergence_warning?: string | null
   warnings?: string[]
   citation_coverage_rate?: number | null
   total_duration_s?: number
@@ -86,7 +87,8 @@ export default function RuntimeA3Panel({
   const nAspects = trace.length
     ? Math.max(...trace.map((t) => t.n_sub_goals || 1))
     : 1
-  const hasConflict = !!runtimeA3.conflict_warning
+  const hasDivergence = !!runtimeA3.authority_divergence_warning
+  const hasConflict = !!runtimeA3.conflict_warning || hasDivergence
   const reasoningSteps: { icon: any; color: string; text: string }[] = [
     {
       icon: FiSearch,
@@ -138,6 +140,34 @@ export default function RuntimeA3Panel({
 
   return (
     <VStack spacing={2} align="stretch" w="full" mt={2}>
+      {/* Divergence entre autorités réglementaires — matérialisée en bandeau
+          dédié (retour Fred 05/06 : la divergence inline passait inaperçue).
+          Posé déterministiquement côté backend, JAMAIS sur une simple
+          équivalence d'unités (cf value_equivalence). */}
+      {hasDivergence && (
+        <Box
+          p={3}
+          bg="rgba(239, 68, 68, 0.12)"
+          borderRadius="md"
+          border="1px solid"
+          borderColor="red.500"
+        >
+          <HStack spacing={2} align="start">
+            <Icon as={FiAlertTriangle} color="red.400" boxSize={5} mt="2px" />
+            <VStack align="start" spacing={1}>
+              <Text fontSize="sm" fontWeight="bold" color="red.300">
+                Divergence entre autorités réglementaires
+              </Text>
+              <Text fontSize="xs" color="text.secondary">
+                {runtimeA3.authority_divergence_warning} Les deux positions sont
+                exposées dans la réponse ci-dessus — le système ne tranche pas à
+                votre place.
+              </Text>
+            </VStack>
+          </HStack>
+        </Box>
+      )}
+
       {/* Abstention / tension — le différenciateur clé : dire quand on ne sait pas */}
       {(runtimeA3.uncovered_warning || runtimeA3.conflict_warning) && (
         <Box
