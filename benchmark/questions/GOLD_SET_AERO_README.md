@@ -87,3 +87,39 @@ côté gold a disparu du staged ; question vague → ni relabel ni ré-ancrage p
 legacy ont été perdues par les gates staged (sélection ou décomposition), dont un
 cas typique de troncature Stage B (claim_1d990a6c8867_a : « require an
 assessment » sans le but de l'assessment). À traiter côté extraction (backlog).
+
+## Révision 2026-06-05 (ter) — audit #450 (perte de couverture) + réparation des 3 comparisons
+
+**Audit #450 — cause racine des ~10 ancres perdues** (passages sources retrouvés
+dans `data/extraction_cache/`) :
+1. **« Note: » factuelles jetées** (PSAIR100, wear-and-damage, Appendix J) : le juge
+   de la selection gate les classe `doc_meta`/`reference` = déchet franc → le
+   garde-fou identifiant est suspendu (`guard_suppressed`) → DROP.
+2. **Déclarations de changement réglementaire jetées** (« Deletes paragraph
+   5e(5)(d)… », « Redesignates… ») : classées méta-document alors que c'est la
+   matière première lifecycle d'OSMOSIS. Le garde supersession ne couvrait que
+   supersede/cancel/replace.
+3. **Décomposition ampute la finalité** (« an assessment must be conducted to
+   verify that structural integrity… » → « require an assessment ») : la
+   subordonnée de but n'était pas protégée par le prompt Stage B.
+
+**Fixes livrés (effectifs à la prochaine ingestion)** :
+- `is_regulatory_lifecycle_statement()` (verbes structurels + cible
+  paragraphe/section/appendix, + provenance documentaire identifiée) → override
+  du DROP y compris en déchet franc, comme la garde supersession.
+- Garde EXIGENCE : identifiant + verbe d'exigence (requires/shall/must)
+  neutralise la suppression déchet-franc.
+- Prompt décomposition : règle « NEVER truncate a PURPOSE or OUTCOME clause ».
+- Tests sur les ancres réelles perdues (76 verts).
+
+**Réparation CMP_0003/0007/0011** (`apply_gold_cmp_repair_20260605.py`) :
+questions précisées + golds reciblés sur des paires FAA/EASA **vérifiées des
+deux côtés** dans le KG staged :
+- CMP_0003 : belt cut/torn (AC 25.562-1B) vs seatbelt misalignment (ETSO-C127b)
+- CMP_0007 : protection occupants CFR Part 25 vs « not optimal » NPA 2013-20
+- CMP_0011 : underseat baggage — déplacement siège (AC 23.562-1) vs rétention
+  gilet de sauvetage (ETSO-C127b)
+
+⚠ Les questions relabellisées unanswerable le 05/06 (PSAIR100, 5e(5), Appendix J…)
+devront être RE-RELABELLISÉES answerable après la prochaine ré-ingestion (les
+gardes ci-dessus ressusciteront leurs ancres).

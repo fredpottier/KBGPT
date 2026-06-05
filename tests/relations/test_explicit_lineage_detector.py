@@ -186,3 +186,33 @@ from knowbase.relations.explicit_lineage_detector import is_doc_supersession_sta
 )
 def test_is_doc_supersession_statement(txt, expected):
     assert is_doc_supersession_statement(txt) is expected
+
+
+# ── is_regulatory_lifecycle_statement (audit #450, 05/06/2026) ─────────────────
+# Ancres réelles perdues par la selection gate lors de la ré-ingestion staged.
+
+from knowbase.relations.explicit_lineage_detector import is_regulatory_lifecycle_statement
+
+
+@pytest.mark.parametrize(
+    "txt,expected",
+    [
+        # Changements structurels réglementaires (changelog AC 25.562-1B, AC 25-17A)
+        ("Deletes paragraph 5e(5)(d) and the bulleted list of items that follow it.", True),
+        ("Redesignates paragraph 5e(5)(e) as paragraph 5e(5)(d).", True),
+        ("This amendment substantially revised the regulation to move the test criteria to a new Appendix J of the regulation.", True),
+        ("Section 25.791 did not exist prior to Amendment 25-32.", True),
+        ("Added a new requirement that areas likely to become wet in service have slip resistant floors (§ 25.793).", True),
+        # Provenance documentaire identifiée (memo PSAIR100 perdu)
+        ("The FAA has published guidance to assist with classifying major vs. minor changes by the TSO seat manufacturer in policy memorandum PSAIR100-9/8/2003.", True),
+        # Négatifs : verbe sans cible structurelle / méta-doc pur / en-tête
+        ("The kit adds a cable and a charger.", False),
+        ("This guide is organized into five chapters.", False),
+        ("7.20 Follow-Up Activities", False),
+        ("The platform delivers powerful capabilities for success.", False),
+        # « published » sans identifiant précis → pas de rescue provenance
+        ("The agency published guidance on this topic.", False),
+    ],
+)
+def test_is_regulatory_lifecycle_statement(txt, expected):
+    assert is_regulatory_lifecycle_statement(txt) is expected

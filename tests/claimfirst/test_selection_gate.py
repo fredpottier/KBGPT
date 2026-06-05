@@ -205,3 +205,45 @@ def test_is_hard_junk_category():
     assert not _is_hard_junk_category("constraint")  # vrai fait conditionnel → guard protège
     assert not _is_hard_junk_category("factual")
     assert not _is_hard_junk_category("")
+
+
+# ── gardes lifecycle + exigence (audit #450, 05/06/2026) ───────────────────────
+# Les ancres réelles perdues lors de la ré-ingestion staged doivent désormais
+# survivre au DROP du juge, même en catégorie « déchet franc » (doc_meta/reference).
+
+
+def _gate_with_verdict(label: str, category: str):
+    def llm(system, user):
+        import json as _json
+        return _json.dumps({"verdicts": [{"id": "u1", "label": label, "category": category}]})
+    return SelectionGate(llm_call=llm)
+
+
+def test_lifecycle_statement_overrides_doc_meta_drop():
+    txt = "Deletes paragraph 5e(5)(d) and the bulleted list of items that follow it."
+    res = _gate_with_verdict("DROP", "doc_meta").classify([("u1", txt)])
+    assert res.kept_ids == ["u1"]
+    assert res.guard_overrides == 1
+
+
+def test_provenance_statement_overrides_reference_drop():
+    txt = ("The FAA has published guidance to assist with classifying major vs. minor "
+           "changes by the TSO seat manufacturer in policy memorandum PSAIR100-9/8/2003.")
+    res = _gate_with_verdict("DROP", "cross_reference").classify([("u1", txt)])
+    assert res.kept_ids == ["u1"]
+
+
+def test_requirement_with_identifier_overrides_reference_drop():
+    txt = ("TSO-C127 requires that maintenance instructions include guidance on the limits "
+           "of wear and damage permissible to the seat cushions and restraint system webbing "
+           "material that would warrant replacement.")
+    res = _gate_with_verdict("DROP", "reference").classify([("u1", txt)])
+    assert res.kept_ids == ["u1"]
+
+
+def test_heading_with_version_still_suppressed():
+    # un en-tête à identifiant SANS verbe d'exigence ni lifecycle reste jeté
+    txt = "7.20 Follow-Up Activities for Release 9.0"
+    res = _gate_with_verdict("DROP", "heading").classify([("u1", txt)])
+    assert res.kept_ids == []
+    assert res.guard_suppressed == 1

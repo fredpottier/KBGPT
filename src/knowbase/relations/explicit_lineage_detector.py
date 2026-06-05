@@ -173,6 +173,62 @@ def is_doc_supersession_statement(text: str) -> bool:
     return bool(find_reg_ids(text))
 
 
+# ============================================================================
+# Déclarations LIFECYCLE réglementaires (audit #450 du 05/06/2026)
+# ============================================================================
+
+# Verbes de CHANGEMENT STRUCTUREL d'un texte réglementaire. Ces phrases
+# (« Deletes paragraph 5e(5)(d)… », « Redesignates paragraph 5e(5)(e)… »,
+# « This amendment moved the test criteria to a new Appendix J »,
+# « Section 25.791 did not exist prior to Amendment 25-32 ») sont la matière
+# première des questions lifecycle/évolution — le juge de la selection gate
+# les classe typiquement en doc_meta → DROP, ce qui a détruit ~10 ancres du
+# gold-set lors de la ré-ingestion staged (cf GOLD_SET_AERO_README révision
+# 2026-06-05 bis).
+_LIFECYCLE_VERB = re.compile(
+    r"\b(delet(?:es|ed|e)|redesignat(?:es|ed|e)|add(?:s|ed)?|revis(?:es|ed|e)|"
+    r"amend(?:s|ed)?|mov(?:es|ed|e)|remov(?:es|ed|e)|introduc(?:es|ed|e)|"
+    r"renumber(?:s|ed)?|relocat(?:es|ed|e)|did not exist|no longer (?:exists?|appears?))\b",
+    re.IGNORECASE,
+)
+
+# Cible structurelle du changement (sans elle, « adds »/« moved » sont trop génériques).
+_STRUCTURAL_TARGET = re.compile(
+    r"(\bparagraph\b|\bsubparagraph\b|\bsection\b|\bsubsection\b|\bappendix\b|"
+    r"\bamendment\b|§|\bchapter\b|\btable\s+[0-9A-Z]|\bfigure\s+[0-9A-Z])",
+    re.IGNORECASE,
+)
+
+# Provenance documentaire : « <authority> has published/issued <guidance/memo/policy>
+# <identifiant> » (ex : le memo PSAIR100-9/8/2003 perdu par le gate).
+_PROVENANCE = re.compile(
+    r"\b(publish(?:es|ed)?|issu(?:es|ed|e))\b.{0,80}?"
+    r"\b(guidance|memorandum|memo|policy|circular|bulletin|directive|notice)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def is_regulatory_lifecycle_statement(text: str) -> bool:
+    """Vrai si `text` décrit un CHANGEMENT STRUCTUREL d'un texte réglementaire
+    (suppression/redésignation/ajout/déplacement de paragraphe, section,
+    appendix…) ou une PROVENANCE documentaire datée/identifiée.
+
+    Même contrat que `is_doc_supersession_statement` : utilisé par la selection
+    gate comme classe LIFECYCLE-CRITIQUE qui override le DROP du juge, y compris
+    en catégorie « déchet franc » (doc_meta). Garde volontairement étroite :
+    verbe structurel + cible structurelle (ou provenance + identifiant précis).
+    """
+    if not text:
+        return False
+    if _LIFECYCLE_VERB.search(text) and _STRUCTURAL_TARGET.search(text):
+        return True
+    if _PROVENANCE.search(text):
+        # provenance : exiger un identifiant précis (n° de memo, date, code)
+        from knowbase.claimfirst.quality.identifier_guard import has_specific_identifier
+        return has_specific_identifier(text)
+    return False
+
+
 @dataclass
 class LineageParse:
     """Résultat du parsing d'un claim de supersession de document."""

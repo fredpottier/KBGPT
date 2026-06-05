@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
@@ -106,6 +107,13 @@ def _is_hard_junk_category(category: str) -> bool:
     """True si la catégorie (juge) désigne du déchet franc où le garde-fou ne doit pas rescaper."""
     c = (category or "").lower()
     return any(k in c for k in _HARD_JUNK_CATEGORY_KEYS)
+
+
+# Verbe d'EXIGENCE : une unité à identifiant qui énonce une obligation porte un
+# fait vérifiable même si le juge l'a classée reference/doc_meta (audit #450 :
+# « Note: TSO-C127 requires that maintenance instructions include guidance on
+# the limits of wear and damage… » jetée comme note-référence).
+_REQUIREMENT_VERB = re.compile(r"\b(requires?|required|shall|must)\b", re.IGNORECASE)
 
 
 @dataclass
@@ -250,16 +258,33 @@ class SelectionGate:
             # de supersession DE DOCUMENT (« This AC cancels AC 21-25A… ») est une classe
             # LIFECYCLE-CRITIQUE — elle override MÊME le déchet franc (le juge la classe
             # typiquement en doc_meta, ce qui détruisait la lignée du corpus).
+            # GARDE LIFECYCLE (audit #450, 05/06/2026) : même traitement pour les
+            # déclarations de CHANGEMENT STRUCTUREL réglementaire (« Deletes paragraph
+            # 5e(5)(d)… », « moved the test criteria to a new Appendix J ») et la
+            # provenance documentaire identifiée (« published guidance … in policy
+            # memorandum PSAIR100-9/8/2003 ») — ~10 ancres gold perdues en doc_meta.
             supersession = False
+            lifecycle = False
             if judge_label == "DROP":
                 try:
                     from knowbase.relations.explicit_lineage_detector import (
                         is_doc_supersession_statement,
+                        is_regulatory_lifecycle_statement,
                     )
                     supersession = is_doc_supersession_statement(txt)
+                    lifecycle = is_regulatory_lifecycle_statement(txt)
                 except Exception:
                     supersession = False
-            guard_override = (has_id and not hard_junk) or supersession
+            # GARDE EXIGENCE (audit #450) : une unité à identifiant qui ÉNONCE une
+            # exigence (« TSO-C127 requires that maintenance instructions include… »)
+            # porte un fait même classée reference/doc_meta — l'identifiant redevient
+            # protecteur. N'élargit PAS aux en-têtes/renvois purs (pas de verbe d'exigence).
+            requirement = bool(
+                has_id and _REQUIREMENT_VERB.search(txt)
+            )
+            guard_override = (
+                (has_id and not hard_junk) or supersession or lifecycle or requirement
+            )
             final = "KEEP" if (judge_label == "KEEP" or guard_override) else "DROP"
             v = UnitVerdict(uid, txt, final, judge_label, category, guard_override)
             result.verdicts.append(v)

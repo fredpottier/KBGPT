@@ -1914,15 +1914,18 @@
  },
  {
   "id": "AERO_CMP_0003",
-  "question": "What is the difference between FAA and EASA requirements regarding seat belt testing and integrity?",
+  "question": "What is the difference between the seat belt integrity issue addressed by FAA AC 25.562-1B and the seatbelt condition described in EASA ETSO-C127b?",
   "primary_type": "comparison",
   "secondary_types": [
    "contradiction"
   ],
   "language": "en",
   "ground_truth": {
-   "answer": "FAA requires the seat belt should not be cut or torn by features of the seat or the belt adjuster mechanism, while EASA specifies to test the installed seat belt for misalignment by positioning the seat in its taxi, take-off and landing condition.",
-   "exact_identifiers": [],
+   "answer": "FAA AC 25.562-1B requires that the seat belt not be cut or torn by features of the seat or the belt adjuster mechanism, while EASA ETSO-C127b describes seatbelt misalignment — a condition where the seatbelt and/or shackle is positioned to give the impression that the belt has been properly tightened when in fact there is slack in the system or the shackle will not carry the force generated in an emergency landing or turbulence.",
+   "exact_identifiers": [
+    "AC 25.562-1B",
+    "ETSO-C127b"
+   ],
    "supporting_doc_ids": [
     "AC_25.562-1B_e14eda4f",
     "ETSO-C127b_8c0c076e"
@@ -1931,7 +1934,13 @@
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "faa_easa_comparison"
+  "category": "faa_easa_comparison",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "paire gold d'origine semi-désancrée (côté EASA « test for misalignment by positioning the seat in taxi/take-off/landing » absent du staged) + question trop vague ; reciblée sur une paire FAA/EASA vérifiée des deux côtés (claims verbatim contrôlés)",
+   "previous_question": "What is the difference between FAA and EASA requirements regarding seat belt testing and integrity?",
+   "previous_answer": "FAA requires the seat belt should not be cut or torn by features of the seat or the belt adjuster mechanism, while EASA specifies to test the installed seat belt for misalignment by positioning the seat in its taxi, take-off and landing condition."
+  }
  },
  {
   "id": "AERO_CMP_0004",
@@ -2002,24 +2011,32 @@
  },
  {
   "id": "AERO_CMP_0007",
-  "question": "What are the differences between FAA and EASA regarding the potential risks and protections for seats during emergency landings?",
+  "question": "How do FAA regulations and EASA's NPA 2013-20 differ in their view of seat occupant protection during emergency landings?",
   "primary_type": "comparison",
   "secondary_types": [
    "contradiction"
   ],
   "language": "en",
   "ground_truth": {
-   "answer": "FAA focuses on the potential rupture of hydraulic lines during emergency landings, while EASA highlights the insufficient protection of passenger and cabin crew seats in large aircraft during survivable accidents.",
-   "exact_identifiers": [],
+   "answer": "The FAA regulation (14 CFR Part 25) requires the airplane to be designed to protect each occupant under emergency landing conditions on land or water, while EASA's NPA 2013-20 found that in survivable accident impacts the level of protection of passenger and cabin crew seats is not optimal on some large aeroplanes.",
+   "exact_identifiers": [
+    "NPA 2013-20"
+   ],
    "supporting_doc_ids": [
-    "AC_25-17A_55f08065",
+    "CFR_part25_seats_extract_3abc9981",
     "NPA_2013-20_seat_crashworthiness_fdd93d4d"
    ],
    "answerability": "answerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "faa_easa_comparison"
+  "category": "faa_easa_comparison",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "paire gold d'origine semi-désancrée (côté FAA « rupture of hydraulic lines » absent du staged) + question trop vague ; reciblée sur une paire vérifiée (CFR Part 25 / NPA 2013-20)",
+   "previous_question": "What are the differences between FAA and EASA regarding the potential risks and protections for seats during emergency landings?",
+   "previous_answer": "FAA focuses on the potential rupture of hydraulic lines during emergency landings, while EASA highlights the insufficient protection of passenger and cabin crew seats in large aircraft during survivable accidents."
+  }
  },
  {
   "id": "AERO_CMP_0008",
@@ -2086,24 +2103,33 @@
  },
  {
   "id": "AERO_CMP_0011",
-  "question": "What are the differences between FAA and EASA regulations regarding aircraft seat components?",
+  "question": "How do FAA and EASA guidance differ in their concerns about underseat baggage in seat design?",
   "primary_type": "comparison",
   "secondary_types": [
    "contradiction"
   ],
   "language": "en",
   "ground_truth": {
-   "answer": "FAA specifies components that affect occupant positioning, while EASA focuses on ensuring that exposed edges or corners do not impede an occupant's egress.",
-   "exact_identifiers": [],
+   "answer": "FAA guidance (AC 23.562-1) requires the seat to contain adequate design features to preclude underseat baggage from restricting the seat displacement during energy absorption, while EASA (ETSO-C127b) requires that the life preserver retention device not allow the life preserver to come free during turbulence and the stowage and removal of underseat baggage.",
+   "exact_identifiers": [
+    "AC 23.562-1",
+    "ETSO-C127b"
+   ],
    "supporting_doc_ids": [
-    "AC_25.562-1B_e14eda4f",
+    "AC_23.562-1_0d9f78dc",
     "ETSO-C127b_8c0c076e"
    ],
    "answerability": "answerable",
    "false_premise": false
   },
   "source_set": "aero_kg_grounded",
-  "category": "faa_easa_comparison"
+  "category": "faa_easa_comparison",
+  "revision": {
+   "date": "2026-06-05",
+   "reason": "paire gold d'origine semi-désancrée (côté FAA « affect occupant positioning » absent ; les candidats restants étaient FAA-vs-FAA) + question trop vague ; reciblée sur le topic « underseat baggage » avec paire FAA/EASA vérifiée",
+   "previous_question": "What are the differences between FAA and EASA regulations regarding aircraft seat components?",
+   "previous_answer": "FAA specifies components that affect occupant positioning, while EASA focuses on ensuring that exposed edges or corners do not impede an occupant's egress."
+  }
  },
  {
   "id": "AERO_CMP_0012",

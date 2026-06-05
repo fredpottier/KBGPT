@@ -88,6 +88,10 @@ emit several from one sentence only when it truly states multiple independent fa
 lists all items (never one claim per item). Never place coordinated SUBJECTS into `objects`.
    - A single fact uses a one-element `objects` array. Keep a condition/qualifier inside the \
 claim's text rather than spawning a separate claim for it.
+   - NEVER truncate a PURPOSE or OUTCOME clause ("to verify that…", "to ensure…", "in order \
+to…", "so that…"): it is part of the molecular fact. "An assessment must be conducted to verify \
+that structural integrity is maintained" must keep the "to verify…" part — "an assessment must \
+be conducted" alone loses the fact.
 2. DECONTEXTUALIZE: resolve pronouns/anaphora using the passage context; NAME the subject \
 explicitly (never leave "it" / "the system" / "this"). If the referent is genuinely unknown, \
 keep the best literal subject — do NOT invent one.
