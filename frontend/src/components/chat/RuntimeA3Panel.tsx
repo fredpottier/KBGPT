@@ -34,6 +34,7 @@ interface CitedClaim {
   doc_title?: string | null
   section_id?: string | null
   page?: number | null
+  source_doc_id?: string | null
   n?: number
 }
 
@@ -293,10 +294,35 @@ export default function RuntimeA3Panel({
                 </Text>
                 “{c.claim_verbatim}”
               </Text>
-              <Text color="text.secondary" mt="2px" pl={4}>
-                {c.doc_title || 'Document'}
-                {c.page != null ? ` · p.${c.page}` : ''}
-              </Text>
+              {/* Click-to-source (fix régression 05/06) : ouvre le document
+                  source dans un onglet — PDF directement à la bonne page
+                  (#page=N, RFC 3778) via openSourceFile + page_no du KG. */}
+              {c.source_doc_id ? (
+                <Text
+                  as="button"
+                  color="brand.300"
+                  mt="2px"
+                  pl={4}
+                  display="block"
+                  textAlign="left"
+                  textDecoration="underline"
+                  _hover={{ color: 'brand.200' }}
+                  onClick={async () => {
+                    const { openSourceFile } = await import(
+                      '@/lib/openSourceFile'
+                    )
+                    await openSourceFile(c.source_doc_id!, c.page ?? undefined)
+                  }}
+                >
+                  {c.doc_title || c.source_doc_id}
+                  {c.page != null ? ` · p.${c.page}` : ''} ↗
+                </Text>
+              ) : (
+                <Text color="text.secondary" mt="2px" pl={4}>
+                  {c.doc_title || 'Document'}
+                  {c.page != null ? ` · p.${c.page}` : ''}
+                </Text>
+              )}
             </Box>
           ))}
         </VStack>

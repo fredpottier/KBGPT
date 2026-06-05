@@ -17,6 +17,7 @@ Domain-agnostic.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -101,6 +102,13 @@ class CitedClaimRef(BaseModel):
     doc_title: Optional[str] = None
     section_id: Optional[str] = None
     page: Optional[int] = None
+    source_doc_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "doc_id KG du document source — permet le click-to-source via "
+            "GET /api/documents/source-file?doc_id=… (+ #page=N pour les PDF)."
+        ),
+    )
 
 
 class IterationTraceDict(BaseModel):
@@ -291,22 +299,59 @@ def _answer_classic_rag(request: RuntimeV6Request) -> RuntimeV6Response:
 # ============================================================================
 
 
+def _hydrate_citation_sources(claim_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """claim_id → {doc_id, page} depuis le KG (click-to-source, fix régression 05/06).
+
+    Le pipeline runtime ne propage pas doc/page jusqu'aux cited_claims (le LLM
+    Synthesize ne les recopie pas fiablement) → on hydrate ICI, déterministe,
+    en une requête batch. Les claims portent directement `doc_id` + `page_no`
+    (schéma claimfirst). Fail-soft : toute erreur → champs None (l'UI dégrade
+    en citation non cliquable, jamais d'erreur réponse).
+    """
+    if not claim_ids:
+        return {}
+    try:
+        from knowbase.common.clients.neo4j_client import get_neo4j_client
+        rows = get_neo4j_client().execute_query(
+            "MATCH (c:Claim) WHERE c.claim_id IN $ids "
+            "RETURN c.claim_id AS id, c.doc_id AS doc_id, c.page_no AS page",
+            ids=claim_ids,
+        )
+        return {
+            r["id"]: {"doc_id": r["doc_id"], "page": r["page"]}
+            for r in rows
+        }
+    except Exception:
+        logger.warning("runtime_v6: citation source hydration failed", exc_info=True)
+        return {}
+
+
+# Suffixe hash hex des doc_ids (ex: "AC_25.562-1B_e14eda4f") → titre lisible.
+_DOC_HASH_SUFFIX_RE = re.compile(r"_[a-f0-9]{6,}$", re.IGNORECASE)
+
+
 def _build_response(
     result: OrchestratorResult,
     include_trace: bool,
 ) -> RuntimeV6Response:
     synth = result.synthesize_output
 
-    cited_refs = [
-        CitedClaimRef(
+    sources = _hydrate_citation_sources([cc.claim_id for cc in synth.cited_claims])
+    cited_refs = []
+    for cc in synth.cited_claims:
+        src = sources.get(cc.claim_id) or {}
+        doc_id = src.get("doc_id")
+        page = src.get("page")
+        cited_refs.append(CitedClaimRef(
             claim_id=cc.claim_id,
             claim_verbatim=cc.claim_verbatim,
-            doc_title=cc.doc_title,
+            doc_title=cc.doc_title or (
+                _DOC_HASH_SUFFIX_RE.sub("", doc_id).replace("_", " ") if doc_id else None
+            ),
             section_id=cc.section_id,
-            page=cc.page,
-        )
-        for cc in synth.cited_claims
-    ]
+            page=cc.page if cc.page is not None else (int(page) if page is not None else None),
+            source_doc_id=doc_id,
+        ))
 
     trace_payload: Optional[List[IterationTraceDict]] = None
     if include_trace:
