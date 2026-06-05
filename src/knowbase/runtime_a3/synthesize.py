@@ -165,6 +165,23 @@ RULES (NON-NEGOTIABLE):
   <authority_b> (<doc_b>) states <text_b>" — then state the actual difference.
   Never present one authority's rule as if it were universal. Surface this in
   answer_text under "⚠ Divergence between authorities".
+- CLAIM `status` (lifecycle):
+  * `in_force` — current knowledge; answer normally.
+  * `superseded` — a HISTORICAL fact, replaced by a successor document. NEVER
+    present it as the current rule. For evolution/lifecycle/point-in-time
+    questions it IS the answer material: present it temporally ("under the
+    <valid_from> edition, X was …; the current edition states …"). For
+    current-state questions, prefer in_force claims and mention the superseded
+    value only as history if relevant.
+  * `withdrawn` — the SOURCE DOCUMENT was cancelled but no successor restates
+    this specific point. EPISTEMIC caveat required, with this exact nuance:
+    say "according to <doc> (document cancelled); the successor does not
+    restate this point" — NEVER say or imply "this is no longer valid" (the
+    corpus does not state that; do not invent the replacement).
+- If two claims about the same point CONTRADICT and both carry dates but no
+  resolution: present BOTH temporally with their dates and sources ("the
+  <newer date> document states X; the <older date> document stated Y") and let
+  the reader decide — do NOT silently prefer the more recent one.
 - COMPARISON questions (the question contrasts two or more items, versions,
   editions, options, or documents): structure the answer to present EACH side
   EXPLICITLY and put them side by side (e.g. "Side A: <facts> ; Side B: <facts>"),
@@ -367,6 +384,16 @@ def _serialize_input(
         # (SWI1) malgré CE top-1 score 0.965. Le verbatim text règle le problème.
         extras = c.model_dump() if hasattr(c, "model_dump") else {}
         claim_text = extras.get("text")  # verbatim Neo4j c.text (extra Pydantic)
+        # Statut lifecycle (ADR_RESOLUTION_CONTRADICTIONS §5.2/§7.D/§7.F) :
+        # - superseded : invalidé par lignée documentaire → fait HISTORIQUE
+        # - withdrawn  : doc porteur annulé, successeur muet → caveat épistémique
+        # - in_force   : courant
+        if c.invalidated_at is not None:
+            status = "superseded"
+        elif extras.get("lifecycle_status") == "withdrawn":
+            status = "withdrawn"
+        else:
+            status = "in_force"
         claims_payload.append({
             "claim_id": c.claim_id,
             "subject": c.subject_canonical,
@@ -375,6 +402,9 @@ def _serialize_input(
             "text": (claim_text[:600] if isinstance(claim_text, str) else None),
             "source_doc_id": c.source_doc_id,
             "marker_type": c.marker_type,
+            "status": status,
+            "valid_from": (str(c.valid_from)[:10] if c.valid_from else None),
+            "valid_until": (str(c.valid_until)[:10] if c.valid_until else None),
         })
 
     cps = _aggregate_conflict_pending_summaries(inp.execute_output)

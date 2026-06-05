@@ -76,9 +76,10 @@ CYPHER_KG_CLAIMS = """
 MATCH (c:Claim {tenant_id: $tenant_id})
 WHERE c.subject_canonical = $subject
   AND ($predicate IS NULL OR c.predicate = $predicate)
-  AND c.invalidated_at IS NULL
-  AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
-  AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))
+  AND ($include_history OR (
+        c.invalidated_at IS NULL
+        AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
+        AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))))
 OPTIONAL MATCH (c)-[:EVIDENCED_BY]->(s:Section)
 RETURN c, collect(s) AS sections
 LIMIT 50
@@ -95,9 +96,10 @@ CYPHER_KG_CLAIMS_HYBRID = """
 CALL db.index.fulltext.queryNodes('claim_text_search', $query_text)
 YIELD node AS c, score AS bm25_score
 WHERE c.tenant_id = $tenant_id
-  AND c.invalidated_at IS NULL
-  AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
-  AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))
+  AND ($include_history OR (
+        c.invalidated_at IS NULL
+        AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
+        AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))))
 WITH c, bm25_score
 ORDER BY bm25_score DESC
 LIMIT 50
@@ -112,9 +114,10 @@ CYPHER_KG_CLAIMS_BM25_ONLY = """
 CALL db.index.fulltext.queryNodes('claim_text_search', $query_text)
 YIELD node AS c, score AS bm25_score
 WHERE c.tenant_id = $tenant_id
-  AND c.invalidated_at IS NULL
-  AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
-  AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))
+  AND ($include_history OR (
+        c.invalidated_at IS NULL
+        AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
+        AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))))
 RETURN c.claim_id AS claim_id, bm25_score AS score
 ORDER BY bm25_score DESC
 LIMIT 50
@@ -124,9 +127,10 @@ CYPHER_KG_CLAIMS_VECTOR_ONLY = """
 CALL db.index.vector.queryNodes('claim_embedding_idx', 50, $query_embedding)
 YIELD node AS c, score AS vec_score
 WHERE c.tenant_id = $tenant_id
-  AND c.invalidated_at IS NULL
-  AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
-  AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))
+  AND ($include_history OR (
+        c.invalidated_at IS NULL
+        AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
+        AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))))
 RETURN c.claim_id AS claim_id, vec_score AS score
 ORDER BY vec_score DESC
 """
@@ -144,9 +148,10 @@ CYPHER_KG_CLAIMS_LIST = """
 MATCH (c:Claim {tenant_id: $tenant_id})
 WHERE ($subject_filter IS NULL OR c.subject_canonical = $subject_filter)
   AND ($predicate IS NULL OR c.predicate = $predicate)
-  AND c.invalidated_at IS NULL
-  AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
-  AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))
+  AND ($include_history OR (
+        c.invalidated_at IS NULL
+        AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
+        AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))))
 OPTIONAL MATCH (c)-[:EVIDENCED_BY]->(s:Section)
 RETURN c, collect(s) AS sections
 ORDER BY coalesce(c.confidence, 0.0) DESC
@@ -619,6 +624,24 @@ class Executor:
     # Dispatch par tool
     # ------------------------------------------------------------------
 
+    def _include_history_for_call(self, tc: ToolCall) -> bool:
+        """ADR_RESOLUTION_CONTRADICTIONS §5.2 (moitié runtime) — portée temporelle.
+
+        Les claims invalidés par lignée (`invalidated_at` + `valid_until`) sont
+        l'HISTOIRE du corpus : ils doivent rester accessibles aux questions
+        lifecycle/évolution/point-in-time, sinon le runtime abstient à tort sur
+        « comment X a-t-il évolué ? » (constaté au bench du 05/06 : 5 abstentions
+        à tort lifecycle après la résolution par lignée).
+        """
+        po = getattr(self, "_current_parse_output", None)
+        try:
+            sg = po.sub_goals[tc.sub_goal_idx] if po and po.sub_goals else None
+        except (IndexError, AttributeError):
+            sg = None
+        if sg is None:
+            return False
+        return sg.kind == "lifecycle_trace" or sg.time_filter in ("evolution", "as_of")
+
     def _execute_tool_call(
         self,
         tc: ToolCall,
@@ -643,6 +666,7 @@ class Executor:
                     self._aspect_emphasized_query(tc)
                     or self._build_query_text_for_call(tc, parse_input)
                 )
+                resolved_params["include_history"] = self._include_history_for_call(tc)
                 claims, sections = self._call_kg_claims(resolved_params)
                 relations: List[RelationSummary] = []
             elif tc.tool == "kg_claims_list":
@@ -659,6 +683,7 @@ class Executor:
                     self._aspect_emphasized_query(tc)
                     or (parse_input.question or "").strip()
                 )
+                resolved_params["include_history"] = self._include_history_for_call(tc)
                 claims, sections = self._call_kg_claims_list(resolved_params)
                 relations = []
             elif tc.tool == "lifecycle_query":
@@ -676,6 +701,7 @@ class Executor:
                 # donc Execute ne devrait jamais recevoir comparison_query directement.
                 # Si jamais (pour V2 future), on traite comme kg_claims du subject.
                 resolved_params = self._resolve_subject_for_call(tc, "subject")
+                resolved_params["include_history"] = self._include_history_for_call(tc)
                 claims, sections = self._call_kg_claims(resolved_params)
                 relations = []
             else:
@@ -857,6 +883,7 @@ class Executor:
                 query_embedding=emb,
                 tenant_id=params["tenant_id"],
                 as_of=params["as_of"],
+                include_history=params.get("include_history", False),
             )
         except Exception as e:
             logger.warning("vector_only: vector query failed (%s), fallback hybrid", e)
@@ -898,6 +925,7 @@ class Executor:
         base_params = {
             "tenant_id": params["tenant_id"],
             "as_of": params["as_of"],
+            "include_history": params.get("include_history", False),
         }
 
         # 2. BM25 + Vector queries (séquentiel pour simplicité — Neo4j n'autorise
@@ -960,6 +988,7 @@ class Executor:
             "query_text": escaped,
             "tenant_id": params["tenant_id"],
             "as_of": params["as_of"],
+            "include_history": params.get("include_history", False),
         }
         try:
             rows = self._get_neo4j().execute_query(CYPHER_KG_CLAIMS_HYBRID, **hybrid_params)
@@ -1374,6 +1403,15 @@ class Executor:
         #   Vector rank 1 ; sans c.text, le CE ne peut pas matcher la question
         #   sur l'identifiant rare. Pattern littérature 2026 : cross-encoder
         #   doit voir le verbatim complet, pas un triplet reconstruit minimaliste.
+        #
+        # Conversion temporels Neo4j → Python natif (ADR §7) : avec
+        # include_history=True, les claims invalidés remontent désormais et
+        # leur `invalidated_at` (posé par lineage_resolution via datetime())
+        # arrive en neo4j.time.DateTime que Pydantic rejette. Avant l'ADR ce
+        # champ était toujours NULL côté retrieval (claims filtrés).
+        def _native(v: Any) -> Any:
+            return v.to_native() if hasattr(v, "to_native") else v
+
         return ClaimSummary(
             claim_id=str(node.get("claim_id") or node.get("id") or ""),
             subject_canonical=node.get("subject_canonical"),
@@ -1381,14 +1419,20 @@ class Executor:
             value=node.get("object_canonical") or node.get("value") or node.get("object_value"),
             value_normalized=node.get("value_normalized"),
             confidence=node.get("confidence"),
-            valid_from=node.get("valid_from"),
-            valid_until=node.get("valid_until"),
-            ingested_at=node.get("ingested_at"),
-            invalidated_at=node.get("invalidated_at"),
+            valid_from=_native(node.get("valid_from")),
+            valid_until=_native(node.get("valid_until")),
+            ingested_at=_native(node.get("ingested_at")),
+            invalidated_at=_native(node.get("invalidated_at")),
             marker_type=node.get("marker_type"),
             source_doc_id=node.get("source_doc_id") or node.get("doc_id") or node.get("document_id"),
             # Extra (Pydantic extra="allow") — verbatim Claim text pour cross-encoder
             text=node.get("text"),
+            # Extra — statut lifecycle (ADR §7.D/§7.F) : 'withdrawn' = marqueur
+            # ÉPISTÉMIQUE (doc porteur annulé, successeur muet) → caveat en synthèse
+            # + tie-breaker de rang, JAMAIS un filtre dur.
+            lifecycle_status=node.get("lifecycle_status_current"),
+            lifecycle_reason=node.get("lifecycle_status_reason"),
+            invalidation_reason=node.get("invalidation_reason"),
         )
 
     @staticmethod

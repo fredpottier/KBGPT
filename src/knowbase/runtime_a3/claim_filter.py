@@ -318,8 +318,17 @@ class ClaimFilter:
                 duration_s=time.perf_counter() - t0,
             )
 
-        # Sort DESC par score
-        scored.sort(key=lambda t: t[1], reverse=True)
+        # Sort DESC par score — avec TIE-BREAKER lifecycle (ADR_RESOLUTION_
+        # CONTRADICTIONS §7.F) : à pertinence ÉGALE, un claim actif passe devant
+        # un claim 'withdrawn' (doc porteur annulé). JAMAIS une pénalité de score
+        # (un withdrawn fortement pertinent qui est la seule formulation doit
+        # surfacer — avec caveat en synthèse) : on arrondit le score à 3 décimales
+        # pour le tri primaire, le statut ne départage que les quasi-ex-aequo.
+        def _is_withdrawn(idx: int) -> bool:
+            extras = claims[idx].model_dump() if hasattr(claims[idx], "model_dump") else {}
+            return extras.get("lifecycle_status") == "withdrawn" or claims[idx].invalidated_at is not None
+
+        scored.sort(key=lambda t: (round(t[1], 3), not _is_withdrawn(t[0])), reverse=True)
 
         # Sélection : top-K avec score >= MIN_SCORE, mais au moins MIN_KEPT.
         # Si `groups` fourni, top-K est appliqué PAR groupe (stratification).
