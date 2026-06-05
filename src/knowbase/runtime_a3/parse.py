@@ -170,12 +170,47 @@ class Parser:
         # 1. Préparer la question (tronquer si trop longue)
         question, truncation_warning = self._prepare_question(parse_input.question)
 
-        # 2. Tenter le LLM call (avec 1 retry)
-        try:
-            output = self._call_llm_with_retry(question, parse_input)
-        except (ParseValidationError, Exception) as e:
-            logger.warning(f"[Parse] LLM call failed: {e}. Using deterministic fallback.")
+        # 2. Tenter le LLM call. GARDE STABILITÉ (chantier 05/06) : 1 retry avant
+        # le fallback déterministe — A4.14 avait coupé le retry quand Parse était
+        # Qwen3-235B (30% d'échec, retry inutile) ; Parse est DeepSeek depuis P2.3
+        # (échec rare et transitoire : le retry sauve le run au lieu de dégénérer
+        # en subject=None → « (no subject) » + abstention à tort côté chat).
+        import os as _os
+        retry_enabled = _os.getenv("V6_PARSE_DEGENERATE_RETRY", "1") == "1"
+        output = None
+        for attempt in range(2 if retry_enabled else 1):
+            try:
+                output = self._call_llm_with_retry(question, parse_input)
+                break
+            except (ParseValidationError, Exception) as e:
+                logger.warning(
+                    f"[Parse] LLM call failed (attempt {attempt + 1}): {e}."
+                )
+        if output is None:
+            logger.warning("[Parse] all attempts failed. Using deterministic fallback.")
             return self._fallback_deterministic(parse_input.question, parse_input)
+
+        # 2-bis. GARDE DÉGÉNÉRESCENCE : sortie LLM valide mais VIDE de sens
+        # (aucun sous-but ne porte ni subject ni predicate_hint) → la suite du
+        # pipeline est aveugle (retrieval sur la question seule, Evaluate juge
+        # « non couvert »). 1 retry ; si toujours dégénéré on garde (le LLM
+        # considère la question réellement sans entité extractible).
+        def _degenerate(o) -> bool:
+            return bool(o.sub_goals) and all(
+                not sg.subject_canonical and not sg.predicate_hint
+                for sg in o.sub_goals
+            )
+        if retry_enabled and _degenerate(output):
+            logger.info("[Parse] sortie dégénérée (aucun subject/predicate) — retry unique")
+            try:
+                retried = self._call_llm_with_retry(question, parse_input)
+                if not _degenerate(retried):
+                    retried.parse_warnings.append("degenerate_retry_recovered")
+                    output = retried
+                else:
+                    output.parse_warnings.append("degenerate_confirmed")
+            except Exception:
+                pass  # on garde la sortie initiale
 
         # 3. Ajouter le warning de troncature si applicable
         if truncation_warning and truncation_warning not in output.parse_warnings:

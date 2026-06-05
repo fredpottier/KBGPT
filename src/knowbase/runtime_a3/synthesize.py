@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -598,6 +599,7 @@ class Synthesizer:
     def _apply_claim_filter(
         self,
         inp: SynthesizeInput,
+        top_k_override: Optional[int] = None,
     ) -> List[ClaimSummary]:
         """Applique le filtre sémantique claim↔question si activé.
 
@@ -623,6 +625,8 @@ class Synthesizer:
             sg.kind == "list_enumeration" for sg in inp.parse_output.sub_goals
         )
         eff_top_k = int(_os.getenv("V6_LIST_TOP_K", "12")) if is_list else 5
+        if top_k_override is not None:
+            eff_top_k = top_k_override
 
         # P2.2 — Cross-encoder reranker prioritaire si activé
         if _os.getenv("V6_CROSS_ENCODER_RERANK", "0") == "1":
@@ -735,6 +739,7 @@ class Synthesizer:
         try:
             out = self._call_llm_with_retry(inp, override_claims=filtered_claims)
             if out is not None:
+                out = self._maybe_textonly_rescue(out, inp, filtered_claims)
                 return self._finalize(out, inp)
         except Exception:
             logger.exception("synthesize: LLM call raised, falling back to template")
@@ -802,6 +807,57 @@ class Synthesizer:
     # ------------------------------------------------------------------
     # Finalize: post-validation + citation coverage check
     # ------------------------------------------------------------------
+
+    def _maybe_textonly_rescue(
+        self,
+        out: SynthesizeOutput,
+        inp: SynthesizeInput,
+        filtered_claims: List[ClaimSummary],
+    ) -> SynthesizeOutput:
+        """Garde STABILITÉ (chantier 05/06) — rescue des flips TEXT_ONLY.
+
+        Pattern observé (bench + chat) : Evaluate dit CORRECT, des claims sont
+        fournis, mais le LLM Synthesize déclare TEXT_ONLY (« the evidence does
+        not document… ») parce que le top-5 filtré a raté LE claim clé — flip
+        run-to-run causé par la non-déterminisme provider (DeepSeek MoE, même à
+        temperature=0+seed) en amont (Parse → retrieval → top-5 différents).
+
+        Rescue ÉTROIT (anti-A3.10 : jamais une cascade systématique) :
+        uniquement si verdict==CORRECT ET claims≥1 ET mode==TEXT_ONLY, on
+        re-filtre avec top_k élargi (12) et on retente UNE synthèse. Si le LLM
+        maintient TEXT_ONLY → on respecte (abstention/constat honnête conservé).
+        Toggle V6_TEXTONLY_RESCUE (défaut "1"). Coût : 1 appel LLM, rare.
+        """
+        if os.getenv("V6_TEXTONLY_RESCUE", "1") != "1":
+            return out
+        if out.mode != "TEXT_ONLY":
+            return out
+        if inp.evaluate_output.verdict != "CORRECT" or not filtered_claims:
+            return out
+        try:
+            widened = self._apply_claim_filter(inp, top_k_override=12)
+        except Exception:
+            return out
+        if len(widened) <= len(filtered_claims):
+            return out  # rien de plus à montrer → inutile de retenter
+        logger.info(
+            "synthesize: TEXT_ONLY rescue — verdict CORRECT avec %d claims, "
+            "retry avec top-K élargi (%d claims)",
+            len(filtered_claims), len(widened),
+        )
+        try:
+            retried = self._call_llm_with_retry(inp, override_claims=widened)
+        except Exception:
+            return out
+        if retried is not None and retried.mode != "TEXT_ONLY":
+            retried.synthesize_warnings = list(retried.synthesize_warnings) + [
+                "textonly_rescue_applied"
+            ]
+            return retried
+        out.synthesize_warnings = list(out.synthesize_warnings) + [
+            "textonly_rescue_unchanged"
+        ]
+        return out
 
     def _finalize(
         self,
@@ -923,6 +979,30 @@ class Synthesizer:
             return None
 
         if not result.is_false_premise:
+            return None
+
+        # GARDE STABILITÉ (chantier 05/06) — FALSE_UNSUPPORTED ignoré sous
+        # verdict Evaluate==CORRECT. ÉTAYÉ PAR LES DONNÉES (bench @70460ba,
+        # 15 questions false_premise réelles) :
+        #   - les détections RÉUSSIES viennent de FALSE_CONTRADICTED (3) ou de
+        #     l'abstention normale — JAMAIS de FALSE_UNSUPPORTED ;
+        #   - l'unique tir FALSE_UNSUPPORTED sur un vrai faux-présupposé
+        #     (AERO_FP_0002) a été jugé 0.0 (la correction était mauvaise) ;
+        #   - en face, FALSE_UNSUPPORTED tire à ~70% sur des questions
+        #     ANSWERABLE (LIST_0003 : 3 flips/4 runs) → flips TEXT_ONLY.
+        # FALSE_UNSUPPORTED = signal d'ABSENCE, structurellement contradictoire
+        # avec un évaluateur qui vient de juger la question couverte par les
+        # claims. FALSE_CONTRADICTED (le corpus CONTREDIT le présupposé) reste
+        # souverain. Hors verdict CORRECT, FALSE_UNSUPPORTED s'applique normalement.
+        if (
+            os.getenv("V6_PREMISE_UNSUPPORTED_SKIP_ON_CORRECT", "1") == "1"
+            and result.status == "FALSE_UNSUPPORTED"
+            and inp.evaluate_output.verdict == "CORRECT"
+        ):
+            logger.info(
+                "[PREMISE] FALSE_UNSUPPORTED ignoré (verdict=CORRECT — signal "
+                "d'absence contredit par la couverture jugée complète)"
+            )
             return None
 
         if result.correction:
