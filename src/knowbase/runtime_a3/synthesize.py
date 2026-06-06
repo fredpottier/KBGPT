@@ -78,6 +78,12 @@ _I18N_CONFLICT = {
     "fr": "Sources en tension", "en": "Conflicting sources",
     "de": "Widersprüchliche Quellen", "es": "Fuentes en conflicto",
 }
+_I18N_EQUIVALENT = {
+    "fr": "énoncent la même valeur (unités différentes)",
+    "en": "state the same value (different units)",
+    "de": "nennen denselben Wert (unterschiedliche Einheiten)",
+    "es": "expresan el mismo valor (unidades diferentes)",
+}
 _I18N_NEXT_STEPS = {
     "fr": "Pistes possibles :\n  - Reformuler avec des termes plus précis\n  - Vérifier que le corpus indexé couvre ce sujet",
     "en": "Possible next steps:\n  - Reformulate with more specific terms\n  - Verify that the indexed corpus covers this topic",
@@ -1194,11 +1200,12 @@ class Synthesizer:
                 lines.append(f"- {b_lab} ({ac.get('doc_b')}) : {ac.get('text_b')}")
                 docs_cited.add(ac.get("doc_a"))
                 docs_cited.add(ac.get("doc_b"))
+        _eq_lbl = _i18n(_I18N_EQUIVALENT, inp.parse_output)
         for ac in equiv[:4]:
             a_lab = ac.get("authority_a") or ac.get("doc_a") or "?"
             b_lab = ac.get("authority_b") or ac.get("doc_b") or "?"
             lines.append(
-                f"✓ {a_lab} et {b_lab} énoncent la même valeur (unités différentes) : "
+                f"✓ {a_lab} & {b_lab} — {_eq_lbl} : "
                 f"{a_lab} « {ac.get('text_a')} » / {b_lab} « {ac.get('text_b')} »"
             )
             docs_cited.add(ac.get("doc_a"))
