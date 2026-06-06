@@ -235,6 +235,8 @@ export default function ReferentielPage() {
   const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null)
   // positions ajustées au drag (type Neo4j) — surchargent le layout déterministe
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({})
+  // mode focus : double-clic sur un document → seul lui, ses voisins et leurs liens restent visibles
+  const [focusDoc, setFocusDoc] = useState<string | null>(null)
   const [verdictFilter, setVerdictFilter] = useState<string | null>(null)
   // filtre du registre sur une paire de documents (posé par les pills / panneaux)
   const [pairFilter, setPairFilter] = useState<{ a: string; b: string } | null>(null)
@@ -254,6 +256,7 @@ export default function ReferentielPage() {
       setProof(null)
       setSelectedDoc(null)
       setSelectedPair(null)
+      setFocusDoc(null)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -347,6 +350,23 @@ export default function ReferentielPage() {
     for (const l of lineageDrawn) { s.add(l.superseder); s.add(l.superseded) }
     return s
   }, [lineageDrawn])
+
+  // voisinage du document en focus : lui + tout document relié (lignée ou relations)
+  const focusSet = useMemo(() => {
+    if (!focusDoc) return null
+    const s = new Set<string>([focusDoc])
+    for (const l of lineageDrawn) {
+      if (l.superseder === focusDoc) s.add(l.superseded)
+      if (l.superseded === focusDoc) s.add(l.superseder)
+    }
+    for (const p of drawnPairs) {
+      if (p.doc_a === focusDoc) s.add(p.doc_b)
+      if (p.doc_b === focusDoc) s.add(p.doc_a)
+    }
+    return s
+  }, [focusDoc, lineageDrawn, drawnPairs])
+  // un lien n'est gardé en focus que s'il TOUCHE le document focalisé
+  const focusEdge = (a: string, b: string) => !focusDoc || a === focusDoc || b === focusDoc
 
   const chainOf = useCallback((id: string): string[] => {
     const up = new Map<string, string>()   // superseded -> superseder
@@ -456,6 +476,8 @@ export default function ReferentielPage() {
         .ref-node:hover circle.ring { stroke-width:4; }
         .ref-node.sel circle.ring { stroke:var(--warning-base); stroke-width:4; filter:drop-shadow(0 0 10px var(--warning-soft)); }
         .ref-node.fade { opacity:.15; }
+        .ref-node, .ref-edge-rel, .ref-edge-lineage, .ref-pill { transition: opacity var(--motion-base, .2s); }
+        .ref-hidden { opacity:0 !important; pointer-events:none !important; }
         .ref-nlabel { fill:var(--fg-primary); font-family:var(--font-sans); font-weight:600; font-size:12.5px; text-anchor:middle; pointer-events:none; }
         .ref-node.dead .ref-nlabel, .ref-node.external .ref-nlabel { fill:var(--fg-muted); }
         .ref-nsub { fill:var(--fg-muted); font-family:var(--font-mono); font-size:9.5px; text-anchor:middle; pointer-events:none; letter-spacing:.05em; }
@@ -570,6 +592,15 @@ export default function ReferentielPage() {
                   {label}
                 </Box>
               ))}
+              {focusDoc && (
+                <Box as="button" onClick={() => setFocusDoc(null)}
+                  fontSize="11.5px" fontWeight={700} letterSpacing=".03em" whiteSpace="nowrap"
+                  color="var(--accent)" border="1px solid var(--accent)"
+                  bg="var(--accent-soft)" borderRadius="20px" px={3} py={1.5}
+                  title="Sortir du focus (ou double-clic dans le vide / Échap)">
+                  ◎ Focus : {nodeById.get(focusDoc)?.title ?? focusDoc}  ✕
+                </Box>
+              )}
               {Object.keys(positions).length > 0 && (
                 <Box as="button" onClick={() => setPositions({})}
                   fontSize="11.5px" fontWeight={600} letterSpacing=".03em"
@@ -583,13 +614,14 @@ export default function ReferentielPage() {
             </HStack>
             <Text position="absolute" top="18px" right="20px" zIndex={8} fontSize="11.5px"
               color="var(--fg-muted)" fontFamily="var(--font-mono)">
-              cliquez un document · un fil ambré pour sa preuve · une arête fine pour le détail
+              clic : document · double-clic : isoler son voisinage · fil ambré : preuve · arête fine : détail
             </Text>
 
             {/* SVG carte (scrollable verticalement si grande) */}
             <Box position="absolute" inset={0} overflowY="auto" overflowX="hidden">
               <svg ref={svgRef} viewBox={`0 0 ${layout.w} ${layout.h}`} style={{ width: '100%', display: 'block' }}
-                onClick={(e) => { if (e.target === e.currentTarget) { setSelectedDoc(null); setSelectedPair(null) } }}>
+                onClick={(e) => { if (e.target === e.currentTarget) { setSelectedDoc(null); setSelectedPair(null) } }}
+                onDoubleClick={(e) => { if (e.target === e.currentTarget) setFocusDoc(null) }}>
                 <defs>
                   <marker id="ref-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--warning-base)" />
@@ -606,15 +638,16 @@ export default function ReferentielPage() {
                   const tip = `${a.title} ↔ ${b.title} — ${p.n_relations} relations : ${relBreakdownFr(p.relations)}`
                   const dim = filter === 'lineage'
                   const lit = selectedDoc != null && (p.doc_a === selectedDoc || p.doc_b === selectedDoc)
+                  const hid = !focusEdge(p.doc_a, p.doc_b)
                   return (
                     <g key={`${p.doc_a}|${p.doc_b}`}>
-                      <path className={`ref-edge-rel ref-pop ${p.tensions_confirmed > 0 ? 'confirmed' : ''} ${dim ? 'dim' : ''} ${lit ? 'lit' : ''}`}
+                      <path className={`ref-edge-rel ref-pop ${p.tensions_confirmed > 0 ? 'confirmed' : ''} ${dim ? 'dim' : ''} ${lit ? 'lit' : ''} ${hid ? 'ref-hidden' : ''}`}
                         d={c.d} strokeWidth={w} style={{ animationDelay: `${0.9 + i * 0.04}s` }}
                         onMouseMove={(e) => showTooltip(e, tip)}
                         onMouseLeave={() => setHover(null)}
                         onClick={() => { setSelectedPair(p); setSelectedDoc(null) }} />
                       {p.tensions_examined > 0 && !dim && (
-                        <g className={`ref-pill ref-pop ${p.tensions_confirmed > 0 ? 'confirmed' : ''}`}
+                        <g className={`ref-pill ref-pop ${p.tensions_confirmed > 0 ? 'confirmed' : ''} ${hid ? 'ref-hidden' : ''}`}
                           style={{ animationDelay: `${1.3 + i * 0.04}s` }}
                           onClick={() => openRegistryForPair(p.doc_a, p.doc_b)}>
                           <rect x={mid.x - 64} y={mid.y - 11} width={128} height={20} />
@@ -633,11 +666,12 @@ export default function ReferentielPage() {
                   const b = nodeById.get(l.superseded)!
                   const c = curvePath(b, a, 0.10) // flèche orientée vers le document courant
                   const dim = filter === 'alive' || filter === 'dead'
+                  const hid = !focusEdge(l.superseder, l.superseded)
                   return (
                     <g key={`lin-${i}`}>
-                      <path className={`ref-edge-lineage ${dim ? 'dim' : ''}`} d={c.d}
+                      <path className={`ref-edge-lineage ${dim ? 'dim' : ''} ${hid ? 'ref-hidden' : ''}`} d={c.d}
                         markerEnd="url(#ref-arrow)" style={{ animationDelay: `${0.5 + i * 0.15}s` }} />
-                      <path className="ref-edge-hit" d={c.d}
+                      <path className={`ref-edge-hit ${hid ? 'ref-hidden' : ''}`} d={c.d}
                         onMouseMove={(e) => showTooltip(e, `${a.title} remplace ${b.title} — cliquez pour la preuve`)}
                         onMouseLeave={() => setHover(null)}
                         onClick={() => setProof(l)} />
@@ -653,15 +687,17 @@ export default function ReferentielPage() {
                   const sub = n.status === 'external'
                     ? 'réf. externe — non ingéré'
                     : `${n.status === 'superseded' ? '✝ annulé · ' : ''}${fmtNum(n.n_claims)} faits`
+                  const hid = focusSet != null && !focusSet.has(n.doc_id)
                   return (
                     <g key={n.doc_id}
-                      className={`ref-node ref-pop ${cls} ${selectedDoc === n.doc_id ? 'sel' : ''} ${visibleNode(n) ? '' : 'fade'}`}
+                      className={`ref-node ref-pop ${cls} ${selectedDoc === n.doc_id ? 'sel' : ''} ${visibleNode(n) ? '' : 'fade'} ${hid ? 'ref-hidden' : ''}`}
                       style={{ animationDelay: `${0.15 + i * 0.05}s`, transformOrigin: `${n.x}px ${n.y}px` }}
                       onPointerDown={(e) => startDrag(e, n)}
                       onClick={() => {
                         if (dragRef.current?.moved) return // c'était un drag, pas un clic
                         setSelectedDoc(n.doc_id); setSelectedPair(null)
-                      }}>
+                      }}
+                      onDoubleClick={(e) => { e.stopPropagation(); setFocusDoc(n.doc_id) }}>
                       <circle className="core" cx={n.x} cy={n.y} r={n.r} />
                       <circle className="ring" cx={n.x} cy={n.y} r={n.r} />
                       {n.authority && (
