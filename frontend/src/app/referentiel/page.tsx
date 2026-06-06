@@ -969,9 +969,16 @@ function RegistryRow({ t, v, expanded, onToggle }: {
       <Box as="tr" cursor="pointer" onClick={onToggle}
         _hover={{ bg: 'var(--bg-hover)' }} transition="background var(--motion-fast)">
         <Box as="td" px={3} py={3} borderBottom="1px solid var(--border-faint)" fontSize="12.5px"
-          fontWeight={600} color="var(--fg-primary)" lineHeight={1.4} verticalAlign="top">
+          fontWeight={600} color="var(--fg-primary)" lineHeight={1.6} verticalAlign="top">
+          {/* badges A/B : même mapping que les passages (la raison du juge cite « Statement A/B ») */}
+          <Box as="span" fontFamily="var(--font-mono)" fontSize="9px" fontWeight={700} px={1.5} py={0.5}
+            borderRadius="4px" mr={1.5} color="var(--accent)" border="1px solid var(--accent)"
+            verticalAlign="middle">A</Box>
           {t.title_a}
           <Box as="span" color="var(--fg-muted)" fontFamily="var(--font-mono)" fontSize="10px" px={1.5}>VS</Box>
+          <Box as="span" fontFamily="var(--font-mono)" fontSize="9px" fontWeight={700} px={1.5} py={0.5}
+            borderRadius="4px" mr={1.5} color="var(--info-base)" border="1px solid var(--info-border)"
+            verticalAlign="middle">B</Box>
           {t.title_b}
         </Box>
         <Box as="td" px={3} py={3} borderBottom="1px solid var(--border-faint)" verticalAlign="top">
