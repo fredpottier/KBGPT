@@ -490,6 +490,12 @@ export default function ReferentielPage() {
     if (filter === 'lineage') return inLineage.has(n.doc_id)
     return true
   }
+  // un lien suit ses extrémités : estompé si l'un de ses deux documents est filtré
+  const visibleEdge = (a: string, b: string) => {
+    const na = nodeById.get(a)
+    const nb = nodeById.get(b)
+    return !!na && !!nb && visibleNode(na) && visibleNode(nb)
+  }
 
   return (
     <Box minH="calc(100vh - 64px)" bg="var(--bg-canvas)" position="relative" overflow="hidden">
@@ -685,7 +691,7 @@ export default function ReferentielPage() {
                   const w = Math.max(1, Math.min(7, p.n_relations / 70))
                   const mid = qMid(a, { x: c.cx, y: c.cy }, b)
                   const tip = `${a.title} ↔ ${b.title} — ${p.n_relations} relations : ${relBreakdownFr(p.relations)}`
-                  const dim = filter === 'lineage'
+                  const dim = filter === 'lineage' || !visibleEdge(p.doc_a, p.doc_b)
                   const lit = selectedDoc != null && (p.doc_a === selectedDoc || p.doc_b === selectedDoc)
                   const hid = !focusEdge(p.doc_a, p.doc_b)
                   return (
@@ -714,7 +720,7 @@ export default function ReferentielPage() {
                   const a = nodeById.get(l.superseder)!
                   const b = nodeById.get(l.superseded)!
                   const c = curvePath(b, a, 0.10) // flèche orientée vers le document courant
-                  const dim = filter === 'alive' || filter === 'dead'
+                  const dim = !visibleEdge(l.superseder, l.superseded)
                   const hid = !focusLineage(l.superseder, l.superseded)
                   return (
                     <g key={`lin-${i}`}>
