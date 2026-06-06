@@ -233,11 +233,16 @@ export default function ReferentielPage() {
   const [selectedPair, setSelectedPair] = useState<RefPair | null>(null)
   const [proof, setProof] = useState<RefLineage | null>(null)
   const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null)
+  // positions ajustées au drag (type Neo4j) — surchargent le layout déterministe
+  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({})
   const [verdictFilter, setVerdictFilter] = useState<string | null>(null)
   // filtre du registre sur une paire de documents (posé par les pills / panneaux)
   const [pairFilter, setPairFilter] = useState<{ a: string; b: string } | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
   const stageRef = useRef<HTMLDivElement>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+  // drag en cours : id du nœud, offset curseur→centre, et si un vrai déplacement a eu lieu
+  const dragRef = useRef<{ id: string; dx: number; dy: number; moved: boolean } | null>(null)
 
   // les index des lignes changent avec les filtres → referme la ligne dépliée
   useEffect(() => { setExpanded(null) }, [verdictFilter, pairFilter])
@@ -276,10 +281,52 @@ export default function ReferentielPage() {
     () => (mapData ? computeLayout(mapData.documents, mapData.lineage) : null),
     [mapData],
   )
-  const nodeById = useMemo(
-    () => new Map((layout?.nodes ?? []).map((n) => [n.doc_id, n])),
-    [layout],
+  // positions effectives = layout déterministe + déplacements manuels
+  const nodes = useMemo(
+    () => (layout?.nodes ?? []).map((n) => ({ ...n, ...(positions[n.doc_id] ?? {}) })),
+    [layout, positions],
   )
+  const nodeById = useMemo(
+    () => new Map(nodes.map((n) => [n.doc_id, n])),
+    [nodes],
+  )
+
+  // ── Drag des nœuds (les arêtes/pills suivent : tout est dérivé des positions)
+  const toSvgCoords = useCallback((e: { clientX: number; clientY: number }) => {
+    const svg = svgRef.current
+    if (!svg) return null
+    const pt = svg.createSVGPoint()
+    pt.x = e.clientX
+    pt.y = e.clientY
+    const ctm = svg.getScreenCTM()
+    return ctm ? pt.matrixTransform(ctm.inverse()) : null
+  }, [])
+
+  const startDrag = useCallback((e: React.PointerEvent, node: NodePos) => {
+    if (e.button !== 0) return
+    const p = toSvgCoords(e)
+    if (!p) return
+    dragRef.current = { id: node.doc_id, dx: p.x - node.x, dy: p.y - node.y, moved: false }
+    const onMove = (ev: PointerEvent) => {
+      const d = dragRef.current
+      const q = toSvgCoords(ev)
+      if (!d || !q) return
+      const nx = q.x - d.dx
+      const ny = q.y - d.dy
+      // seuil anti-tremblement : en dessous, ça reste un clic
+      if (!d.moved && Math.hypot(nx - node.x, ny - node.y) < 4) return
+      d.moved = true
+      setPositions((prev) => ({ ...prev, [d.id]: { x: nx, y: ny } }))
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      // laisse le onClick lire `moved` avant de nettoyer
+      setTimeout(() => { dragRef.current = null }, 0)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [toSvgCoords])
 
   const drawnPairs = useMemo(() => {
     if (!mapData) return []
@@ -398,7 +445,8 @@ export default function ReferentielPage() {
         .ref-edge-lineage:hover { stroke-width:3.6; }
         .ref-edge-lineage.dim { opacity:.18; }
         .ref-edge-hit { fill:none; stroke:transparent; stroke-width:18; cursor:pointer; }
-        .ref-node { cursor:pointer; }
+        .ref-node { cursor:grab; touch-action:none; }
+        .ref-node:active { cursor:grabbing; }
         .ref-node circle.core { fill:var(--bg-surface-alt); transition:fill var(--motion-fast); }
         .ref-node circle.ring { fill:none; stroke-width:2.6; transition:stroke-width var(--motion-fast); }
         .ref-node.alive circle.ring { stroke:var(--success-base); }
@@ -522,6 +570,16 @@ export default function ReferentielPage() {
                   {label}
                 </Box>
               ))}
+              {Object.keys(positions).length > 0 && (
+                <Box as="button" onClick={() => setPositions({})}
+                  fontSize="11.5px" fontWeight={600} letterSpacing=".03em"
+                  color="var(--fg-secondary)" border="1px dashed var(--border-default)"
+                  bg="var(--bg-surface)" borderRadius="20px" px={3} py={1.5}
+                  title="Revenir à la disposition automatique"
+                  _hover={{ color: 'var(--fg-primary)' }}>
+                  ⟲ Réorganiser
+                </Box>
+              )}
             </HStack>
             <Text position="absolute" top="18px" right="20px" zIndex={8} fontSize="11.5px"
               color="var(--fg-muted)" fontFamily="var(--font-mono)">
@@ -530,7 +588,7 @@ export default function ReferentielPage() {
 
             {/* SVG carte (scrollable verticalement si grande) */}
             <Box position="absolute" inset={0} overflowY="auto" overflowX="hidden">
-              <svg viewBox={`0 0 ${layout.w} ${layout.h}`} style={{ width: '100%', display: 'block' }}
+              <svg ref={svgRef} viewBox={`0 0 ${layout.w} ${layout.h}`} style={{ width: '100%', display: 'block' }}
                 onClick={(e) => { if (e.target === e.currentTarget) { setSelectedDoc(null); setSelectedPair(null) } }}>
                 <defs>
                   <marker id="ref-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -587,8 +645,8 @@ export default function ReferentielPage() {
                   )
                 })}
 
-                {/* nœuds documents */}
-                {layout.nodes.map((n, i) => {
+                {/* nœuds documents (déplaçables — les arêtes suivent) */}
+                {nodes.map((n, i) => {
                   const cls = n.status === 'in_force' ? 'alive' : n.status === 'external' ? 'external' : 'dead'
                   const authClass = (n.authority ?? '').toUpperCase()
                   const authColor = authClass === 'EASA' ? 'var(--info-base)' : authClass === 'FAA' ? 'var(--accent)' : 'var(--fg-muted)'
@@ -599,7 +657,11 @@ export default function ReferentielPage() {
                     <g key={n.doc_id}
                       className={`ref-node ref-pop ${cls} ${selectedDoc === n.doc_id ? 'sel' : ''} ${visibleNode(n) ? '' : 'fade'}`}
                       style={{ animationDelay: `${0.15 + i * 0.05}s`, transformOrigin: `${n.x}px ${n.y}px` }}
-                      onClick={() => { setSelectedDoc(n.doc_id); setSelectedPair(null) }}>
+                      onPointerDown={(e) => startDrag(e, n)}
+                      onClick={() => {
+                        if (dragRef.current?.moved) return // c'était un drag, pas un clic
+                        setSelectedDoc(n.doc_id); setSelectedPair(null)
+                      }}>
                       <circle className="core" cx={n.x} cy={n.y} r={n.r} />
                       <circle className="ring" cx={n.x} cy={n.y} r={n.r} />
                       {n.authority && (
