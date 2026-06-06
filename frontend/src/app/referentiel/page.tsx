@@ -966,6 +966,7 @@ export default function ReferentielPage() {
           bg="var(--bg-surface)" fontSize="11.5px" color="var(--fg-secondary)" position="relative">
           <HStack><Box w="30px" borderTop="4px solid var(--success-base)" /><Text fontSize="11.5px">Période de validité du texte en vigueur</Text></HStack>
           <HStack><Box w="30px" borderTop="3px solid var(--border-strong)" opacity={0.6} /><Text fontSize="11.5px">Période révolue (jusqu&apos;au remplacement ✝)</Text></HStack>
+          <HStack><Box w="30px" borderTop="3px dashed var(--border-strong)" opacity={0.7} /><Text fontSize="11.5px">Barre pointillée : borne(s) non datée(s) — l&apos;ordre est prouvé, la durée non</Text></HStack>
           <HStack>
             <Box w="11px" h="11px" borderRadius="50%" border="2.5px dashed var(--warning-base)" bg="var(--bg-surface-alt)" />
             <Text fontSize="11.5px">Date inconnue — position interpolée, ordre garanti par la lignée</Text>
