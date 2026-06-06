@@ -24,10 +24,10 @@ import {
   HStack,
   Select,
   Progress,
-  Image,
 } from '@chakra-ui/react'
 import { ViewIcon, ViewOffIcon, ChevronDownIcon } from '@chakra-ui/icons'
 import { motion, AnimatePresence } from 'framer-motion'
+import BrandLogo from '@/components/ui/BrandLogo'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { FiMail, FiLock, FiArrowRight, FiAlertCircle, FiUser, FiShield, FiCheck } from 'react-icons/fi'
@@ -149,19 +149,14 @@ const Logo = () => (
   >
     <VStack spacing={3}>
       <HStack spacing={3}>
-        <Image
-          src="/logo.png"
-          alt="OSMOSIS Logo"
-          h={14}
-          w="auto"
-          objectFit="contain"
-          filter="drop-shadow(0 0 20px rgba(99, 102, 241, 0.4))"
-        />
+        <Box filter="drop-shadow(0 0 20px var(--accent-glow))">
+          <BrandLogo size={52} />
+        </Box>
         <Text
           fontSize="2xl"
           fontWeight="bold"
-          bgGradient="linear(to-r, text.primary, brand.400)"
-          bgClip="text"
+          color="text.primary"
+          letterSpacing="-.02em"
         >
           OSMOSIS
         </Text>

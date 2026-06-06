@@ -11,7 +11,11 @@ export const metadata: Metadata = {
   title: 'OSMOSIS - Le Cortex Documentaire',
   description: 'OSMOSE - Intelligence sémantique avancée pour la recherche documentaire',
   icons: {
-    icon: '/favicon.ico',
+    // Monogramme « Pore décentré » — SVG adaptatif light/dark, .ico en repli
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.ico', sizes: 'any' },
+    ],
   },
 }
 

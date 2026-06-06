@@ -15,7 +15,6 @@ import {
   Badge,
   Button,
   Icon,
-  Image,
 } from '@chakra-ui/react'
 import { ChevronDownIcon } from '@chakra-ui/icons'
 import { useState, useEffect, useMemo } from 'react'
@@ -24,6 +23,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import NextLink from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
 import ThemeToggle from '@/components/layout/ThemeToggle'
+import BrandLogo from '@/components/ui/BrandLogo'
 import {
   FiMessageSquare,
   FiFolder,
@@ -303,16 +303,10 @@ export default function TopNavigation() {
       backdropFilter="blur(12px)"
     >
       <Flex h={16} alignItems="center" justifyContent="space-between">
-        {/* Logo OSMOS */}
-        <Flex alignItems="center" gap={2}>
-          <Image
-            src="/logo.png"
-            alt="OSMOSIS Logo"
-            h={10}
-            w="auto"
-            objectFit="contain"
-          />
-          <Text fontWeight="bold" fontSize="lg" color="text.primary">
+        {/* Logo OSMOSIS — monogramme Pore décentré (suit le thème) */}
+        <Flex alignItems="center" gap={2.5}>
+          <BrandLogo size={28} />
+          <Text fontWeight="bold" fontSize="lg" color="text.primary" letterSpacing="-.02em">
             OSMOSIS
           </Text>
         </Flex>

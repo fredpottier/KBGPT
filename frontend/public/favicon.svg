@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- OSMOSIS — monogramme Pore décentré (brand-logo, 06/06/2026).
+       S'adapte au thème du navigateur : light = graphite + viridian,
+       dark = paper + viridian-onDark. -->
+  <style>
+    .ring { stroke: #0E1116; }
+    .pore { fill: #2E5D4E; }
+    @media (prefers-color-scheme: dark) {
+      .ring { stroke: #F5F4EF; }
+      .pore { fill: #5EC28C; }
+    }
+  </style>
+  <circle class="ring" cx="12" cy="12" r="9" fill="none" stroke-width="2.1"/>
+  <circle class="pore" cx="15.2" cy="12" r="2.1"/>
+</svg>
