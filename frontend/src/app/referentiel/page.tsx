@@ -89,6 +89,15 @@ interface RefTensions {
   items: RefTension[]
 }
 
+interface RefPairExample {
+  text_a: string
+  text_b: string
+  doc_a: string
+  doc_b: string
+  page_a: number | null
+  page_b: number | null
+}
+
 // ── Libellés français ───────────────────────────────────────────────────────
 
 const REL_FR: Record<string, string> = {
@@ -99,6 +108,39 @@ const REL_FR: Record<string, string> = {
   CHAINS_TO: 'enchaîne vers',
   EVOLVES_TO: 'évolution',
   EVOLUTION_OF: 'évolution',
+}
+
+// Langage clair pour la décomposition par type (terme technique en infobulle)
+const REL_EXPLAIN: Record<string, { label: string; desc: string }> = {
+  REFINES:      { label: 'précise',          desc: 'l’un détaille ou affine une règle énoncée par l’autre' },
+  QUALIFIES:    { label: 'conditionne',      desc: 'l’un ajoute des conditions ou limites d’application à l’autre' },
+  COMPLEMENTS:  { label: 'complète',         desc: 'les deux couvrent des aspects voisins du même sujet' },
+  SPECIALIZES:  { label: 'particularise',    desc: 'l’un applique une règle générale de l’autre à un cas précis' },
+  CHAINS_TO:    { label: 'enchaîne',         desc: 'étapes successives d’une même procédure, réparties entre les deux' },
+  EVOLVES_TO:   { label: 'fait évoluer',     desc: 'versions successives d’une même exigence' },
+  EVOLUTION_OF: { label: 'fait évoluer',     desc: 'versions successives d’une même exigence' },
+}
+
+/** Phrase de synthèse CALCULÉE depuis la distribution des types — jamais
+ *  écrite en dur (le texte explique comment lire, les données portent le
+ *  verdict). `isLineage` : la paire est-elle reliée par une supersession ? */
+function pairNatureFr(relations: Record<string, number>, isLineage: boolean): string | null {
+  const total = Object.values(relations).reduce((s, v) => s + v, 0)
+  if (!total) return null
+  const share = (k: string) => (relations[k] ?? 0) / total
+  if (isLineage) {
+    return 'Ces deux documents sont les éditions successives d’un même texte : la nouvelle reformule, précise et encadre ce que disait l’ancienne.'
+  }
+  if (share('REFINES') + share('QUALIFIES') >= 0.5) {
+    return 'Profil dominant : l’un précise et encadre les règles de l’autre — typique d’un guide d’application face à son texte de référence.'
+  }
+  if (share('COMPLEMENTS') >= 0.5) {
+    return 'Profil dominant : deux textes qui se complètent — ils couvrent des facettes voisines du même sujet, sans se répéter.'
+  }
+  if (share('CHAINS_TO') >= 0.4) {
+    return 'Profil dominant : une procédure répartie entre les deux documents — les étapes de l’un appellent celles de l’autre.'
+  }
+  return 'Relations variées : ces deux documents s’articulent de plusieurs manières — le détail par type ci-dessous, avec exemples.'
 }
 
 const VERDICT_FR: Record<string, { label: string; color: string; soft: string }> = {
@@ -766,6 +808,9 @@ export default function ReferentielPage() {
               )}
               {selectedPair && (
                 <PairPanel pair={selectedPair} nodeById={nodeById}
+                  isLineage={lineageDrawn.some((l) =>
+                    (l.superseder === selectedPair.doc_a && l.superseded === selectedPair.doc_b) ||
+                    (l.superseder === selectedPair.doc_b && l.superseded === selectedPair.doc_a))}
                   onRegistry={() => openRegistryForPair(selectedPair.doc_a, selectedPair.doc_b)} />
               )}
             </Box>
@@ -1251,15 +1296,35 @@ function DocPanel({ node, chain, lineage, pairs, nodeById, onProof, onRegistry }
   )
 }
 
-function PairPanel({ pair, nodeById, onRegistry }: {
+function PairPanel({ pair, nodeById, isLineage, onRegistry }: {
   pair: RefPair
   nodeById: Map<string, NodePos>
+  isLineage: boolean
   onRegistry: () => void
 }) {
   const a = nodeById.get(pair.doc_a)
   const b = nodeById.get(pair.doc_b)
   const entries = Object.entries(pair.relations).sort((x, y) => y[1] - x[1])
   const max = Math.max(1, ...entries.map(([, v]) => v))
+  const nature = pairNatureFr(pair.relations, isLineage)
+  // exemples verbatim par type (chargés au clic, mémorisés)
+  const [openRel, setOpenRel] = useState<string | null>(null)
+  const [examples, setExamples] = useState<Record<string, RefPairExample[] | 'loading'>>({})
+
+  const toggleRel = async (rel: string) => {
+    if (openRel === rel) { setOpenRel(null); return }
+    setOpenRel(rel)
+    if (examples[rel]) return
+    setExamples((p) => ({ ...p, [rel]: 'loading' }))
+    try {
+      const res = await api.referentiel.pairExamples(pair.doc_a, pair.doc_b, rel)
+      const data = (res.success && res.data ? (res.data as { items: RefPairExample[] }).items : [])
+      setExamples((p) => ({ ...p, [rel]: data }))
+    } catch {
+      setExamples((p) => ({ ...p, [rel]: [] }))
+    }
+  }
+
   return (
     <>
       <Text fontFamily="var(--font-mono)" fontSize="10px" letterSpacing=".3em" color="var(--fg-muted)">RELATION ENTRE DOCUMENTS</Text>
@@ -1267,22 +1332,76 @@ function PairPanel({ pair, nodeById, onRegistry }: {
         {a?.title} <Box as="span" color="var(--fg-muted)" fontFamily="var(--font-mono)" fontSize="11px" px={1}>↔</Box> {b?.title}
       </Heading>
       <Text fontSize="12px" color="var(--fg-secondary)" mt={2}>
-        {fmtNum(pair.n_relations)} relations entre faits, détectées et typées à l&apos;ingestion.
+        {fmtNum(pair.n_relations)} liens entre les faits des deux documents, détectés à l&apos;ingestion.
       </Text>
+      {nature && (
+        <Box mt={3} px={3} py={2.5} borderRadius="9px" bg="var(--accent-soft)"
+          border="1px solid var(--border-faint)" fontSize="12px" color="var(--fg-primary)" lineHeight={1.5}>
+          {nature}
+        </Box>
+      )}
 
       <Box mt={5}>
-        <SectionTitle>Décomposition par type</SectionTitle>
-        {entries.map(([k, v]) => (
-          <Box key={k} mb={2.5}>
-            <Flex justify="space-between" fontSize="12px" mb={1}>
-              <Text color="var(--fg-primary)" fontWeight={600}>{REL_FR[k] ?? k.toLowerCase()}</Text>
-              <Text color="var(--fg-secondary)" fontFamily="var(--font-mono)">{fmtNum(v)}</Text>
-            </Flex>
-            <Box h="6px" borderRadius="3px" bg="var(--bg-surface-alt)" overflow="hidden">
-              <Box h="100%" w={`${(v / max) * 100}%`} bg="var(--accent)" borderRadius="3px" />
+        <SectionTitle>Comment ils s&apos;articulent</SectionTitle>
+        <Text fontSize="11px" color="var(--fg-muted)" mb={3} mt={-1}>
+          Cliquez un type pour lire de vrais exemples, preuve à l&apos;appui.
+        </Text>
+        {entries.map(([k, v]) => {
+          const ex = REL_EXPLAIN[k]
+          const open = openRel === k
+          const exData = examples[k]
+          return (
+            <Box key={k} mb={2.5}>
+              <Box as="button" w="100%" textAlign="left" onClick={() => toggleRel(k)}
+                _hover={{ bg: 'var(--bg-hover)' }} borderRadius="7px" px={2} py={1.5} mx={-2}
+                title={`Relation technique : ${k}`}>
+                <Flex justify="space-between" fontSize="12px" mb={1} align="baseline">
+                  <Text color="var(--fg-primary)" fontWeight={600}>
+                    {ex?.label ?? REL_FR[k] ?? k.toLowerCase()}
+                    <Box as="span" color="var(--fg-muted)" fontWeight={400} ml={2} fontSize="11px">
+                      {ex?.desc ?? ''}
+                    </Box>
+                  </Text>
+                  <Text color="var(--fg-secondary)" fontFamily="var(--font-mono)" whiteSpace="nowrap" ml={2}>
+                    {fmtNum(v)} {open ? '▾' : '▸'}
+                  </Text>
+                </Flex>
+                <Box h="6px" borderRadius="3px" bg="var(--bg-surface-alt)" overflow="hidden">
+                  <Box h="100%" w={`${(v / max) * 100}%`} bg="var(--accent)" borderRadius="3px" />
+                </Box>
+              </Box>
+              {open && (
+                <Box mt={2} mb={1}>
+                  {exData === 'loading' && (
+                    <Text fontSize="11.5px" color="var(--fg-muted)" px={2}>Chargement des exemples…</Text>
+                  )}
+                  {Array.isArray(exData) && exData.length === 0 && (
+                    <Text fontSize="11.5px" color="var(--fg-muted)" px={2}>Aucun exemple disponible.</Text>
+                  )}
+                  {Array.isArray(exData) && exData.map((e, i) => (
+                    <Box key={i} border="1px solid var(--border-faint)" borderRadius="8px" px={3} py={2.5} mb={2}
+                      bg="var(--bg-surface-alt)" fontSize="11.5px" lineHeight={1.5}>
+                      <Text color="var(--fg-primary)" cursor="pointer" title="Ouvrir le PDF à la page"
+                        onClick={() => openSourceFile(e.doc_a, e.page_a ?? undefined)}>
+                        <Box as="b" color="var(--accent)" fontFamily="var(--font-mono)" fontSize="9.5px" mr={1.5}>
+                          {a?.title}{e.page_a != null ? ` · p.${e.page_a}` : ''} ↗
+                        </Box>
+                        « {e.text_a} »
+                      </Text>
+                      <Text color="var(--fg-secondary)" mt={1.5} cursor="pointer" title="Ouvrir le PDF à la page"
+                        onClick={() => openSourceFile(e.doc_b, e.page_b ?? undefined)}>
+                        <Box as="b" color="var(--info-base)" fontFamily="var(--font-mono)" fontSize="9.5px" mr={1.5}>
+                          {b?.title}{e.page_b != null ? ` · p.${e.page_b}` : ''} ↗
+                        </Box>
+                        « {e.text_b} »
+                      </Text>
+                    </Box>
+                  ))}
+                </Box>
+              )}
             </Box>
-          </Box>
-        ))}
+          )
+        })}
         {entries.length === 0 && (
           <Text color="var(--fg-muted)" fontSize="12px">Pas de relation sémantique — uniquement des tensions examinées.</Text>
         )}

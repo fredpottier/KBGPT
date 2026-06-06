@@ -677,5 +677,9 @@ export const api = {
   referentiel: {
     map: () => apiClient.get('/referentiel/map'),
     tensions: (limit = 300) => apiClient.get(`/referentiel/tensions?limit=${limit}`),
+    pairExamples: (docA: string, docB: string, relation: string, limit = 3) =>
+      apiClient.get(
+        `/referentiel/pair-examples?doc_a=${encodeURIComponent(docA)}&doc_b=${encodeURIComponent(docB)}&relation=${encodeURIComponent(relation)}&limit=${limit}`,
+      ),
   },
 }

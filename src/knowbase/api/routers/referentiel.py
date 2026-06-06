@@ -146,6 +146,23 @@ class RefTensions(BaseModel):
     items: List[RefTension] = Field(default_factory=list)
 
 
+class RefPairExample(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text_a: str
+    text_b: str
+    doc_a: str
+    doc_b: str
+    page_a: Optional[int] = None
+    page_b: Optional[int] = None
+
+
+class RefPairExamples(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    relation: str
+    total: int = 0
+    items: List[RefPairExample] = Field(default_factory=list)
+
+
 # ── Cyphers ───────────────────────────────────────────────────────────────────
 
 _CY_DOCS = """
@@ -220,6 +237,20 @@ _CY_VERDICT_COUNTS = """
 MATCH (:Claim {tenant_id: $tenant_id})-[r:CONTRADICTS]->(:Claim {tenant_id: $tenant_id})
 RETURN coalesce(r.adjudication, 'NON_ADJUGÉ') AS verdict, count(r) AS n
 """
+
+# Exemples verbatim d'une paire de documents pour UN type de relation —
+# rend la décomposition « parlante » (on lit de vrais couples de phrases).
+_CY_PAIR_EXAMPLES = f"""
+MATCH (a:Claim {{tenant_id: $tenant_id, doc_id: $doc_a}})-[r]-(b:Claim {{tenant_id: $tenant_id, doc_id: $doc_b}})
+WHERE type(r) = $rel
+WITH a, b ORDER BY size(coalesce(a.text, '')) + size(coalesce(b.text, '')) ASC
+RETURN a.text AS text_a, b.text AS text_b,
+       a.doc_id AS doc_a, b.doc_id AS doc_b,
+       a.page_no AS page_a, b.page_no AS page_b
+LIMIT $limit
+"""
+
+_ALLOWED_REL_TYPES = set(_SEMANTIC_RELS.split("|")) | {"CONTRADICTS"}
 
 
 def _get_driver():
@@ -326,6 +357,34 @@ async def get_map(tenant_id: str = Query(default="default")) -> RefMap:
         tensions_confirmed=sum(p.tensions_confirmed for p in pairs),
     )
     return RefMap(summary=summary, documents=documents, lineage=lineage, pairs=pairs)
+
+
+@router.get("/pair-examples", response_model=RefPairExamples)
+async def get_pair_examples(
+    doc_a: str = Query(...),
+    doc_b: str = Query(...),
+    relation: str = Query(..., description="Type de relation (REFINES, QUALIFIES…)"),
+    tenant_id: str = Query(default="default"),
+    limit: int = Query(default=3, le=10),
+) -> RefPairExamples:
+    """Exemples verbatim (couples de claims) d'une paire de docs pour un type donné."""
+    rel = relation.upper().strip()
+    if rel not in _ALLOWED_REL_TYPES:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"Type de relation inconnu : {relation}")
+    driver = _get_driver()
+    with driver.session() as s:
+        rows = [dict(r) for r in s.run(
+            _CY_PAIR_EXAMPLES, tenant_id=tenant_id, doc_a=doc_a, doc_b=doc_b,
+            rel=rel, limit=limit,
+        )]
+    items = [RefPairExample(
+        text_a=(r.get("text_a") or "")[:350], text_b=(r.get("text_b") or "")[:350],
+        doc_a=r["doc_a"], doc_b=r["doc_b"],
+        page_a=int(r["page_a"]) if r.get("page_a") is not None else None,
+        page_b=int(r["page_b"]) if r.get("page_b") is not None else None,
+    ) for r in rows]
+    return RefPairExamples(relation=rel, total=len(items), items=items)
 
 
 @router.get("/tensions", response_model=RefTensions)
