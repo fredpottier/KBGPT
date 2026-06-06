@@ -22,19 +22,12 @@ jamais « une fonctionnalité » — il voit Claire éviter une erreur ou gagner
 > ETSOs, CFR, SAE, NPAs… des centaines de pages qui se citent, se remplacent et
 > parfois se contredisent. Son problème est de savoir **ce qui fait foi**.
 
-## Acte 1 — S'orienter : l'Atlas (2 min)
+*(Décision Fred 06/06 : l'Atlas passe EN CLÔTURE — en ouverture c'est un décor,
+en fin de démo c'est une chute. Cf Acte 5.)*
 
-Claire ouvre l'**Atlas** : la cartographie narrative que le système a construite
-tout seul depuis les documents — thèmes, articles de synthèse, claims sourcés.
-Elle parcourt le thème « Safety & Compliance » pour se remettre le domaine en tête.
+## Acte 1 — Vérifier un fait, et la preuve à un clic (1 min 30)
 
-**Valeur racontée** : « Personne n'a écrit ces articles. Le système a lu les 24
-documents et a organisé le savoir. C'est l'onboarding d'un nouvel ingénieur,
-ou la revue de périmètre avant un dossier. » *(le mode « parcourir »)*
-
-## Acte 2 — Vérifier un fait, et la preuve à un clic (1 min 30)
-
-Claire passe au chat *(le mode « interroger »)*. Première vérification basique :
+Claire ouvre le chat. Première vérification basique :
 
 > **« Quelle est la limite maximale autorisée du HIC pour la certification des sièges d'avion ? »**
 
@@ -43,7 +36,7 @@ PDF s'ouvre À LA BONNE PAGE.** « Elle ne croit pas le système sur parole — 
 vérifie en 5 secondes au lieu de chercher dans 60 pages. C'est la différence
 entre un assistant qu'on doit relire et un assistant qu'on peut auditer. »
 
-## Acte 3 — Le piège du document mort (2 min)
+## Acte 2 — Le piège du document mort (2 min)
 
 Dans le dossier de certification d'origine (2009), le siège référence l'AC 21-25A.
 
@@ -57,7 +50,7 @@ a failli bâtir sa réponse client sur un texte mort — l'erreur classique qui 
 retoquer un dossier. Et remarquez : il ne dit pas seulement "remplacée", il
 **prouve** l'annulation. »
 
-## Acte 4 — Le climax : la divergence que personne ne voit (3 min)
+## Acte 3 — Le climax : la divergence que personne ne voit (3 min)
 
 Le siège modifié doit repasser les essais dynamiques HIC, côté FAA **et** EASA.
 Claire vérifie le protocole d'impact tête :
@@ -78,7 +71,7 @@ l'ingestion et attend Claire. Si elle avait qualifié son essai selon la seule
 FAA, le dossier EASA était mauvais. **C'est un essai sur catapulte à refaire :
 des dizaines de milliers d'euros et six semaines.** »
 
-## Acte 5 — La confiance : savoir se taire (1 min 30)
+## Acte 4 — La confiance : savoir se taire (1 min 30)
 
 Claire pousse une question dont la réponse n'est PAS dans le corpus
 (ex : une question sur un standard non couvert).
@@ -89,18 +82,46 @@ Claire pousse une question dont la réponse n'est PAS dans le corpus
 de réponse. Ce refus est calibré : sur notre banc de test, 83 % de discipline
 contre 65 % pour un RAG classique. C'est ce qui permet à Claire de s'y fier. »
 
-*(Option si l'audience est technique — Acte 5 bis : le calcul réglementaire :*
+*(Option si l'audience est technique — Acte 4 bis : le calcul réglementaire :*
 > *« Une charge lombaire de 1590 lb a été mesurée lors d'un essai dont le pic était de 15g au lieu des 14g requis. À quelle valeur cette charge peut-elle être ramenée par proportionnalité, selon la guidance ? »*
 *→ règle + calcul 14/15 × 1590 = 1484 lb, sourcés. « Il a retrouvé la règle ET
 son application chiffrée — deux faits chaînés. »)*
+
+## Acte 5 — La chute : l'Atlas (2 min)
+
+La démo des questions est finie. Transition faussement anodine :
+
+> « Une dernière chose. Quand Claire a rejoint ce programme, elle a dû se former.
+> Voici la documentation de référence de l'équipe. »
+
+On ouvre l'**Atlas** et on navigue 30 secondes SANS commentaire : domaines,
+chapitres titrés, articles structurés avec résumés, thèmes transversaux. On
+laisse l'audience supposer que c'est la documentation interne, rédigée par
+quelqu'un. Puis :
+
+> « Une question : d'après vous, qui a écrit cette documentation ? …
+> **Personne.** Le système l'a générée tout seul, en lisant les mêmes 24
+> documents. Les chapitres, les articles, les liens entre thèmes — tout est
+> dérivé des faits extraits, et chaque affirmation reste cliquable vers sa
+> source. Et quand un nouveau document arrive — un amendement, une révision —
+> **cette documentation se régénère**. Elle ne peut pas être périmée. »
+
+**Valeur racontée** : le moment « Attends… » recherché. Ce n'est plus une
+fonctionnalité, c'est la conséquence visible de toute la démo : si le système
+stocke des faits vérifiables (actes 1-4), alors il peut aussi *rédiger et
+maintenir* le savoir — pas seulement répondre. L'onboarding d'un nouvel
+ingénieur, la revue de périmètre, la documentation vivante : cadeau dérivé
+de la même architecture.
 
 ## Clôture (1 min)
 
 > « Tout ce que vous avez vu repose sur une seule idée : ce système ne stocke pas
 > des *pages*, il stocke des **affirmations vérifiables** — qui les a dites, quand,
-> ce qui les remplace, ce qui les contredit. La différence avec un assistant IA
-> générique, ce n'est pas l'intelligence du modèle — c'est **la structure de la
-> mémoire**. Et c'est ce qui change un outil de recherche en un outil de décision. »
+> ce qui les remplace, ce qui les contredit. Vous l'avez vu répondre, prouver,
+> confronter deux autorités, refuser d'inventer — et même rédiger sa propre
+> documentation. La différence avec un assistant IA générique, ce n'est pas
+> l'intelligence du modèle — c'est **la structure de la mémoire**. Et c'est ce
+> qui change un outil de recherche en un outil de décision. »
 
 ## Logistique / plan B
 
@@ -117,6 +138,6 @@ son application chiffrée — deux faits chaînés. »)*
 
 1. **Audience exacte** ? (technique aéro / dirigeant / juriste) → ajuste la
    profondeur de l'acte 4 et l'option 5 bis.
-2. L'Atlas en ouverture (acte 1) ou en « et il y a aussi… » de clôture ?
+2. ~~Place de l'Atlas~~ → TRANCHÉ (Fred 06/06) : en clôture, en mode reveal.
 3. Qui pilote ? (Fred narre + clique, ou narration partagée)
 4. Chiffres du bench à l'écran ou seulement en voix off ?
