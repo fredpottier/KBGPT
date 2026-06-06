@@ -1,9 +1,10 @@
 # Guide de démo OSMOSIS — « La semaine de Claire »
 
-*Guide opérateur, v3 — 06/06/2026 (climax pivoté lignée+toggle après vérification
-des contradictions : ce corpus harmonisé n'en contient pas de vive — cf bloc
-« Objection contradictions » en fin de guide). Toutes les questions et les DEUX
-bras (KG et RAG) ont été validés en live. Durée cible : 12-14 min.*
+*Guide opérateur, v4 — 06/06/2026 soir (ajout Acte 2bis : rebond sur la page
+« Référentiel » — carte + frise chronologique — après la question lifecycle ;
+climax lignée+toggle inchangé ; cf bloc « Objection contradictions » en fin de
+guide). Toutes les questions et les DEUX bras (KG et RAG) ont été validés en
+live ; la page Référentiel a été validée navigateur. Durée cible : 13-16 min.*
 
 ---
 
@@ -26,6 +27,8 @@ avec un critère chiffré : le **HIC** (Head Injury Criterion). Au-delà de
    limite HIC + la preuve à un clic (**acte 1**)
 2. *« Quelle procédure d'approbation pour modifier un siège certifié ? »* → le
    vieux dossier référence l'AC 21-25A… qui est un document **mort** (**acte 2**)
+   — puis **le coup d'œil** : la même information, visible sans poser de
+   question, sur la carte et la frise du Référentiel (**acte 2bis**)
 3. **LE TEST** : la même question posée à un assistant IA classique — sur les
    mêmes documents, avec le même modèle (**acte 3 — climax**)
 4. *« Puis-je me fier à cet outil ? »* → elle le piège volontairement (**acte 4**)
@@ -59,7 +62,8 @@ questions — tu déroules le raisonnement d'une ingénieure qui prépare un dos
 | 2 | Ouvrir http://localhost:3000/chat et poser une question quelconque | **Chauffer le système** : 1er appel ~50 s (chargement modèles), les suivants 25-45 s |
 | 3 | Vérifier le toggle **« Knowledge Graph »** **activé** (bouton bleu) | L'acte 3 repose sur sa bascule |
 | 4 | Ouvrir http://localhost:3000/atlas dans un 2e onglet | L'acte 5 doit s'ouvrir sans chercher |
-| 5 | Deck de secours (captures) accessible | Plan B si le LLM tousse |
+| 5 | Ouvrir http://localhost:3000/referentiel dans un 3e onglet, **vérifier que la carte ET la frise s'affichent avec les dates** (si « date inconnue » partout : F5 dur) | L'acte 2bis doit basculer en 1 s ; la page charge ses données à l'ouverture |
+| 6 | Deck de secours (captures) accessible | Plan B si le LLM tousse |
 
 ⚠️ Latence normale : **25-45 s**. À assumer : « il vérifie chaque fait, il ne
 complète pas des phrases » — la latence devient un argument.
@@ -157,6 +161,67 @@ Réflexe avant d'engager le travail : ce guide est-il encore la référence ?
 > indexent ce qui existe ; ils ne savent pas ce qui **fait encore foi**. Pour
 > tout métier réglementé — aéro, pharma, juridique, finance — c'est LA question
 > quotidienne.
+
+---
+
+## 🎬 ACTE 2bis — Le coup d'œil : le Référentiel (2 min)
+
+**📖 Pourquoi ce moment :** Claire vient d'obtenir la réponse en *posant une
+question*. Mais la généalogie qu'elle vient de lire n'a pas été fabriquée pour
+elle à cet instant — elle **existe en permanence**, pour tout le corpus. Ce
+moment montre que la réponse du chat n'était que la partie émergée : en dessous,
+il y a un référentiel **structuré, daté et prouvé** qu'on peut regarder
+directement. C'est le passage de « un assistant qui répond » à « une plateforme
+qui connaît votre patrimoine documentaire ».
+
+**🖱️ Manipulation :**
+1. Basculer sur l'onglet navigateur **Référentiel** (pré-ouvert, checklist #5).
+2. Sur la **Carte** : montrer le sceau « Référentiel cohérent » et les fils
+   ambrés, puis **double-cliquer sur AC 21-25B** → tout disparaît sauf la
+   lignée et son voisinage. **Cliquer le fil ambré** AC 21-25B → AC 21-25A →
+   la fiche preuve s'ouvre (« this AC cancels AC 21-25A ») → *« Ouvrir le PDF
+   à la page »* si l'audience accroche.
+3. Échap (ou double-clic dans le vide), puis onglet **Frise chronologique** :
+   pointer le couloir AC 21-25 → 21-25A (1997) → 21-25B, la barre **verte**
+   qui court jusqu'à « aujourd'hui », et les ✝ aux remplacements.
+4. Laisser 5 secondes de silence — la frise se lit seule.
+5. Revenir sur l'onglet **Chat** pour l'acte 3.
+
+**🗣️ Pitch :**
+> « Claire a eu sa réponse en posant la question. Mais regardez d'où elle
+> vient. Voici son référentiel — pas une liste de fichiers : son **anatomie**.
+> Chaque pastille est un document, chaque fil ambré une succession **prouvée** —
+> je clique : voilà la phrase d'annulation, page 1, dans le texte officiel.
+>
+> Et maintenant la même chose dans le temps. [Frise] Chaque couloir est une
+> famille de documents. La barre verte, c'est le texte qui fait foi
+> **aujourd'hui**. Les croix, les remplacements. La question de tout à l'heure —
+> "l'AC 21-25A est-elle en vigueur ?" — Claire peut aussi y répondre **d'un
+> coup d'œil**, sans rien taper : 21-25A s'arrête en chemin, 21-25B court
+> jusqu'à aujourd'hui.
+>
+> Personne n'a dessiné cet écran. Personne n'a saisi ces dates ni ces liens.
+> Tout a été **lu dans les documents eux-mêmes** au moment de l'ingestion — y
+> compris les dates des documents disparus, retrouvées dans la phrase
+> d'annulation de leur remplaçant. Et quand le système ne sait pas dater, il le
+> dit : "date inconnue". Il n'invente rien, ici non plus. »
+>
+> *(Transition vers l'acte 3 :)* « Une question légitime à ce stade : est-ce que
+> ce n'est pas simplement l'IA qui est douée ? Testons ça. »
+
+**🎯 Ce qu'on démontre :** le cycle de vie d'une chaîne de documents, positionnés
+les uns par rapport aux autres dans le temps, **lisible sans poser de question**
+— et chaque lien porte sa preuve cliquable. La réponse du chat et cet écran
+sont deux vues du **même actif structuré**.
+
+**💎 Différenciateur :**
+> Les outils du marché ont des listes de fichiers et des dossiers ; au mieux un
+> historique de versions saisi à la main. Aucun ne sait **reconstruire seul**
+> qui remplace qui, depuis quand, preuve à l'appui — parce qu'aucun ne lit le
+> contenu pour en faire une structure. C'est ce qui transforme une pile de PDF
+> en référentiel : on ne *cherche* plus l'état de son patrimoine documentaire,
+> on le *regarde*. Et pour vos contrats, ce même écran montrerait :
+> contrat-cadre → avenant 1 → avenant 2, avec l'article exact qui amende quoi.
 
 ---
 
@@ -328,6 +393,8 @@ maintenir* le savoir — onboarding, revue de périmètre, documentation vivante
 | Abstention inattendue sur les actes 1-2 | Reposer telle quelle (variance fournisseur) ; 2e échec → capture du deck + « résultat d'hier, on regardera en direct après » |
 | Le RAG (toggle off) répond correctement à l'acte 3 | Sourire : « il a eu de la chance sur ce tirage — c'est justement le problème : sans graphe, retrouver la généalogie est une loterie ; avec, elle est pré-construite et systématique » *(validé 2× en échec, risque faible)* |
 | Citation non cliquable / PDF ne s'ouvre pas | Passer à l'autre citation ; le fix de résolution couvre tous les docs mais un onglet bloqué par le navigateur peut nécessiter d'autoriser les pop-ups |
+| Référentiel : « date inconnue » partout / frise sans graduations | Données chargées avant un redémarrage backend → **F5 dur** sur l'onglet (Ctrl+Shift+R). Vérifié à la checklist #5 pour ne pas le découvrir en live |
+| Référentiel : carte brouillonne après manipulations | Chip « ⟲ Réorganiser » (layout auto) ; Échap sort du focus |
 | Page Atlas vide / thème vide | Rafraîchir ; sinon sauter à la clôture (l'acte 5 est sautable) |
 
 ## 📝 Notes opérateur
@@ -336,7 +403,12 @@ maintenir* le savoir — onboarding, revue de périmètre, documentation vivante
   bras KG ET bras RAG pour l'acte 2/3).
 - Ne PAS purger, ré-ingérer ni redémarrer quoi que ce soit entre la répétition
   et la démo.
-- Répétition complète la veille : dérouler les 5 actes dans l'ordre,
-  chronométrer, faire les captures du deck de secours à cette occasion.
+- Répétition complète la veille : dérouler les 6 actes dans l'ordre (dont le
+  2bis Référentiel), chronométrer, faire les captures du deck de secours à
+  cette occasion (inclure : carte en focus AC 21-25B, fiche preuve ouverte,
+  frise avec le couloir AC 21-25).
+- Acte 2bis : répéter le **geste** double-clic → fil ambré → preuve → frise ;
+  c'est une chorégraphie de 30 s qui doit être fluide pour porter le « coup
+  d'œil ». Si le temps presse, la frise SEULE suffit (sauter la carte).
 - Question de fond aéro de l'audience : le **lexique** couvre 95 % des cas ;
   sinon « excellente question, je la note pour nos experts métier ».

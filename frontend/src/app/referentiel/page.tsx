@@ -353,22 +353,30 @@ export default function ReferentielPage() {
     return s
   }, [lineageDrawn])
 
-  // voisinage du document en focus : lui + tout document relié (lignée ou relations)
+  // voisinage du document en focus : sa lignée ENTIÈRE (toute la chaîne,
+  // pas seulement le voisin direct) + les documents reliés par relations
   const focusSet = useMemo(() => {
     if (!focusDoc) return null
+    const up = new Map<string, string>()
+    const down = new Map<string, string>()
+    for (const l of lineageDrawn) { up.set(l.superseded, l.superseder); down.set(l.superseder, l.superseded) }
     const s = new Set<string>([focusDoc])
-    for (const l of lineageDrawn) {
-      if (l.superseder === focusDoc) s.add(l.superseded)
-      if (l.superseded === focusDoc) s.add(l.superseder)
-    }
+    let cur = focusDoc
+    while (down.has(cur)) { cur = down.get(cur)!; if (s.has(cur)) break; s.add(cur) }
+    cur = focusDoc
+    while (up.has(cur)) { cur = up.get(cur)!; if (s.has(cur)) break; s.add(cur) }
     for (const p of drawnPairs) {
       if (p.doc_a === focusDoc) s.add(p.doc_b)
       if (p.doc_b === focusDoc) s.add(p.doc_a)
     }
     return s
   }, [focusDoc, lineageDrawn, drawnPairs])
-  // un lien n'est gardé en focus que s'il TOUCHE le document focalisé
+  // arête fine : gardée seulement si elle TOUCHE le document focalisé
   const focusEdge = (a: string, b: string) => !focusDoc || a === focusDoc || b === focusDoc
+  // fil de lignée : gardé si ses deux extrémités sont dans le voisinage
+  // (la chaîne complète reste visible, maillon par maillon)
+  const focusLineage = (a: string, b: string) =>
+    !focusSet || (focusSet.has(a) && focusSet.has(b))
 
   const chainOf = useCallback((id: string): string[] => {
     const up = new Map<string, string>()   // superseded -> superseder
@@ -665,7 +673,7 @@ export default function ReferentielPage() {
                   const b = nodeById.get(l.superseded)!
                   const c = curvePath(b, a, 0.10) // flèche orientée vers le document courant
                   const dim = filter === 'alive' || filter === 'dead'
-                  const hid = !focusEdge(l.superseder, l.superseded)
+                  const hid = !focusLineage(l.superseder, l.superseded)
                   return (
                     <g key={`lin-${i}`}>
                       <path className={`ref-edge-lineage ${dim ? 'dim' : ''} ${hid ? 'ref-hidden' : ''}`} d={c.d}
