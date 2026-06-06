@@ -203,9 +203,18 @@ CYPHER_CLAIM_CONTRADICTIONS = """
 UNWIND $claim_ids AS cid
 MATCH (a:Claim {tenant_id: $tenant_id, claim_id: cid})-[r:CONTRADICTS]-(b:Claim {tenant_id: $tenant_id})
 WHERE a.invalidated_at IS NULL AND b.invalidated_at IS NULL
+  AND (NOT $confirmed_only
+       OR r.adjudication IS NULL
+       OR r.adjudication = 'CONFIRMED')
 RETURN a.claim_id AS a_id, a.doc_id AS a_doc, a.subject_canonical AS subj, a.text AS a_text,
        b.claim_id AS b_id, b.doc_id AS b_doc, b.text AS b_text, r.confidence AS conf
 """
+# NOTE adjudication (#446, 06/06/2026) : avec V6_AUTHORITY_CONFLICT_CONFIRMED_ONLY=1
+# (défaut), seules les arêtes adjugées CONFIRMED (vraie contradiction vérifiée en
+# contexte) — ou pas encore adjugées (corpus sans pipeline d'adjudication) — sont
+# surfacées. Les arêtes démotées (DIFFERENT_SCOPE/COMPLEMENTARY/EQUIVALENT) ne
+# portent JAMAIS le bandeau divergence (éval 06/06 : 281 paires → 95% démotées,
+# le bandeau affichait des faux positifs PERSUASIFS).
 
 # §4.5 conflict_pending_surface — transversal
 CYPHER_CONFLICT_PENDING = """
@@ -1300,7 +1309,8 @@ class Executor:
             return
         try:
             rows = self._get_neo4j().execute_query(
-                CYPHER_CLAIM_CONTRADICTIONS, tenant_id=tenant_id, claim_ids=list(claim_ids)
+                CYPHER_CLAIM_CONTRADICTIONS, tenant_id=tenant_id, claim_ids=list(claim_ids),
+                confirmed_only=os.getenv("V6_AUTHORITY_CONFLICT_CONFIRMED_ONLY", "1") == "1",
             )
         except Exception:
             logger.exception("execute: authority conflict lookup failed (non-fatal)")

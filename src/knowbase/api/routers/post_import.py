@@ -214,6 +214,14 @@ STEPS = [
         estimated_duration="< 30s",
     ),
     StepInfo(
+        id="adjudicate_contradictions",
+        name="Adjudication des contradictions (en contexte)",
+        description="#446 : pour chaque paire CONTRADICTS, un juge LLM reçoit les deux claims AVEC leurs passages sources (doc, page) et classe CONFIRMED / DIFFERENT_SCOPE / COMPLEMENTARY / EQUIVALENT / UNCLEAR. Pré-passe déterministe d'équivalence d'unités + double-check des CONFIRMED. Verdict posé sur l'arête (réversible) + rapport JSON tracé. Le runtime ne surface en « divergence » que les CONFIRMED.",
+        order=12,
+        estimated_duration="5 - 15min",
+        requires_llm=True,
+    ),
+    StepInfo(
         id="build_perspectives",
         name="Construction Perspectives V2",
         description="Reconstruit les Perspectives thématiques (HDBSCAN sur embeddings claims, labellisation LLM, linking sujets). Skippé si moins de 50 nouveaux claims depuis le dernier build.",
@@ -599,10 +607,28 @@ def _execute_step(step_id: str, tenant_id: str, on_progress=None) -> dict:
         return _run_explicit_lineage(tenant_id, progress)
     elif step_id == "lineage_resolution":
         return _run_lineage_resolution(tenant_id, progress)
+    elif step_id == "adjudicate_contradictions":
+        return _run_adjudicate_contradictions(tenant_id, progress)
     elif step_id == "build_perspectives":
         return _run_build_perspectives(tenant_id, progress)
     else:
         raise ValueError(f"Étape inconnue: {step_id}")
+
+
+def _run_adjudicate_contradictions(tenant_id: str, progress=None) -> dict:
+    """#446 — adjudication EN CONTEXTE des paires CONTRADICTS (cf
+    relations/contradiction_adjudicator.py). Idempotent : ne re-juge que les
+    arêtes sans verdict (relancer après chaque detect_contradictions)."""
+    from knowbase.relations.contradiction_adjudicator import ContradictionAdjudicator
+
+    summary = ContradictionAdjudicator().run(tenant_id=tenant_id)
+    return {
+        "n_adjudicated": summary.n_total,
+        "n_skipped_already": summary.n_skipped_already,
+        "by_verdict": summary.by_verdict,
+        "report_path": summary.report_path,
+        "duration_s": round(summary.duration_s, 1),
+    }
 
 
 def _run_canonicalize(tenant_id: str, progress=None) -> dict:

@@ -238,6 +238,7 @@ class ContradictionAdjudicator:
         limit: Optional[int] = None,
         report_path: Optional[str] = None,
         max_workers: int = 4,
+        confirm_double_check: bool = True,
     ) -> AdjudicationSummary:
         from concurrent.futures import ThreadPoolExecutor
         from knowbase.common.clients.neo4j_client import get_neo4j_client
@@ -266,6 +267,29 @@ class ContradictionAdjudicator:
                 records.append(rec)
                 if i % 20 == 0 or i == len(pairs):
                     logger.info("[ADJUDICATION] %d/%d (%s)", i, len(pairs), rec.verdict)
+
+        # DOUBLE-CHECK des CONFIRMED (éval qualité 06/06) : CONFIRMED est le
+        # verdict à enjeu (il porte le bandeau divergence) ET le plus exposé à
+        # l'inconstance provider (constaté : 2 paires jumelles de 0.09/0.08
+        # jugées différemment). On re-juge chaque CONFIRMED une 2e fois ; il ne
+        # reste CONFIRMED que s'il l'est 2/2, sinon il prend le verdict du
+        # 2e passage (method='llm_doublecheck_demoted'). Coût : n_confirmed appels.
+        if confirm_double_check:
+            pair_by_key = {(p["a_id"], p["b_id"]): p for p in pairs}
+            for idx, rec in enumerate(records):
+                if rec.verdict != "CONFIRMED" or rec.method != "llm":
+                    continue
+                pair = pair_by_key.get((rec.a_id, rec.b_id))
+                if pair is None:
+                    continue
+                second = self.adjudicate_pair(pair)
+                if second.verdict != "CONFIRMED":
+                    logger.info(
+                        "[ADJUDICATION] double-check démote %s↔%s : CONFIRMED → %s",
+                        rec.a_id, rec.b_id, second.verdict,
+                    )
+                    second.method = "llm_doublecheck_demoted"
+                    records[idx] = second
 
         # Écriture des verdicts sur les arêtes
         with driver.session() as s:
