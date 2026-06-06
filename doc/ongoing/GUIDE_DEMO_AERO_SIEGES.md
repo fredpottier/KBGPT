@@ -1,8 +1,9 @@
 # Guide de démo OSMOSIS — « La semaine de Claire »
 
-*Guide opérateur, 06/06/2026 (v2 — fil narratif explicité). Toutes les questions ont
-été validées en live sur le corpus aéro (24 documents de certification sièges
-FAA/EASA). Durée cible : 12-14 min.*
+*Guide opérateur, v3 — 06/06/2026 (climax pivoté lignée+toggle après vérification
+des contradictions : ce corpus harmonisé n'en contient pas de vive — cf bloc
+« Objection contradictions » en fin de guide). Toutes les questions et les DEUX
+bras (KG et RAG) ont été validés en live. Durée cible : 12-14 min.*
 
 ---
 
@@ -15,22 +16,19 @@ FAA/EASA). Durée cible : 12-14 min.*
 
 Pourquoi c'est un sujet de certification ? Parce qu'en cas d'atterrissage
 d'urgence, **la tête du passager assis derrière vient frapper le dossier du siège
-de devant**. Tout ce qu'on ajoute sur ce dossier — un écran rigide, une tablette —
-change la surface que la tête percute. Les autorités encadrent donc la sévérité
-de cet impact avec un critère chiffré : le **HIC** (Head Injury Criterion, critère
-de blessure à la tête). Si le HIC mesuré en essai dépasse **1 000**, le siège
-n'est pas certifiable.
+de devant**. Tout ce qu'on ajoute sur ce dossier — un écran rigide — change la
+surface que la tête percute. Les autorités encadrent la sévérité de cet impact
+avec un critère chiffré : le **HIC** (Head Injury Criterion). Au-delà de
+**1 000**, le siège n'est pas certifiable.
 
-**D'où la matinée de Claire, dans l'ordre :**
-1. *« Quel est le seuil que mon écran ne doit pas faire dépasser ? »* → la limite
-   HIC (**acte 1**)
-2. *« Quelle est la procédure d'approbation d'une modification de siège ? »* → le
-   vieux dossier référence l'AC 21-25A, guide officiel de l'approbation des
-   sièges modifiés… est-il encore valable ? (**acte 2**)
-3. *« Comment dois-je conduire l'essai d'impact tête pour qu'il soit accepté par
-   la FAA ET par l'EASA ? »* → et là, les deux autorités divergent (**acte 3**)
-4. *« Puis-je faire confiance à cet outil ? »* → elle le piège volontairement
-   (**acte 4**)
+**La matinée de Claire, dans l'ordre :**
+1. *« Quel est le seuil que mon écran ne doit pas faire dépasser ? »* → la
+   limite HIC + la preuve à un clic (**acte 1**)
+2. *« Quelle procédure d'approbation pour modifier un siège certifié ? »* → le
+   vieux dossier référence l'AC 21-25A… qui est un document **mort** (**acte 2**)
+3. **LE TEST** : la même question posée à un assistant IA classique — sur les
+   mêmes documents, avec le même modèle (**acte 3 — climax**)
+4. *« Puis-je me fier à cet outil ? »* → elle le piège volontairement (**acte 4**)
 5. La chute : l'Atlas (**acte 5**)
 
 Chaque question DÉCOULE de la modification du client. Tu ne récites pas des
@@ -44,12 +42,11 @@ questions — tu déroules le raisonnement d'une ingénieure qui prépare un dos
 |---|---|
 | **HIC** | *Head Injury Criterion* — score de sévérité d'un impact de la tête, calculé depuis les capteurs d'un mannequin de crash. **Limite : 1 000.** Au-delà = risque de blessure grave = non certifiable |
 | **FAA / EASA** | Les deux autorités de certification : américaine / européenne. Un siège vendu mondialement doit satisfaire **les deux** |
-| **AC** (Advisory Circular) | Document de la FAA expliquant **comment** se conformer à la réglementation (le « guide pratique » officiel). Ex : AC 21-25B = approbation des sièges modifiés |
+| **AC** (Advisory Circular) | Document de la FAA expliquant **comment** se conformer à la réglementation. Ex : la série AC 21-25 = approbation des sièges **modifiés** — exactement le cas de Claire |
 | **TSO / ETSO** | *Technical Standard Order* — l'agrément type d'un équipement (le siège lui-même). ETSO = version européenne |
-| **CFR / CS-25** | La réglementation elle-même (Code of Federal Regulations US / Certification Specifications EASA pour les gros avions) |
+| **CFR / CS-25** | La réglementation elle-même (US / EASA pour les gros avions) |
 | **ATD** | *Anthropomorphic Test Device* — le mannequin de crash instrumenté |
-| **Essai dynamique 16g** | Essai sur catapulte : le siège (avec mannequins) subit une décélération de 16 fois la gravité, comme un crash survivable. C'est là qu'on mesure le HIC, les charges lombaires, la tenue des ceintures |
-| **Impact franc / coup glissant** (*solid strike / glancing blow*) | La tête peut frapper le dossier de face (franc) ou en le rasant (glissant). Toute la divergence FAA/EASA de l'acte 3 porte sur : lequel des deux compte pour la démonstration ? |
+| **Essai dynamique 16g** | Essai sur catapulte : le siège (avec mannequins) subit une décélération de 16 g, comme un crash survivable. C'est là qu'on mesure le HIC et les charges lombaires |
 | **Charge lombaire** | Force de compression mesurée dans la colonne du mannequin. Limite : 1 500 lb |
 
 ---
@@ -59,7 +56,7 @@ questions — tu déroules le raisonnement d'une ingénieure qui prépare un dos
 | # | Manipulation | Pourquoi |
 |---|---|---|
 | 1 | `./kw.ps1 status` → app, frontend, neo4j, qdrant, redis **Up** | Pas de surprise infra |
-| 2 | Ouvrir http://localhost:3000/chat et poser une question quelconque | **Chauffer le système** : 1er appel ~50 s (chargement modèles), les suivants 25-40 s |
+| 2 | Ouvrir http://localhost:3000/chat et poser une question quelconque | **Chauffer le système** : 1er appel ~50 s (chargement modèles), les suivants 25-45 s |
 | 3 | Vérifier le toggle **« Knowledge Graph »** **activé** (bouton bleu) | L'acte 3 repose sur sa bascule |
 | 4 | Ouvrir http://localhost:3000/atlas dans un 2e onglet | L'acte 5 doit s'ouvrir sans chercher |
 | 5 | Deck de secours (captures) accessible | Plan B si le LLM tousse |
@@ -80,24 +77,23 @@ complète pas des phrases » — la latence devient un argument.
 > Ça a l'air anodin. Ça ne l'est pas : en cas d'atterrissage d'urgence, la tête
 > du passager assis derrière **vient frapper ce dossier**. Ajouter un écran
 > rigide à l'endroit exact où une tête percute, c'est rouvrir la démonstration
-> de sécurité du siège. Et ce siège vole aux États-Unis ET en Europe : il doit
-> satisfaire **deux autorités**, la FAA et l'EASA.
+> de sécurité du siège. Et ce siège vole aux États-Unis ET en Europe : deux
+> autorités, la FAA et l'EASA.
 >
 > Le problème de Claire n'est pas de trouver de l'information — elle en a trop :
 > des centaines de pages de réglementations et de guides qui se citent, se
-> remplacent, et parfois se contredisent. Son problème, c'est de savoir **ce qui
-> fait foi**. Une exigence ratée, c'est un dossier retoqué, des semaines de
-> retard, un avion cloué au sol. Suivons sa matinée. »
+> remplacent, évoluent d'amendement en amendement. Son problème, c'est de savoir
+> **ce qui fait foi aujourd'hui**. Une exigence ratée, c'est un dossier retoqué,
+> des semaines de retard, un avion cloué au sol. Suivons sa matinée. »
 
 ---
 
-## 🎬 ACTE 1 — Le seuil à ne pas dépasser (1 min 30)
+## 🎬 ACTE 1 — Le seuil à ne pas dépasser, et la preuve à un clic (1 min 30)
 
 **📖 Pourquoi Claire pose cette question :** l'écran dans le dossier change la
-surface que la tête percute. Avant toute chose, Claire a besoin du **chiffre qui
-gouverne tout son dossier** : jusqu'à quelle sévérité d'impact son siège modifié
-reste-t-il certifiable ? C'est le critère HIC. Tout le reste (conception de
-l'écran, campagne d'essais, coûts) découle de ce seuil.
+surface que la tête percute. Avant tout, Claire a besoin du **chiffre qui
+gouverne son dossier** : jusqu'à quelle sévérité d'impact son siège modifié
+reste-t-il certifiable ? C'est le critère HIC.
 
 **🖱️ Manipulation :**
 1. Poser :
@@ -107,119 +103,106 @@ l'écran, campagne d'essais, coûts) découle de ce seuil.
    **à la bonne page**.
 
 **🗣️ Pitch :**
-> « Première question de Claire : le seuil. Si la tête du passager subit un
-> impact dont le score — le HIC — dépasse 1 000, le siège n'est pas certifiable.
-> Réponse : 1 000 unités, c'est confirmé. Mais regardez le geste important :
-> chaque affirmation est reliée à sa source. Je clique… et le document s'ouvre
-> **à la page exacte**. Claire ne croit pas le système sur parole — elle vérifie
-> en cinq secondes ce qui lui prenait dix minutes dans un PDF de 60 pages. »
+> « Première question : le seuil. Réponse : 1 000 unités. Mais regardez le geste
+> important : chaque affirmation est reliée à sa source. Je clique… et le
+> document s'ouvre **à la page exacte**. Claire ne croit pas le système sur
+> parole — elle vérifie en cinq secondes ce qui lui prenait dix minutes dans un
+> PDF de 60 pages. »
 
 **🎯 Ce qu'on démontre :** réponse factuelle sourcée au niveau de l'affirmation,
 traçabilité cliquable jusqu'à la page.
 
 **💎 Différenciateur :**
-> Les assistants IA du marché citent des *documents* — « voir AC 25.562-1B » — et
-> vous laissent chercher. Ici, chaque **phrase** connaît sa source et sa page.
-> C'est la différence entre un assistant qu'il faut **relire** et un assistant
-> qu'on peut **auditer**. Dans un métier où l'on engage sa signature, c'est ce
-> qui rend l'outil utilisable, pas juste impressionnant.
+> Les assistants IA du marché citent des *documents* et vous laissent chercher.
+> Ici, chaque **phrase** connaît sa source et sa page. C'est la différence entre
+> un assistant qu'il faut **relire** et un assistant qu'on peut **auditer**.
+> Dans un métier où l'on engage sa signature, c'est ce qui rend l'outil
+> utilisable, pas juste impressionnant.
 
 ---
 
 ## 🎬 ACTE 2 — Le piège du document mort (2 min)
 
-**📖 Pourquoi Claire pose cette question :** modifier un siège certifié ne se
-fait pas librement — il existe un **guide officiel de l'approbation des sièges
-modifiés** (c'est littéralement le sujet de l'AC 21-25). Claire ressort donc le
-dossier de certification d'origine du siège, qui date de 2009… et qui référence
-l'**AC 21-25A** comme procédure à suivre. Réflexe avant d'engager le travail :
-ce guide de 2009 est-il encore la référence ?
+**📖 Pourquoi Claire pose cette question :** modifier un siège certifié suit un
+**guide officiel d'approbation des sièges modifiés** (c'est littéralement le
+sujet de la série AC 21-25). Claire ressort le dossier de certification
+d'origine du siège — 2009 — qui référence l'**AC 21-25A** comme procédure.
+Réflexe avant d'engager le travail : ce guide est-il encore la référence ?
 
 **🖱️ Manipulation :**
 1. Poser :
    > **Est-ce que l'AC 21-25A est toujours en vigueur, et sinon, par quoi a-t-elle été remplacée ?**
-2. Attendu : *« Non… annulée et remplacée par l'AC 21-25B »* + la phrase
-   d'annulation citée + la lignée (21-25 → 21-25A → 21-25B).
+2. Attendu : *« Non… annulée et remplacée par l'AC 21-25B »* + **2 citations
+   cliquables = les 2 maillons de la généalogie** : AC 21-25B p.1 (« this AC
+   cancels AC 21-25A ») et AC 21-25A p.1 (« AC 21-25 … is canceled »).
+3. **Cliquer la citation AC 21-25B** → le PDF s'ouvre p.1 sur la déclaration
+   d'annulation.
 
 **🗣️ Pitch :**
-> « Le dossier d'origine du siège date de 2009. Il dit : pour modifier ce siège,
-> suivez la procédure de l'AC 21-25A. Claire vérifie. Réponse : ce document est
-> **mort** — annulé et remplacé par l'AC 21-25B. Et le système ne se contente
-> pas de l'affirmer : il **cite la déclaration d'annulation** comme preuve, et
-> il connaît toute la généalogie — 21-25, puis 21-25A, puis 21-25B aujourd'hui
-> en vigueur. Si Claire avait suivi la procédure de 2009, son dossier reposait
-> sur un texte abrogé — l'erreur classique qu'on découvre six mois plus tard,
-> au moment du refus. »
+> « Le dossier d'origine dit : suivez l'AC 21-25A. Claire vérifie. Réponse : ce
+> document est **mort** — annulé et remplacé par l'AC 21-25B. Et le système ne
+> se contente pas de l'affirmer : il connaît toute la généalogie — 21-25, puis
+> 21-25A, puis 21-25B aujourd'hui en vigueur — et il vous donne **la preuve de
+> chaque maillon**. Je clique : voilà la déclaration d'annulation, page 1 du
+> document remplaçant. Si Claire avait suivi la procédure de 2009, son dossier
+> reposait sur un texte abrogé — l'erreur classique qu'on découvre six mois plus
+> tard, au moment du refus. »
 
 **🎯 Ce qu'on démontre :** le système connaît le **cycle de vie** des documents
-(qui remplace quoi) et le restitue avec preuve.
+(qui remplace quoi) et le **prouve** maillon par maillon.
 
 **💎 Différenciateur :**
-> Une recherche classique vous donne *tous* les documents qui ressemblent à votre
-> question — y compris les morts, sans vous le dire. Les moteurs d'entreprise
-> indexent ce qui existe ; ils ne savent pas ce qui **fait encore foi**. Ici, la
-> généalogie documentaire est une connaissance de premier rang : le système
-> distingue l'histoire de l'état courant. Pour tout métier réglementé — aéro,
-> pharma, juridique, finance — c'est LA question quotidienne.
+> Une recherche classique vous donne *tous* les documents qui ressemblent à
+> votre question — y compris les morts, sans vous le dire. Les moteurs du marché
+> indexent ce qui existe ; ils ne savent pas ce qui **fait encore foi**. Pour
+> tout métier réglementé — aéro, pharma, juridique, finance — c'est LA question
+> quotidienne.
 
 ---
 
-## 🎬 ACTE 3 — LE CLIMAX : la divergence que personne ne voit (3-4 min)
+## 🎬 ACTE 3 — LE CLIMAX : la même question, sans la mémoire structurée (2-3 min)
 
-**📖 Pourquoi Claire pose cette question :** la procédure est claire, le seuil
-aussi. Reste à **planifier l'essai** qui démontrera que la tête peut frapper ce
-nouvel écran sans dépasser HIC 1 000. Or pendant un essai, la tête du mannequin
-peut frapper le dossier **de face** (impact franc) ou **en le rasant** (coup
-glissant). La question à plusieurs dizaines de milliers d'euros : *lequel des
-deux compte comme démonstration valable ?* Si elle se trompe, l'essai est à
-refaire. Et son siège doit convaincre **deux autorités**.
+**📖 Pourquoi ce moment :** l'audience vient de voir une réponse impressionnante.
+La question légitime dans toutes les têtes : *« c'est l'IA qui fait ça, non ? »*
+On y répond par une expérience en direct, à armes égales.
 
-**🖱️ Manipulation (en 2 temps) :**
-1. Poser :
-   > **Selon la FAA et l'EASA, l'évaluation du HIC à 1000 doit-elle provenir d'un impact franc (solid strike), ou s'applique-t-elle aussi en cas de coup glissant (glancing blow) ?**
-2. Attendu : **bandeau rouge « Divergence entre autorités réglementaires »** +
-   les deux positions citées (FAA : impact franc exigé ; EASA : la limite
-   s'applique quel que soit le contact).
-3. **Coup de théâtre** : désactiver le toggle **« Knowledge Graph »** (gris) et
-   **reposer exactement la même question**.
-4. Attendu : badge violet « RAG seul » ; la réponse passe à côté de la
-   divergence (affirme à tort qu'il n'y a pas de distinction, ou avoue ne pas
-   savoir — les deux servent le propos).
-5. **Réactiver le toggle.**
+**🖱️ Manipulation :**
+1. **Désactiver le toggle « Knowledge Graph »** (il devient gris).
+2. **Reposer EXACTEMENT la même question** (l'historique du chat la garde) :
+   > **Est-ce que l'AC 21-25A est toujours en vigueur, et sinon, par quoi a-t-elle été remplacée ?**
+3. Attendu : badge violet « RAG seul — Knowledge Graph désactivé » +
+   > *« INSUFFICIENT_CONTEXT : Le contexte fourni ne contient aucune mention de
+   > l'AC 21-25A, ni d'information sur son statut actuel ou sur un éventuel
+   > document de remplacement. »*
+4. **Réactiver le toggle** avant l'acte suivant.
 
-**🗣️ Pitch (temps 1) :**
-> « Claire planifie maintenant son essai d'impact tête. Détail technique qui
-> vaut très cher : pendant l'essai, la tête du mannequin peut frapper l'écran
-> de face — un impact franc — ou en le rasant — un coup glissant. Lequel des
-> deux compte comme démonstration ? Elle pose la question… et le système lève
-> un **drapeau rouge** : les deux autorités ne disent pas la même chose. La FAA
-> exige que la démonstration provienne d'un impact franc. L'EASA applique la
-> limite quel que soit le type de contact. Les deux textes sont là, cités. Si
-> Claire avait conçu sa campagne d'essais selon la seule FAA, son dossier EASA
-> était mauvais. Concrètement : **un essai sur catapulte à refaire — des
-> dizaines de milliers d'euros et six semaines de programme.** »
+**🗣️ Pitch :**
+> « Expérience honnête. Je désactive le graphe de connaissances. Il reste la
+> recherche documentaire moderne — la même technologie que les assistants IA
+> que vous connaissez — sur les **mêmes documents**, avec le **même modèle
+> d'IA**. Même question…
+>
+> *"Le contexte ne contient aucune mention de l'AC 21-25A."* Aucune mention ?
+> La déclaration d'annulation est dans le corpus — vous venez de la lire, page 1.
+> Mais un moteur de recherche découpe les documents en fragments et récupère les
+> plus *ressemblants* à la question. La phrase d'annulation ne ressemble pas à
+> la question — elle n'est jamais remontée. Et surtout : même remontée, rien
+> dans cette architecture ne *relie* les documents entre eux.
+>
+> Le graphe, lui, a construit la généalogie **au moment de l'ingestion** — elle
+> n'attend pas d'avoir de la chance au moment de la question. **La différence
+> n'est pas l'intelligence du modèle — vous venez de voir le même modèle
+> échouer. C'est la structure de la mémoire.** »
 
-**🗣️ Pitch (temps 2 — la bascule) :**
-> « Maintenant, une expérience honnête. Je désactive le graphe de connaissances —
-> il ne reste que la recherche documentaire moderne, la même technologie que
-> les assistants IA que vous connaissez, sur les **mêmes documents**, avec le
-> **même modèle d'IA**. Même question… Regardez : la divergence a disparu.
-> L'information existe pourtant — mais elle vit dans **deux documents
-> différents**, et un moteur de recherche lit des passages : il ne **confronte**
-> jamais deux textes entre eux. Ici, la contradiction a été détectée au moment
-> de l'ingestion des documents — elle attendait Claire. »
-
-**🎯 Ce qu'on démontre :** détection de contradictions inter-sources pré-calculée
-dans le graphe + preuve A/B en direct que le modèle d'IA n'y est pour rien.
+**🎯 Ce qu'on démontre :** l'A/B en direct — même corpus, même LLM, seule
+l'architecture de mémoire change. Le différenciateur cesse d'être un argument :
+il devient un fait observé par l'audience.
 
 **💎 Différenciateur :**
-> C'est le cœur. Tous les acteurs du marché répondent à « que disent mes
-> documents ? ». Aucun ne répond à « mes documents sont-ils **d'accord entre
-> eux** ? ». Cette question-là exige de mémoriser des affirmations, pas des
-> pages, et de les confronter en permanence. Vous venez de le constater : même
-> corpus, même modèle — seule la **structure de la mémoire** change le résultat.
-> Ce n'est pas une course au meilleur modèle d'IA ; c'est une autre catégorie
-> d'outil.
+> C'est le cœur. Les outils du marché répondent à « quels passages ressemblent
+> à ma question ? ». Celui-ci répond à « que sait-on, qui le dit, et qu'est-ce
+> qui fait encore foi ? ». Ce n'est pas une course au meilleur modèle d'IA —
+> c'est une autre catégorie d'outil.
 
 ---
 
@@ -227,9 +210,9 @@ dans le graphe + preuve A/B en direct que le modèle d'IA n'y est pour rien.
 
 **📖 Pourquoi Claire pose cette question :** Claire est ingénieure — elle ne
 fait pas confiance à un outil qu'elle n'a pas **piégé**. Avant de s'appuyer sur
-lui pour un dossier qu'elle signera, elle lui pose volontairement une question
-dont elle SAIT que la réponse n'est pas dans sa base documentaire (les sièges
-éjectables militaires — un tout autre monde que les sièges passagers civils).
+lui pour un dossier qu'elle signera, elle pose volontairement une question dont
+elle SAIT que la réponse n'est pas dans sa base (les sièges éjectables
+militaires — un autre monde que les sièges passagers civils).
 
 **🖱️ Manipulation :**
 1. (Toggle KG réactivé.) Poser :
@@ -238,14 +221,13 @@ dont elle SAIT que la réponse n'est pas dans sa base documentaire (les sièges
    dit au lieu d'inventer.
 
 **🗣️ Pitch :**
-> « Dernière question — et Claire la pose en connaissance de cause : les sièges
-> éjectables militaires, un monde qui n'a rien à voir avec sa base documentaire.
-> Elle piège l'outil. Et il donne la réponse la plus importante de toute la
-> démo : **"je ne sais pas, et voici pourquoi"**. En certification, une réponse
-> inventée est pire que pas de réponse : elle finit dans un dossier avec une
-> signature dessous. Sur notre banc d'évaluation, cette discipline d'abstention
-> atteint 83 %, contre 65 % pour la même IA sans le graphe. C'est *ça* qui
-> permet à Claire de s'y fier les 95 autres fois où il répond. »
+> « Dernière question — et Claire la pose en connaissance de cause : elle piège
+> l'outil. Et il donne la réponse la plus importante de toute la démo : **"je ne
+> sais pas, et voici pourquoi"**. En certification, une réponse inventée est
+> pire que pas de réponse : elle finit dans un dossier avec une signature
+> dessous. Sur notre banc d'évaluation, cette discipline d'abstention atteint
+> 83 %, contre 65 % pour la même IA sans le graphe. C'est *ça* qui permet à
+> Claire de s'y fier les 95 autres fois où il répond. »
 
 **🎯 Ce qu'on démontre :** l'abstention calibrée — le système connaît les
 limites de son corpus et les déclare.
@@ -254,19 +236,16 @@ limites de son corpus et les déclare.
 > Le réflexe du marché est de toujours répondre — optimisé pour la satisfaction
 > immédiate, pas pour la fiabilité. Un outil qui ne sait pas se taire reporte la
 > vérification sur l'humain à **chaque** réponse : le gain de temps s'évapore.
-> La valeur d'un assistant professionnel ne se mesure pas à ce qu'il sait dire,
-> mais à la confiance qu'on peut accorder à ce qu'il dit.
 
 *(**Option audience technique — Acte 4 bis : sauver un essai déjà payé.**
-Contexte-histoire : en fouillant les archives d'essais du siège, Claire trouve un
-essai dynamique où la catapulte a tiré un peu trop fort — pic à 15g au lieu des
-14g requis — et la charge lombaire mesurée, 1 590 lb, dépasse la limite de
-1 500 lb. Cet essai est-il bon à jeter, ou la guidance permet-elle de corriger
-proportionnellement ? Poser :*
+Contexte : dans les archives d'essais, Claire trouve un essai dynamique où la
+catapulte a tiré trop fort — pic à 15g au lieu des 14g requis — et la charge
+lombaire mesurée, 1 590 lb, dépasse la limite de 1 500 lb. Essai à jeter, ou
+corrigeable ? Poser :*
 > *« Une charge lombaire de 1590 lb a été mesurée lors d'un essai dont le pic était de 15g au lieu des 14g requis. À quelle valeur cette charge peut-elle être ramenée par proportionnalité, selon la guidance ? »*
-*→ attendu : la règle ET le calcul, 14/15 × 1590 = **1 484 lb** < 1 500 → l'essai
-est sauvé. Pitch : « il a chaîné deux faits — la règle de proportionnalité, puis
-son application chiffrée. Claire vient d'éviter de repayer un essai. »)*
+*→ attendu : la règle ET le calcul, 14/15 × 1590 = **1 484 lb** < 1 500 →
+l'essai est sauvé. Pitch : « il a chaîné la règle de proportionnalité et son
+application chiffrée. Claire vient d'éviter de repayer un essai. »)*
 
 ---
 
@@ -275,8 +254,8 @@ son application chiffrée. Claire vient d'éviter de repayer un essai. »)*
 **📖 Pourquoi on montre ça :** la démo des questions est finie — l'audience
 pense avoir tout vu. On introduit l'Atlas comme un élément *banal* du décor
 (la documentation de formation de l'équipe) pour révéler ensuite qu'il est
-généré. La surprise ne marche que si la navigation silencieuse laisse croire
-à une documentation rédigée à la main.
+généré. La surprise ne marche que si la navigation silencieuse laisse croire à
+une documentation rédigée à la main.
 
 **🖱️ Manipulation :**
 1. Basculer sur l'onglet **http://localhost:3000/atlas** déjà ouvert.
@@ -303,9 +282,7 @@ maintenir* le savoir — onboarding, revue de périmètre, documentation vivante
 **💎 Différenciateur :**
 > La documentation interne est le projet que toutes les organisations commencent
 > et qu'aucune ne maintient : périmée le jour de sa publication. Ici, ce n'est
-> plus un livrable, c'est un **sous-produit permanent** du système. Les outils du
-> marché cherchent dans vos documents ; celui-ci en **redistille le savoir** —
-> et le tient à jour sans qu'on le lui demande.
+> plus un livrable, c'est un **sous-produit permanent** du système.
 
 ---
 
@@ -314,12 +291,32 @@ maintenir* le savoir — onboarding, revue de périmètre, documentation vivante
 **🗣️ Pitch :**
 > « Tout ce que vous avez vu repose sur une seule idée : ce système ne stocke
 > pas des *pages*, il stocke des **affirmations vérifiables** — qui les a dites,
-> quand, ce qui les remplace, ce qui les contredit. Vous l'avez vu répondre et
-> prouver, repérer un document mort, confronter deux autorités, refuser
-> d'inventer, et même rédiger sa propre documentation. La différence avec un
-> assistant IA générique, ce n'est pas l'intelligence du modèle — vous avez vu
-> le même modèle échouer sans le graphe. C'est **la structure de la mémoire**.
-> Et c'est ce qui change un outil de recherche en un outil de décision. »
+> quand, ce qui les remplace. Vous l'avez vu répondre et prouver, repérer un
+> document mort, refuser d'inventer, rédiger sa propre documentation — et vous
+> avez vu le même modèle d'IA échouer dès qu'on lui retire cette mémoire. La
+> différence n'est pas l'intelligence du modèle — c'est **la structure de la
+> mémoire**. Et c'est ce qui change un outil de recherche en un outil de
+> décision. »
+
+---
+
+## ❓ OBJECTION PROBABLE : « Et les contradictions entre documents ? »
+
+*(Ne pas l'aborder spontanément — mais si la question vient, c'est un point FORT :)*
+
+> « Excellente question. Le système détecte les tensions candidates entre
+> documents à l'ingestion — sur ce corpus, il en a repéré 281. Puis il fait ce
+> qu'un bon analyste ferait : il **relit les passages sources de chaque paire**
+> pour vérifier qu'elles parlent bien de la même chose, dans les mêmes
+> conditions. Verdict, traçé paire par paire : ce corpus est **cohérent** — ce
+> qui est normal, FAA et EASA harmonisent volontairement leurs exigences
+> sièges. La plupart des tensions apparentes étaient des conversions d'unités,
+> des conditions d'essai différentes, ou des citations historiques.
+>
+> Et c'est exactement le comportement que vous voulez : un système qui ne crie
+> pas au loup. Le jour où un document **réellement** contradictoire entrera
+> dans votre base — une nouvelle révision qui change un seuil, une exigence
+> client incompatible — lui seul déclenchera l'alerte, preuve à l'appui. »
 
 ---
 
@@ -328,19 +325,18 @@ maintenir* le savoir — onboarding, revue de périmètre, documentation vivante
 | Symptôme | Réflexe |
 |---|---|
 | Réponse > 60 s ou erreur de synthèse | « Le fournisseur d'IA a un hoquet — c'est précisément pour ça qu'on ne fait jamais confiance à une IA sans preuve » → reposer la question ; sinon capture du deck |
-| Abstention inattendue sur une question des actes 1-3 | Reposer telle quelle (variance fournisseur) ; 2e échec → capture du deck + « résultat d'hier, on regardera en direct après » |
-| La divergence acte 3 ne s'affiche pas | Reposer EXACTEMENT comme écrit (les termes *solid strike* / *glancing blow* comptent) |
-| Le RAG (toggle off) répond correctement à l'acte 3 | Sourire : « il a eu de la chance sur ce tirage — c'est justement le problème : sans graphe, la détection est une loterie ; avec, elle est systématique » |
+| Abstention inattendue sur les actes 1-2 | Reposer telle quelle (variance fournisseur) ; 2e échec → capture du deck + « résultat d'hier, on regardera en direct après » |
+| Le RAG (toggle off) répond correctement à l'acte 3 | Sourire : « il a eu de la chance sur ce tirage — c'est justement le problème : sans graphe, retrouver la généalogie est une loterie ; avec, elle est pré-construite et systématique » *(validé 2× en échec, risque faible)* |
+| Citation non cliquable / PDF ne s'ouvre pas | Passer à l'autre citation ; le fix de résolution couvre tous les docs mais un onglet bloqué par le navigateur peut nécessiter d'autoriser les pop-ups |
 | Page Atlas vide / thème vide | Rafraîchir ; sinon sauter à la clôture (l'acte 5 est sautable) |
 
 ## 📝 Notes opérateur
 
-- Questions à **copier-coller depuis ce guide** (la formulation exacte compte
-  pour les actes 3 et 4 bis).
+- Questions à **copier-coller depuis ce guide** (formulations validées en live,
+  bras KG ET bras RAG pour l'acte 2/3).
 - Ne PAS purger, ré-ingérer ni redémarrer quoi que ce soit entre la répétition
   et la démo.
-- Répétition complète la veille : dérouler les 5 actes dans l'ordre, chronométrer,
-  faire les captures du deck de secours à cette occasion.
-- Si l'audience pose une question de fond sur l'aéro : le **lexique** en tête de
-  guide couvre 95 % des cas ; pour le reste, « excellente question, je la note
-  pour nos experts métier » est une réponse d'avant-vente parfaitement honorable.
+- Répétition complète la veille : dérouler les 5 actes dans l'ordre,
+  chronométrer, faire les captures du deck de secours à cette occasion.
+- Question de fond aéro de l'audience : le **lexique** couvre 95 % des cas ;
+  sinon « excellente question, je la note pour nos experts métier ».
