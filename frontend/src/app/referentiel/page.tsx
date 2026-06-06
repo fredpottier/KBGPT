@@ -234,8 +234,13 @@ export default function ReferentielPage() {
   const [proof, setProof] = useState<RefLineage | null>(null)
   const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null)
   const [verdictFilter, setVerdictFilter] = useState<string | null>(null)
+  // filtre du registre sur une paire de documents (posé par les pills / panneaux)
+  const [pairFilter, setPairFilter] = useState<{ a: string; b: string } | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
   const stageRef = useRef<HTMLDivElement>(null)
+
+  // les index des lignes changent avec les filtres → referme la ligne dépliée
+  useEffect(() => { setExpanded(null) }, [verdictFilter, pairFilter])
 
   // Échap : ferme preuve, puis panneau
   useEffect(() => {
@@ -335,10 +340,30 @@ export default function ReferentielPage() {
 
   const S = mapData.summary
   const coherent = S.tensions_confirmed === 0
-  const verdictCounts = tensions?.by_verdict ?? {}
-  const registryItems = (tensions?.items ?? []).filter(
+  // filtre paire d'abord (bidirectionnel), puis verdict ; les compteurs suivent la paire
+  const pairItems = (tensions?.items ?? []).filter(
+    (t) => !pairFilter
+      || (t.doc_a === pairFilter.a && t.doc_b === pairFilter.b)
+      || (t.doc_a === pairFilter.b && t.doc_b === pairFilter.a),
+  )
+  const verdictCounts: Record<string, number> = pairFilter
+    ? pairItems.reduce((acc, t) => {
+        const v = t.verdict ?? 'NON_ADJUGÉ'
+        acc[v] = (acc[v] ?? 0) + 1
+        return acc
+      }, {} as Record<string, number>)
+    : tensions?.by_verdict ?? {}
+  const registryTotal = pairFilter ? pairItems.length : tensions?.total ?? 0
+  const registryItems = pairItems.filter(
     (t) => !verdictFilter || (t.verdict ?? 'NON_ADJUGÉ') === verdictFilter,
   )
+
+  const openRegistryForPair = (a: string, b: string) => {
+    setPairFilter({ a, b })
+    setVerdictFilter(null)
+    setExpanded(null)
+    setView('registry')
+  }
 
   const visibleNode = (n: NodePos) => {
     if (filter === 'alive') return n.status === 'in_force'
@@ -456,7 +481,7 @@ export default function ReferentielPage() {
       <HStack mx={9} mt={4} spacing={1.5} position="relative">
         {([['map', 'Carte'], ['registry', 'Registre des tensions']] as const).map(([v, label]) => (
           <Button key={v} size="sm" variant="ghost"
-            onClick={() => { setView(v); setProof(null) }}
+            onClick={() => { setView(v); setProof(null); setPairFilter(null) }}
             color={view === v ? 'var(--fg-primary)' : 'var(--fg-secondary)'}
             bg={view === v ? 'var(--bg-surface)' : 'transparent'}
             border="1px solid"
@@ -533,7 +558,7 @@ export default function ReferentielPage() {
                       {p.tensions_examined > 0 && !dim && (
                         <g className={`ref-pill ref-pop ${p.tensions_confirmed > 0 ? 'confirmed' : ''}`}
                           style={{ animationDelay: `${1.3 + i * 0.04}s` }}
-                          onClick={() => { setVerdictFilter(null); setView('registry') }}>
+                          onClick={() => openRegistryForPair(p.doc_a, p.doc_b)}>
                           <rect x={mid.x - 64} y={mid.y - 11} width={128} height={20} />
                           <text x={mid.x} y={mid.y + 3.5}>
                             {p.tensions_examined} examinée{p.tensions_examined > 1 ? 's' : ''} · {p.tensions_confirmed} confirmée
@@ -631,11 +656,12 @@ export default function ReferentielPage() {
                   pairs={mapData.pairs.filter((p) => p.doc_a === selectedDoc || p.doc_b === selectedDoc)}
                   nodeById={nodeById}
                   onProof={setProof}
-                  onRegistry={() => setView('registry')}
+                  onRegistry={openRegistryForPair}
                 />
               )}
               {selectedPair && (
-                <PairPanel pair={selectedPair} nodeById={nodeById} onRegistry={() => setView('registry')} />
+                <PairPanel pair={selectedPair} nodeById={nodeById}
+                  onRegistry={() => openRegistryForPair(selectedPair.doc_a, selectedPair.doc_b)} />
               )}
             </Box>
 
@@ -698,7 +724,19 @@ export default function ReferentielPage() {
                 </Text>
               </Box>
               <HStack spacing={2} wrap="wrap">
-                <VerdictChip label={`Toutes · ${fmtNum(tensions?.total ?? 0)}`} active={!verdictFilter} onClick={() => setVerdictFilter(null)} />
+                {pairFilter && (
+                  <Box as="button" onClick={() => setPairFilter(null)}
+                    fontSize="11.5px" fontWeight={700} letterSpacing=".03em" whiteSpace="nowrap"
+                    color="var(--warning-base)" border="1px solid var(--warning-border)"
+                    bg="var(--warning-soft)" borderRadius="20px" px={3} py={1.5}
+                    title="Retirer le filtre de paire">
+                    {nodeById.get(pairFilter.a)?.title ?? pairFilter.a}
+                    {' ↔ '}
+                    {nodeById.get(pairFilter.b)?.title ?? pairFilter.b}
+                    {'  ✕'}
+                  </Box>
+                )}
+                <VerdictChip label={`Toutes · ${fmtNum(registryTotal)}`} active={!verdictFilter} onClick={() => setVerdictFilter(null)} />
                 {Object.entries(verdictCounts).sort((a, b) => b[1] - a[1]).map(([v, n]) => (
                   <VerdictChip key={v} label={`${VERDICT_FR[v]?.label ?? v} · ${fmtNum(n)}`}
                     color={VERDICT_FR[v]?.color}
@@ -707,7 +745,7 @@ export default function ReferentielPage() {
               </HStack>
             </Flex>
 
-            {coherent && (
+            {coherent && !pairFilter && (
               <Flex border="1px solid var(--success-border)" bg="var(--success-soft)" borderRadius="11px"
                 px={5} py={4} gap={4} align="center" mb={5}>
                 <Icon as={FiShield} color="var(--success-base)" boxSize={6} />
@@ -747,9 +785,9 @@ export default function ReferentielPage() {
                 })}
               </Box>
             </Box>
-            {tensions && registryItems.length < (verdictFilter ? (verdictCounts[verdictFilter] ?? 0) : tensions.total) && (
+            {tensions && registryItems.length < (verdictFilter ? (verdictCounts[verdictFilter] ?? 0) : registryTotal) && (
               <Text py={4} color="var(--fg-muted)" fontSize="12px" fontFamily="var(--font-mono)">
-                … {fmtNum((verdictFilter ? (verdictCounts[verdictFilter] ?? 0) : tensions.total) - registryItems.length)} autres paires examinées (300 premières affichées)
+                … {fmtNum((verdictFilter ? (verdictCounts[verdictFilter] ?? 0) : registryTotal) - registryItems.length)} autres paires examinées (300 premières affichées)
               </Text>
             )}
           </Box>
@@ -777,7 +815,7 @@ function DocPanel({ node, chain, lineage, pairs, nodeById, onProof, onRegistry }
   pairs: RefPair[]
   nodeById: Map<string, NodePos>
   onProof: (l: RefLineage) => void
-  onRegistry: () => void
+  onRegistry: (docA: string, docB: string) => void
 }) {
   const proof = lineage.find((l) => l.superseder === node.doc_id || l.superseded === node.doc_id)
   const tensionPairs = pairs.filter((p) => p.tensions_examined > 0)
@@ -855,7 +893,7 @@ function DocPanel({ node, chain, lineage, pairs, nodeById, onProof, onRegistry }
             const other = nodeById.get(otherId)
             return (
               <Box key={otherId} border="1px solid var(--border-faint)" borderRadius="9px" px={3} py={2.5} mb={2}
-                bg="var(--bg-surface-alt)" cursor="pointer" onClick={onRegistry}
+                bg="var(--bg-surface-alt)" cursor="pointer" onClick={() => onRegistry(node.doc_id, otherId)}
                 _hover={{ borderColor: 'var(--border-default)' }}>
                 <Flex justify="space-between" align="center">
                   <Text fontSize="12px" fontWeight={600} color="var(--fg-primary)">avec {other?.title ?? otherId}</Text>
