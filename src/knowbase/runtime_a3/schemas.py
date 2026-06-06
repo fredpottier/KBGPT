@@ -362,6 +362,15 @@ class DocLineageSummary(BaseModel):
     is_in_force: bool = True  # ce document est-il lui-même la tête ?
     superseded: List[str] = Field(default_factory=list)  # reg_keys superséd és (transitif)
     evidence: List[str] = Field(default_factory=list)  # verbatims des claims déclarants
+    evidence_claim_ids: List[str] = Field(
+        default_factory=list,
+        description=(
+            "claim_ids des claims déclarants (DECLARES_SUPERSESSION) — permet de "
+            "citer la PREUVE de supersession comme une vraie citation cliquable "
+            "(doc+page corrects) au lieu d'un claim de retrieval sans rapport "
+            "(fix filage démo 06/06)."
+        ),
+    )
 
 
 class AuthorityConflictSummary(BaseModel):

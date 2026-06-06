@@ -284,13 +284,25 @@ async def get_source_file_by_doc_id(
         raise HTTPException(status_code=400, detail="Invalid doc_id")
 
     candidate_dirs = [settings.docs_in_dir, settings.docs_done_dir]
-    for base_dir in candidate_dirs:
-        if not base_dir.exists():
-            continue
-        for entry in base_dir.iterdir():
-            if not entry.is_file():
+    # Matching en 2 passes (fix 06/06) : stem EXACT d'abord, puis PRÉFIXE.
+    # Cas réel : doc_id `side_facing_seat_research_ada1d53b` → base
+    # `side_facing_seat_research`, mais le fichier s'appelle
+    # `side_facing_seat_research_201218.pdf` (un suffixe date faisait partie du
+    # nom d'origine) → le match exact échouait → 404 → clic mort dans le chat.
+    for match_mode in ("exact", "prefix"):
+        for base_dir in candidate_dirs:
+            if not base_dir.exists():
                 continue
-            if entry.stem == base_name:
+            for entry in base_dir.iterdir():
+                if not entry.is_file():
+                    continue
+                matched = (
+                    entry.stem == base_name
+                    if match_mode == "exact"
+                    else entry.stem.startswith(base_name + "_")
+                )
+                if not matched:
+                    continue
                 # Defense-in-depth : assurer que le fichier reste dans le dossier whitelisté
                 resolved = entry.resolve()
                 base_resolved = base_dir.resolve()

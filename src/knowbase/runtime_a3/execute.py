@@ -194,7 +194,8 @@ OPTIONAL MATCH (d)-[:SUPERSEDES_DOC*1..]->(old:Document)
 WITH did, d, heads, collect(DISTINCT old.reg_key) AS superseded
 OPTIONAL MATCH (d)-[:SUPERSEDES_DOC]->(direct:Document)<-[:DECLARES_SUPERSESSION]-(cl:Claim)
 RETURN did AS doc_id, d.reg_key AS reg_key, heads, superseded,
-       collect(DISTINCT cl.text)[..3] AS evidence
+       collect(DISTINCT cl.text)[..3] AS evidence,
+       collect(DISTINCT cl.claim_id)[..3] AS evidence_claim_ids
 """
 
 # Side-effect contradictions inter-autorités (#440) — CONTRADICTS adjacents aux claims retrouvés
@@ -1272,6 +1273,7 @@ class Executor:
                 is_in_force=(in_force == reg_key),
                 superseded=[s for s in (row.get("superseded") or []) if s],
                 evidence=[t for t in (row.get("evidence") or []) if t][:3],
+                evidence_claim_ids=[c for c in (row.get("evidence_claim_ids") or []) if c][:3],
             )
         if not lineages:
             return

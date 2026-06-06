@@ -335,6 +335,7 @@ def _aggregate_doc_lineages(execute_output: ExecuteOutput) -> List[Dict[str, Any
                 "is_in_force": dl.is_in_force,
                 "supersedes": dl.superseded,
                 "evidence": dl.evidence,
+                "evidence_claim_ids": getattr(dl, "evidence_claim_ids", []) or [],
             })
     return out
 
@@ -886,6 +887,41 @@ class Synthesizer:
                 )
         except Exception:
             pass
+        # PREUVE DE LIGNÉE citable (fix filage démo 06/06) : quand des lignées
+        # documentaires ont été utilisées, la déclaration de supersession
+        # (« This AC cancels AC 21-25A… ») doit apparaître comme une VRAIE
+        # citation — claim_id réel → la hydration API résout le bon doc + la
+        # bonne page. Avant ce fix, le LLM rattachait la phrase de lignée à un
+        # claim de retrieval sans rapport (constaté : preuve d'annulation
+        # AC 21-25A « sourcée » sur une page flammabilité d'ETSO-C127c).
+        try:
+            lineages = _aggregate_doc_lineages(inp.execute_output)
+            already = {cc.claim_id for cc in out.cited_claims}
+            answer_lower = (out.answer_text or "").lower()
+            for dl in lineages:
+                # Ne citer que les lignées dont la réponse PARLE réellement
+                # (sinon les lignées des autres docs touchés par le retrieval
+                # polluent la liste de citations — ex AC 20-146 sur une
+                # question AC 21-25A).
+                mentioned_keys = [
+                    k for k in (
+                        [dl.get("document"), dl.get("in_force")]
+                        + list(dl.get("supersedes") or [])
+                    ) if k
+                ]
+                if not any(str(k).lower() in answer_lower for k in mentioned_keys):
+                    continue
+                for cid, ev in zip(dl.get("evidence_claim_ids") or [],
+                                   dl.get("evidence") or []):
+                    if cid and cid not in already:
+                        out.cited_claims.append(CitedClaim(
+                            claim_id=cid,
+                            claim_verbatim=(ev or "")[:300],
+                        ))
+                        already.add(cid)
+        except Exception:
+            logger.exception("synthesize: lineage evidence citation failed (non-fatal)")
+
         rate = _compute_citation_coverage(out.answer_text)
         out.citation_coverage_rate = rate
         warnings = list(out.synthesize_warnings)
