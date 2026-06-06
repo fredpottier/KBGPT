@@ -672,4 +672,10 @@ export const api = {
     topic: (topicId: string) => apiClient.get(`/atlas/topic/${topicId}`),
     theme: (themeId: string) => apiClient.get(`/atlas/theme/${themeId}`),
   },
+
+  // Carte du Référentiel — anatomie documentaire du KG (#456)
+  referentiel: {
+    map: () => apiClient.get('/referentiel/map'),
+    tensions: (limit = 300) => apiClient.get(`/referentiel/tensions?limit=${limit}`),
+  },
 }

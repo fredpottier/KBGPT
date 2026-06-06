@@ -302,6 +302,10 @@ def create_app() -> FastAPI:
     from knowbase.api.routers import benchmarks
     app.include_router(benchmarks.router)  # Endpoints: /api/benchmarks
 
+    # 🗺️ OSMOSE Carte du Référentiel — anatomie documentaire (#456)
+    from knowbase.api.routers import referentiel
+    app.include_router(referentiel.router)  # Endpoints: /api/referentiel/map, /api/referentiel/tensions
+
     return app
 
 

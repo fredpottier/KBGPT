@@ -42,6 +42,7 @@ import {
   FiBookOpen,
   FiEdit,
   FiFilter,
+  FiMap,
 } from 'react-icons/fi'
 
 // Configuration des menus
@@ -62,6 +63,12 @@ const navigationConfig = {
     label: 'Vérifier',
     href: '/verify',
     icon: FiCheckSquare,
+    isDropdown: false,
+  },
+  referentiel: {
+    label: 'Référentiel',
+    href: '/referentiel',
+    icon: FiMap,
     isDropdown: false,
   },
   wiki: {
@@ -275,6 +282,7 @@ export default function TopNavigation() {
     if (section === 'chat') return pathname?.startsWith('/chat')
     if (section === 'compare') return pathname?.startsWith('/compare')
     if (section === 'verify') return pathname?.startsWith('/verify')
+    if (section === 'referentiel') return pathname?.startsWith('/referentiel')
     if (section === 'wiki') return pathname?.startsWith('/wiki') || pathname?.startsWith('/atlas')
     if (section === 'documents') return pathname?.startsWith('/documents')
     if (section === 'admin') return pathname?.startsWith('/admin')
@@ -338,6 +346,15 @@ export default function TopNavigation() {
           >
             <Icon as={navigationConfig.verify.icon} />
             <Text>{navigationConfig.verify.label}</Text>
+          </NavLink>
+
+          {/* Carte du Référentiel - lien direct */}
+          <NavLink
+            href={navigationConfig.referentiel.href!}
+            isActive={isActiveSection('referentiel')}
+          >
+            <Icon as={navigationConfig.referentiel.icon} />
+            <Text>{navigationConfig.referentiel.label}</Text>
           </NavLink>
 
           {/* Atlas - dropdown */}
