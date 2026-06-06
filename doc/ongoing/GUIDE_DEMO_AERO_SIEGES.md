@@ -385,6 +385,65 @@ maintenir* le savoir — onboarding, revue de périmètre, documentation vivante
 
 ---
 
+## ❓ OBJECTION (connaisseur) : « Pourquoi votre RAG n'a pas trouvé le chunk ? L'info y est forcément ! »
+
+*(Objection LÉGITIME et probable d'un profil technique après l'acte 3. Mesuré
+sur le corpus réel, 06/06 — ces chiffres sont les nôtres, vérifiés :)*
+
+**Les faits (à dérouler calmement) :**
+
+> « Vous avez raison : la phrase "this AC cancels AC 21-25A" est bien dans un
+> passage indexé — page 1 de l'AC 21-25B. On a mesuré : face à cette question,
+> ce passage est classé **au-delà du 200e rang**. L'IA ne lit que les 12
+> premiers. Il n'avait aucune chance d'arriver jusqu'à elle. Pourquoi ?
+>
+> Trois mécanismes qui se cumulent, et aucun n'est de la malchance :
+> 1. **La recherche sémantique est quasi aveugle aux identifiants.** Pour un
+>    modèle vectoriel, "AC 21-25A", "AC 25-17A" et "AC 25.562-1A" sont presque
+>    le même vecteur. Or le seul mot qui distingue la question… c'est
+>    l'identifiant.
+> 2. **L'écrasement par la masse.** Le document qui contient la réponse fait
+>    21 passages ; ses voisins en font des centaines. Sur une question au
+>    profil générique ("ce texte est-il en vigueur ?"), il suffit de 12
+>    passages "ressemblants" venus des gros documents pour saturer la fenêtre.
+> 3. **La dilution.** La phrase d'annulation est une ligne administrative sur
+>    une page de garde pleine d'en-têtes : le vecteur du passage "ressemble" à
+>    une page de garde, pas à une annulation. »
+
+**Si l'objection se précise (« avec un retrieval hybride BM25 vous l'auriez ») :**
+
+> « Exact — un index lexical remonterait probablement *ce* passage, et nous
+> utilisons nous-mêmes l'hybride en interne. Mais ça reste améliorer ses
+> chances à une **loterie de classement** jouée au moment de chaque question.
+> Et même remonté, ce passage ne donne qu'UN maillon : rien dans cette
+> architecture ne relie 21-25 → 21-25A → 21-25B en généalogie datée et
+> prouvée. Nous ne jouons pas à cette loterie : la lignée a été **lue et
+> construite à l'ingestion**, une fois pour toutes. La différence n'est pas un
+> réglage de recherche — c'est la structure de la mémoire. »
+
+---
+
+## ❓ OBJECTION (si la page benchmarks est montrée) : « Le RAG classique vous bat sur les questions factuelles ! »
+
+*(Vrai sur ce run : précision des références 69 % vs 80 %. Instruit ligne par
+ligne le 06/06 — 7 questions perdantes, deux causes connues :)*
+
+> « Bien vu — et on sait exactement pourquoi, question par question. Sur la
+> recherche brute d'un identifiant isolé, un lecteur de fragments a aujourd'hui
+> un léger avantage : deux des sept écarts viennent de faits que notre filtre
+> d'extraction a écartés (correctif déjà codé, actif à la prochaine ingestion),
+> les cinq autres d'un réglage de recherche d'identifiants identifié dans
+> notre backlog. Rien d'inexpliqué.
+>
+> Maintenant regardez les colonnes d'à côté : quand il s'agit de savoir **ce
+> qui fait foi**, de **comparer** deux sources, ou surtout de **ne pas
+> inventer** quand l'information n'existe pas, le rapport s'inverse largement.
+> Dans vos métiers, l'erreur qui coûte n'est pas de rater un numéro de
+> paragraphe — c'est de fonder un dossier sur un texte abrogé ou sur une
+> réponse fabriquée. C'est là que nous mettons la fiabilité. »
+
+---
+
 ## 🧯 PLAN B / INCIDENTS
 
 | Symptôme | Réflexe |
