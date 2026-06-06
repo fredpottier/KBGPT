@@ -569,9 +569,11 @@ export default function ReferentielPage() {
       </HStack>
 
       {/* ── Scène ── */}
-      <Box ref={stageRef} mx={9} mb={6} position="relative"
+      <Box ref={stageRef} mx={9} mb={3} position="relative"
         border="1px solid var(--border-default)" borderRadius="0 12px 12px 12px"
-        bg="var(--bg-surface)" h="calc(100vh - 296px)" minH="480px" overflow="hidden">
+        bg="var(--bg-surface)"
+        h={view === 'registry' ? 'calc(100vh - 296px)' : 'calc(100vh - 348px)'}
+        minH="440px" overflow="hidden">
 
         {view === 'map' && (
           <>
@@ -707,22 +709,6 @@ export default function ReferentielPage() {
                 })}
               </svg>
             </Box>
-
-            {/* légende */}
-            <VStack position="absolute" left="18px" bottom="16px" zIndex={8} align="stretch" spacing={1.5}
-              bg="var(--bg-surface)" border="1px solid var(--border-default)" borderRadius="10px"
-              px={4} py={3} fontSize="11.5px" color="var(--fg-secondary)" backdropFilter="blur(6px)"
-              className="ref-fadeup" style={{ animationDelay: '1.1s' }} opacity={0.95}>
-              <HStack><Box w="30px" borderTop="2.5px solid var(--warning-base)" /><Text fontSize="11.5px">Lignée de supersession — <Box as="i" color="var(--warning-base)" fontStyle="normal">cliquez pour la preuve</Box></Text></HStack>
-              <HStack><Box w="30px" borderTop="1.5px solid var(--border-strong)" /><Text fontSize="11.5px">Relations entre faits — épaisseur ∝ volume, cliquez pour le détail</Text></HStack>
-              <HStack><Box w="30px" borderTop="2.5px solid var(--error-base)" /><Text fontSize="11.5px">Tension <Box as="b" color="var(--error-base)">confirmée</Box>{coherent ? ' (aucune sur ce corpus)' : ''}</Text></HStack>
-              <HStack>
-                <Box w="11px" h="11px" borderRadius="50%" border="2.5px solid var(--success-base)" bg="var(--bg-surface-alt)" />
-                <Text fontSize="11.5px">En vigueur</Text>
-                <Box w="11px" h="11px" borderRadius="50%" border="2.5px dashed var(--fg-disabled)" bg="var(--bg-surface)" ml={2} />
-                <Text fontSize="11.5px">Annulé</Text>
-              </HStack>
-            </VStack>
 
           </>
         )}
@@ -904,6 +890,35 @@ export default function ReferentielPage() {
           </Box>
         )}
       </Box>
+
+      {/* ── Légende (sous la scène, pour ne pas masquer le graphe) ── */}
+      {view === 'map' && (
+        <Flex mx={9} mb={5} px={4} py={2.5} gap={7} wrap="wrap" align="center"
+          border="1px solid var(--border-faint)" borderRadius="10px"
+          bg="var(--bg-surface)" fontSize="11.5px" color="var(--fg-secondary)" position="relative">
+          <HStack><Box w="30px" borderTop="2.5px solid var(--warning-base)" /><Text fontSize="11.5px">Lignée de supersession — <Box as="i" color="var(--warning-base)" fontStyle="normal">cliquez pour la preuve</Box></Text></HStack>
+          <HStack><Box w="30px" borderTop="1.5px solid var(--border-strong)" /><Text fontSize="11.5px">Relations entre faits — épaisseur ∝ volume</Text></HStack>
+          <HStack><Box w="30px" borderTop="2.5px solid var(--error-base)" /><Text fontSize="11.5px">Tension <Box as="b" color="var(--error-base)">confirmée</Box>{coherent ? ' (aucune)' : ''}</Text></HStack>
+          <HStack>
+            <Box w="11px" h="11px" borderRadius="50%" border="2.5px solid var(--success-base)" bg="var(--bg-surface-alt)" />
+            <Text fontSize="11.5px">En vigueur</Text>
+            <Box w="11px" h="11px" borderRadius="50%" border="2.5px dashed var(--fg-disabled)" bg="var(--bg-surface)" ml={2} />
+            <Text fontSize="11.5px">Annulé</Text>
+          </HStack>
+        </Flex>
+      )}
+      {view === 'timeline' && (
+        <Flex mx={9} mb={5} px={4} py={2.5} gap={7} wrap="wrap" align="center"
+          border="1px solid var(--border-faint)" borderRadius="10px"
+          bg="var(--bg-surface)" fontSize="11.5px" color="var(--fg-secondary)" position="relative">
+          <HStack><Box w="30px" borderTop="4px solid var(--success-base)" /><Text fontSize="11.5px">Période de validité du texte en vigueur</Text></HStack>
+          <HStack><Box w="30px" borderTop="3px solid var(--border-strong)" opacity={0.6} /><Text fontSize="11.5px">Période révolue (jusqu&apos;au remplacement ✝)</Text></HStack>
+          <HStack>
+            <Box w="11px" h="11px" borderRadius="50%" border="2.5px dashed var(--warning-base)" bg="var(--bg-surface-alt)" />
+            <Text fontSize="11.5px">Date inconnue — position interpolée, ordre garanti par la lignée</Text>
+          </HStack>
+        </Flex>
+      )}
     </Box>
   )
 }
@@ -1100,17 +1115,6 @@ function TimelineView({ docs, chains, selectedDoc, onSelect }: {
         </svg>
       </Box>
 
-      {/* légende frise */}
-      <VStack position="absolute" left="18px" bottom="16px" zIndex={8} align="stretch" spacing={1.5}
-        bg="var(--bg-surface)" border="1px solid var(--border-default)" borderRadius="10px"
-        px={4} py={3} fontSize="11.5px" color="var(--fg-secondary)" opacity={0.95}>
-        <HStack><Box w="30px" borderTop="4px solid var(--success-base)" /><Text fontSize="11.5px">Période de validité du texte en vigueur</Text></HStack>
-        <HStack><Box w="30px" borderTop="3px solid var(--border-strong)" opacity={0.6} /><Text fontSize="11.5px">Période révolue (jusqu&apos;au remplacement ✝)</Text></HStack>
-        <HStack>
-          <Box w="11px" h="11px" borderRadius="50%" border="2.5px dashed var(--warning-base)" bg="var(--bg-surface-alt)" />
-          <Text fontSize="11.5px">Date inconnue — position interpolée, ordre garanti par la lignée</Text>
-        </HStack>
-      </VStack>
     </>
   )
 }
