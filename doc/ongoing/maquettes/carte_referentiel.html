@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OSMOSIS — Carte du Référentiel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Instrument+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#070b16; --abyss:#0a1020; --panel:#0e1526; --panel-2:#121b30;
+    --line:#1c2742; --line-soft:#16203a;
+    --text:#e9eef9; --muted:#8b9ab8; --faint:#5a6a8c;
+    --gold:#d9a44a; --gold-soft:rgba(217,164,74,.16); --gold-bright:#f3c878;
+    --blue:#4d8df0; --blue-soft:rgba(77,141,240,.14); --cyan:#54c5e0;
+    --green:#34d399; --green-soft:rgba(52,211,153,.13);
+    --red:#ef5350; --red-soft:rgba(239,83,80,.12);
+    --slate:#33415e;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:var(--ink); color:var(--text);
+    font-family:'Instrument Sans',sans-serif; font-size:14px;
+    overflow:hidden;
+  }
+  /* ── Atmosphère : grille de cartographe + halos + grain ─────────────── */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:
+      radial-gradient(1100px 600px at 28% 18%, rgba(77,141,240,.07), transparent 60%),
+      radial-gradient(900px 700px at 78% 85%, rgba(217,164,74,.05), transparent 55%),
+      repeating-linear-gradient(0deg, transparent 0 47px, rgba(120,150,210,.045) 47px 48px),
+      repeating-linear-gradient(90deg, transparent 0 47px, rgba(120,150,210,.045) 47px 48px);
+  }
+  body::after{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:60; opacity:.5;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.025 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* ── En-tête ────────────────────────────────────────────────────────── */
+  header{
+    position:relative; z-index:5;
+    display:flex; align-items:flex-end; justify-content:space-between;
+    padding:26px 36px 0 36px;
+  }
+  .brand{display:flex; align-items:baseline; gap:14px}
+  .brand .product{
+    font-family:'Spline Sans Mono',monospace; font-size:11px; letter-spacing:.32em;
+    color:var(--faint); text-transform:uppercase;
+  }
+  h1{
+    font-family:'Fraunces',serif; font-weight:600; font-size:34px; letter-spacing:-.01em;
+    background:linear-gradient(100deg, var(--text) 55%, var(--gold-bright));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .subtitle{color:var(--muted); font-size:13px; margin-top:6px; max-width:520px}
+  .subtitle em{color:var(--gold-bright); font-style:normal}
+
+  .seal{
+    position:relative; display:flex; flex-direction:column; align-items:center; gap:2px;
+    border:1px solid rgba(52,211,153,.4); border-radius:14px;
+    padding:12px 22px; background:var(--green-soft);
+    animation:fadeUp .8s .9s both;
+  }
+  .seal .check{color:var(--green); font-size:17px; font-weight:700}
+  .seal .label{font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:var(--green)}
+  .seal .detail{font-size:11px; color:var(--muted)}
+
+  /* ── Ruban de stats ─────────────────────────────────────────────────── */
+  .stats{
+    position:relative; z-index:5; display:flex; gap:0; margin:18px 36px 0 36px;
+    border:1px solid var(--line); border-radius:12px; overflow:hidden;
+    background:linear-gradient(180deg, var(--panel), var(--abyss));
+  }
+  .stat{
+    flex:1; padding:12px 20px; border-right:1px solid var(--line-soft);
+    animation:fadeUp .6s both;
+  }
+  .stat:nth-child(2){animation-delay:.08s}.stat:nth-child(3){animation-delay:.16s}
+  .stat:nth-child(4){animation-delay:.24s}.stat:nth-child(5){animation-delay:.32s}
+  .stat:last-child{border-right:none}
+  .stat .num{
+    font-family:'Fraunces',serif; font-size:24px; font-weight:600; line-height:1.1;
+  }
+  .stat .lbl{font-size:11px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; margin-top:2px}
+  .stat.gold .num{color:var(--gold-bright)} .stat.green .num{color:var(--green)}
+
+  /* ── Onglets ────────────────────────────────────────────────────────── */
+  nav{position:relative; z-index:5; display:flex; gap:6px; margin:18px 36px 0 36px}
+  .tab{
+    font-family:'Instrument Sans',sans-serif; font-size:13px; font-weight:600;
+    color:var(--muted); background:transparent; border:1px solid transparent;
+    border-radius:9px 9px 0 0; padding:10px 18px; cursor:pointer; letter-spacing:.02em;
+  }
+  .tab:hover{color:var(--text)}
+  .tab.active{
+    color:var(--text); background:var(--panel); border-color:var(--line); border-bottom-color:var(--panel);
+  }
+  .tab.disabled{opacity:.4; cursor:default}
+  .tab .soon{font-size:9px; color:var(--gold); border:1px solid var(--gold-soft); border-radius:4px; padding:1px 5px; margin-left:7px; letter-spacing:.1em}
+
+  /* ── Scène ──────────────────────────────────────────────────────────── */
+  .stage{
+    position:relative; z-index:4; margin:0 36px 24px 36px;
+    border:1px solid var(--line); border-radius:0 12px 12px 12px;
+    background:linear-gradient(180deg, var(--panel) 0%, var(--abyss) 100%);
+    height:calc(100vh - 232px); min-height:480px; overflow:hidden;
+  }
+  .view{position:absolute; inset:0; display:none}
+  .view.active{display:block}
+
+  /* légende */
+  .legend{
+    position:absolute; left:18px; bottom:16px; z-index:8;
+    display:flex; flex-direction:column; gap:7px;
+    background:rgba(10,16,32,.82); border:1px solid var(--line); border-radius:10px;
+    padding:12px 16px; backdrop-filter:blur(6px); font-size:11.5px; color:var(--muted);
+    animation:fadeUp .7s 1.1s both;
+  }
+  .legend .row{display:flex; align-items:center; gap:9px}
+  .lg-line{width:30px; height:0; border-top:2.5px solid var(--gold); position:relative}
+  .lg-line.thin{border-top:1.5px solid var(--slate)}
+  .lg-line.red{border-top:2.5px solid var(--red)}
+  .lg-dot{width:11px; height:11px; border-radius:50%; border:2.5px solid var(--green); background:var(--panel)}
+  .lg-dot.dead{border-color:var(--faint); border-style:dashed}
+
+  /* filtres */
+  .filters{
+    position:absolute; top:14px; left:18px; z-index:8; display:flex; gap:8px;
+    animation:fadeUp .6s .9s both;
+  }
+  .chip{
+    font-size:11.5px; font-weight:600; color:var(--muted); cursor:pointer;
+    border:1px solid var(--line); border-radius:20px; padding:6px 13px;
+    background:rgba(10,16,32,.7); backdrop-filter:blur(4px); letter-spacing:.03em;
+  }
+  .chip:hover{color:var(--text); border-color:var(--slate)}
+  .chip.on{color:var(--gold-bright); border-color:var(--gold); background:var(--gold-soft)}
+
+  /* hint */
+  .hint{
+    position:absolute; top:16px; right:20px; z-index:8; font-size:11.5px; color:var(--faint);
+    font-family:'Spline Sans Mono',monospace; animation:fadeUp .6s 1.3s both;
+  }
+
+  /* ── SVG carte ──────────────────────────────────────────────────────── */
+  svg{width:100%; height:100%; display:block}
+  .edge-rel{fill:none; stroke:var(--slate); opacity:.5; transition:opacity .25s, stroke .25s}
+  .edge-rel.dim{opacity:.12}
+  .edge-rel.lit{opacity:.95; stroke:var(--cyan)}
+  .edge-lineage{
+    fill:none; stroke:var(--gold); stroke-width:2.6; cursor:pointer;
+    filter:drop-shadow(0 0 7px rgba(217,164,74,.35));
+    stroke-dasharray:7 5; animation:flow 26s linear infinite;
+    transition:stroke .25s, opacity .25s;
+  }
+  .edge-lineage:hover{stroke:var(--gold-bright); stroke-width:3.4}
+  .edge-lineage.dim{opacity:.18}
+  @keyframes flow{to{stroke-dashoffset:-600}}
+  .edge-hit{fill:none; stroke:transparent; stroke-width:18; cursor:pointer}
+
+  .node{cursor:pointer}
+  .node circle.core{fill:var(--panel-2); transition:fill .2s}
+  .node circle.ring{fill:none; stroke-width:2.6; transition:all .2s}
+  .node.alive circle.ring{stroke:var(--green)}
+  .node.dead circle.ring{stroke:var(--faint); stroke-dasharray:4 4}
+  .node.dead circle.core{fill:#0c1222}
+  .node.dead text.nlabel{fill:var(--faint)}
+  .node:hover circle.ring{stroke-width:4}
+  .node.alive:hover circle.core{fill:#13203a}
+  .node.sel circle.ring{stroke:var(--gold-bright); stroke-width:4; filter:drop-shadow(0 0 12px rgba(243,200,120,.5))}
+  .node.fade{opacity:.16}
+  text.nlabel{
+    fill:var(--text); font-family:'Instrument Sans',sans-serif; font-weight:600;
+    font-size:12.5px; text-anchor:middle; pointer-events:none;
+  }
+  text.nsub{
+    fill:var(--faint); font-family:'Spline Sans Mono',monospace; font-size:9.5px;
+    text-anchor:middle; pointer-events:none; letter-spacing:.05em;
+  }
+  .authority{
+    font-family:'Spline Sans Mono',monospace; font-size:8.5px; font-weight:600;
+    text-anchor:middle; pointer-events:none; letter-spacing:.08em;
+  }
+  .authority.faa{fill:var(--blue)} .authority.easa{fill:var(--cyan)} .authority.etude{fill:var(--faint)}
+  .badge-dead{
+    fill:var(--faint); font-family:'Spline Sans Mono',monospace; font-size:8.5px;
+    text-anchor:middle; letter-spacing:.14em; pointer-events:none;
+  }
+  .tension-pill{cursor:pointer}
+  .tension-pill rect{fill:rgba(10,16,32,.92); stroke:var(--line); rx:9}
+  .tension-pill text{
+    fill:var(--muted); font-family:'Spline Sans Mono',monospace; font-size:9px;
+    text-anchor:middle; pointer-events:none;
+  }
+  .tension-pill:hover rect{stroke:var(--cyan)}
+
+  /* apparition étagée des nœuds */
+  .node, .edge-lineage, .edge-rel, .tension-pill{animation-fill-mode:both}
+  .pop{animation:pop .55s cubic-bezier(.2,1.4,.4,1) both}
+  @keyframes pop{from{opacity:0; transform:scale(.4)}to{opacity:1; transform:scale(1)}}
+  .draw{stroke-dashoffset:600; animation:draw 1.4s ease-out both, flow 26s 1.6s linear infinite}
+  @keyframes draw{from{stroke-dashoffset:600}to{stroke-dashoffset:0}}
+  @keyframes fadeUp{from{opacity:0; transform:translateY(10px)}to{opacity:1; transform:none}}
+
+  /* ── Panneau latéral document ───────────────────────────────────────── */
+  aside#panel{
+    position:absolute; top:0; right:0; bottom:0; width:390px; z-index:12;
+    background:linear-gradient(180deg, #101a32, var(--abyss));
+    border-left:1px solid var(--line);
+    transform:translateX(100%); transition:transform .38s cubic-bezier(.3,1,.3,1);
+    padding:26px 26px 20px 26px; overflow-y:auto;
+  }
+  aside#panel.open{transform:none}
+  #panel .close{
+    position:absolute; top:16px; right:16px; width:30px; height:30px; border-radius:8px;
+    border:1px solid var(--line); background:transparent; color:var(--muted);
+    font-size:15px; cursor:pointer;
+  }
+  #panel .close:hover{color:var(--text); border-color:var(--slate)}
+  #panel h2{font-family:'Fraunces',serif; font-weight:600; font-size:23px; margin:4px 0 4px 0; padding-right:30px}
+  .status-chip{
+    display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:700;
+    letter-spacing:.1em; text-transform:uppercase; border-radius:6px; padding:4px 10px; margin:6px 0 2px 0;
+  }
+  .status-chip.alive{color:var(--green); background:var(--green-soft); border:1px solid rgba(52,211,153,.35)}
+  .status-chip.dead{color:var(--muted); background:rgba(120,140,180,.08); border:1px dashed var(--faint)}
+  .auth-chip{
+    display:inline-block; font-family:'Spline Sans Mono',monospace; font-size:10px;
+    letter-spacing:.12em; color:var(--cyan); border:1px solid rgba(84,197,224,.3);
+    border-radius:6px; padding:4px 8px; margin-left:6px;
+  }
+  .pmeta{display:flex; gap:22px; margin:16px 0 4px 0}
+  .pmeta div .v{font-family:'Fraunces',serif; font-size:20px; font-weight:600}
+  .pmeta div .k{font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em}
+  .psec{margin-top:22px}
+  .psec h3{
+    font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:var(--gold);
+    border-bottom:1px solid var(--line); padding-bottom:7px; margin-bottom:12px; font-weight:600;
+  }
+  .chain{display:flex; align-items:center; gap:0; flex-wrap:wrap; row-gap:8px}
+  .chain .cnode{
+    font-family:'Spline Sans Mono',monospace; font-size:11px; padding:5px 10px;
+    border:1px solid var(--line); border-radius:7px; color:var(--muted); white-space:nowrap;
+  }
+  .chain .cnode.current{color:var(--green); border-color:rgba(52,211,153,.4); background:var(--green-soft)}
+  .chain .cnode.this{color:var(--gold-bright); border-color:var(--gold)}
+  .chain .carrow{color:var(--gold); margin:0 7px; font-size:13px}
+  .proofline{
+    font-size:12px; color:var(--muted); border-left:2px solid var(--gold);
+    padding:6px 0 6px 12px; margin-top:10px; font-style:italic;
+  }
+  .proofline .src{display:block; font-style:normal; font-family:'Spline Sans Mono',monospace; font-size:10.5px; color:var(--gold-bright); margin-top:5px; cursor:pointer}
+  .tension-item{
+    border:1px solid var(--line-soft); border-radius:9px; padding:11px 13px; margin-bottom:9px;
+    background:rgba(14,21,38,.6);
+  }
+  .tension-item .pair{font-size:12px; font-weight:600; margin-bottom:5px}
+  .tension-item .why{font-size:11.5px; color:var(--muted); line-height:1.45}
+  .open-doc{
+    display:block; width:100%; margin-top:22px; padding:12px; text-align:center;
+    background:linear-gradient(120deg, var(--blue), #3a76d8); color:#fff;
+    font-weight:700; font-size:13px; border:none; border-radius:9px; cursor:pointer;
+    letter-spacing:.03em;
+  }
+  .open-doc:hover{filter:brightness(1.12)}
+
+  /* ── Fiche preuve (modale) ──────────────────────────────────────────── */
+  .proof-overlay{
+    position:absolute; inset:0; z-index:20; display:none;
+    background:rgba(5,8,16,.7); backdrop-filter:blur(3px);
+    align-items:center; justify-content:center;
+  }
+  .proof-overlay.open{display:flex}
+  .proof-card{
+    width:520px; max-width:90%; border-radius:14px; position:relative;
+    background:linear-gradient(165deg, #131d36, var(--abyss));
+    border:1px solid var(--gold); box-shadow:0 30px 80px rgba(0,0,0,.6), 0 0 40px rgba(217,164,74,.12);
+    padding:30px 34px 26px 34px; animation:cardIn .35s cubic-bezier(.2,1.3,.4,1) both;
+  }
+  @keyframes cardIn{from{opacity:0; transform:translateY(18px) scale(.96)}to{opacity:1; transform:none}}
+  .proof-card .stamp{
+    font-family:'Spline Sans Mono',monospace; font-size:10px; letter-spacing:.34em;
+    color:var(--gold); text-transform:uppercase; margin-bottom:14px;
+  }
+  .proof-card .rel{
+    font-family:'Fraunces',serif; font-size:21px; font-weight:600; margin-bottom:18px; line-height:1.3;
+  }
+  .proof-card .rel .gold{color:var(--gold-bright)}
+  .verbatim{
+    font-family:'Spline Sans Mono',monospace; font-size:12.5px; line-height:1.65; color:var(--text);
+    background:rgba(217,164,74,.06); border:1px solid var(--gold-soft); border-radius:9px;
+    padding:16px 18px; position:relative;
+  }
+  .verbatim::before{
+    content:"❝"; position:absolute; top:-19px; left:14px; font-size:24px; line-height:1;
+    color:var(--gold); background:var(--abyss); padding:0 7px;
+  }
+  .proof-src{
+    display:flex; justify-content:space-between; align-items:center; margin-top:16px;
+  }
+  .proof-src .where{font-family:'Spline Sans Mono',monospace; font-size:11.5px; color:var(--muted)}
+  .proof-src .where b{color:var(--gold-bright); font-weight:600}
+  .proof-src button{
+    background:transparent; border:1px solid var(--gold); color:var(--gold-bright);
+    border-radius:8px; padding:8px 16px; font-size:12px; font-weight:700; cursor:pointer;
+  }
+  .proof-src button:hover{background:var(--gold-soft)}
+  .proof-card .close{
+    position:absolute; top:14px; right:14px; width:28px; height:28px; border-radius:7px;
+    border:1px solid var(--line); background:transparent; color:var(--muted); cursor:pointer;
+  }
+
+  /* ── Registre des tensions ──────────────────────────────────────────── */
+  .registry{padding:24px 30px; height:100%; overflow-y:auto}
+  .reg-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:18px}
+  .reg-head h2{font-family:'Fraunces',serif; font-size:21px; font-weight:600}
+  .reg-head p{color:var(--muted); font-size:12.5px; margin-top:3px}
+  .verdict-filters{display:flex; gap:8px; flex-wrap:wrap}
+  table{width:100%; border-collapse:collapse}
+  thead th{
+    text-align:left; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--faint); padding:10px 14px; border-bottom:1px solid var(--line); font-weight:600;
+  }
+  tbody tr.main{cursor:pointer; transition:background .15s}
+  tbody tr.main:hover{background:rgba(77,141,240,.05)}
+  tbody td{padding:13px 14px; border-bottom:1px solid var(--line-soft); font-size:12.5px; vertical-align:top}
+  .paircell{font-weight:600; line-height:1.4}
+  .paircell .vs{color:var(--faint); font-family:'Spline Sans Mono',monospace; font-size:10px; padding:0 6px}
+  .verdict{
+    display:inline-block; font-family:'Spline Sans Mono',monospace; font-size:9.5px; font-weight:600;
+    letter-spacing:.1em; padding:4px 9px; border-radius:5px; white-space:nowrap;
+    transform:rotate(-1.2deg);
+  }
+  .verdict.scope{color:var(--cyan); border:1px solid rgba(84,197,224,.4); background:rgba(84,197,224,.07)}
+  .verdict.equiv{color:var(--green); border:1px solid rgba(52,211,153,.4); background:var(--green-soft)}
+  .verdict.compl{color:var(--blue); border:1px solid rgba(77,141,240,.45); background:var(--blue-soft)}
+  .verdict.confirmed{color:var(--red); border:1.5px solid var(--red); background:var(--red-soft)}
+  .reason{color:var(--muted); line-height:1.5; max-width:480px}
+  .method{font-family:'Spline Sans Mono',monospace; font-size:10px; color:var(--faint); white-space:nowrap}
+  tr.detail td{background:rgba(7,11,22,.75); padding:18px 20px}
+  .passages{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .passage{
+    font-family:'Spline Sans Mono',monospace; font-size:11px; line-height:1.6; color:var(--muted);
+    border:1px solid var(--line); border-left:3px solid var(--slate); border-radius:8px; padding:13px 15px;
+  }
+  .passage b{display:block; color:var(--text); font-size:10px; letter-spacing:.1em; margin-bottom:7px}
+  .reg-foot{padding:18px 6px; color:var(--faint); font-size:12px; font-family:'Spline Sans Mono',monospace}
+  .empty-confirmed{
+    margin:8px 0 20px 0; border:1px solid rgba(52,211,153,.3); background:var(--green-soft);
+    border-radius:11px; padding:16px 20px; display:flex; gap:14px; align-items:center;
+  }
+  .empty-confirmed .big{font-size:26px}
+  .empty-confirmed .t{font-weight:700; color:var(--green); font-size:13px}
+  .empty-confirmed .d{color:var(--muted); font-size:12px; margin-top:3px; line-height:1.5}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div>
+      <div class="product">OSMOSIS · INTELLIGENCE DOCUMENTAIRE</div>
+      <h1>Carte du Référentiel</h1>
+      <div class="subtitle">L'anatomie de votre base documentaire : qui remplace qui, qui raffine quoi —
+      et chaque lien porte <em>sa preuve</em>.</div>
+    </div>
+  </div>
+  <div class="seal">
+    <div class="check">✓</div>
+    <div class="label">Référentiel cohérent</div>
+    <div class="detail">281 tensions examinées · 0 contradiction confirmée</div>
+  </div>
+</header>
+
+<div class="stats">
+  <div class="stat"><div class="num">14</div><div class="lbl">Documents</div></div>
+  <div class="stat gold"><div class="num">7</div><div class="lbl">Lignées prouvées</div></div>
+  <div class="stat"><div class="num">17 029</div><div class="lbl">Faits extraits</div></div>
+  <div class="stat"><div class="num">281</div><div class="lbl">Tensions examinées</div></div>
+  <div class="stat green"><div class="num">0</div><div class="lbl">Contradiction confirmée</div></div>
+</div>
+
+<nav>
+  <button class="tab active" data-view="map">Carte</button>
+  <button class="tab" data-view="registry">Registre des tensions</button>
+  <button class="tab disabled">Frise chronologique<span class="soon">V2</span></button>
+</nav>
+
+<div class="stage">
+
+  <!-- ════════ VUE CARTE ════════ -->
+  <div class="view active" id="view-map">
+    <div class="filters">
+      <div class="chip on" data-f="all">Tous</div>
+      <div class="chip" data-f="alive">En vigueur</div>
+      <div class="chip" data-f="dead">Annulés</div>
+      <div class="chip" data-f="lineage">Lignées seules</div>
+    </div>
+    <div class="hint">cliquez un document · cliquez un fil d'or pour sa preuve</div>
+    <svg id="map" viewBox="0 0 1280 780" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="legend">
+      <div class="row"><span class="lg-line"></span> Lignée de supersession <i style="color:var(--gold);font-style:normal">— cliquez pour la preuve</i></div>
+      <div class="row"><span class="lg-line thin"></span> Relations entre faits (raffine · complète) — épaisseur ∝ volume</div>
+      <div class="row"><span class="lg-line red"></span> Tension <b style="color:var(--red)">confirmée</b> (aucune sur ce corpus)</div>
+      <div class="row"><span class="lg-dot"></span> En vigueur &nbsp;&nbsp;<span class="lg-dot dead"></span> Annulé</div>
+    </div>
+
+    <!-- panneau latéral -->
+    <aside id="panel">
+      <button class="close" onclick="closePanel()">✕</button>
+      <div id="panel-content"></div>
+    </aside>
+
+    <!-- fiche preuve -->
+    <div class="proof-overlay" id="proof" onclick="if(event.target===this)closeProof()">
+      <div class="proof-card">
+        <button class="close" onclick="closeProof()">✕</button>
+        <div class="stamp">Preuve de supersession · extraite à l'ingestion</div>
+        <div class="rel" id="proof-rel"></div>
+        <div class="verbatim" id="proof-text"></div>
+        <div class="proof-src">
+          <div class="where" id="proof-src"></div>
+          <button>Ouvrir le PDF à la page ↗</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ VUE REGISTRE ════════ -->
+  <div class="view" id="view-registry">
+    <div class="registry">
+      <div class="reg-head">
+        <div>
+          <h2>Registre des tensions</h2>
+          <p>Chaque paire signalée par le détecteur a été <b>relue dans ses passages sources</b> par l'adjudicateur. Verdict et raison tracés.</p>
+        </div>
+        <div class="verdict-filters">
+          <div class="chip on">Toutes · 281</div>
+          <div class="chip" style="color:var(--red)">Confirmées · 0</div>
+          <div class="chip">Portées différentes · 161</div>
+          <div class="chip">Équivalences · 61</div>
+          <div class="chip">Complémentaires · 45</div>
+        </div>
+      </div>
+
+      <div class="empty-confirmed">
+        <div class="big">🛡️</div>
+        <div>
+          <div class="t">Aucune contradiction vive dans ce référentiel</div>
+          <div class="d">281 tensions candidates examinées en contexte — toutes se sont révélées être des conversions d'unités,
+          des conditions d'application différentes, des compléments du même cadre ou des citations historiques.
+          La prochaine vraie contradiction ingérée déclenchera seule l'alerte, preuve à l'appui.</div>
+        </div>
+      </div>
+
+      <table>
+        <thead><tr>
+          <th style="width:23%">Paire de documents</th>
+          <th style="width:13%">Verdict</th>
+          <th>Raison (adjudicateur)</th>
+          <th style="width:11%">Méthode</th>
+        </tr></thead>
+        <tbody id="reg-body"></tbody>
+      </table>
+      <div class="reg-foot">… 275 autres paires examinées — export CSV · relancer l'adjudication</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════ DONNÉES (réelles, corpus aéro 06/06) ═══════════════ */
+const NODES = [
+  {id:"ac2125",  label:"AC 21-25",    sub:"1989",        x:140,  y:120, claims:310,  status:"dead",  auth:"FAA"},
+  {id:"ac2125a", label:"AC 21-25A",   sub:"1993",        x:360,  y:95,  claims:880,  status:"dead",  auth:"FAA"},
+  {id:"ac2125b", label:"AC 21-25B",   sub:"en vigueur",  x:590,  y:128, claims:1240, status:"alive", auth:"FAA"},
+  {id:"ac2517",  label:"AC 25-17",    sub:"1991",        x:170,  y:330, claims:1430, status:"dead",  auth:"FAA"},
+  {id:"ac2517a", label:"AC 25-17A",   sub:"en vigueur",  x:445,  y:360, claims:7900, status:"alive", auth:"FAA"},
+  {id:"cfr25",   label:"CFR Part 25", sub:"règlement",   x:790,  y:300, claims:2100, status:"alive", auth:"FAA"},
+  {id:"npa",     label:"NPA 2013-20", sub:"proposition", x:1035, y:215, claims:640,  status:"alive", auth:"EASA"},
+  {id:"etsoa",   label:"ETSO-C127a",  sub:"2003",        x:255,  y:585, claims:520,  status:"dead",  auth:"EASA"},
+  {id:"etsob",   label:"ETSO-C127b",  sub:"2012",        x:490,  y:620, claims:980,  status:"dead",  auth:"EASA"},
+  {id:"etsoc",   label:"ETSO-C127c",  sub:"en vigueur",  x:735,  y:578, claims:1257, status:"alive", auth:"EASA"},
+  {id:"ac20146", label:"AC 20-146",   sub:"2003",        x:955,  y:478, claims:230,  status:"dead",  auth:"FAA"},
+  {id:"ac20146a",label:"AC 20-146A",  sub:"en vigueur",  x:1145, y:545, claims:410,  status:"alive", auth:"FAA"},
+  {id:"ac25562", label:"AC 25.562-1B",sub:"en vigueur",  x:935,  y:690, claims:1100, status:"alive", auth:"FAA"},
+  {id:"research",label:"Side-Facing Seat Research", sub:"étude DOT/FAA", x:130, y:700, claims:760, status:"alive", auth:"ÉTUDE"},
+];
+
+const LINEAGE = [
+  {from:"ac2125b", to:"ac2125a", proof:"As of its effective date, this AC cancels AC 21-25A, Approval of Modified Seating Systems Initially Approved Under a Technical Standard Order, dated 6/3/97.", src:"AC 21-25B", page:1},
+  {from:"ac2125a", to:"ac2125",  proof:"AC 21-25, Approval of Modified Seats and Berths Initially Approved Under a Technical Standard Order, dated 4/24/89, is canceled.", src:"AC 21-25A", page:1},
+  {from:"ac2517a", to:"ac2517",  proof:"Advisory Circular 25-17, Transport Airplane Cabin Interiors Crashworthiness Handbook, dated July 15, 1991, is cancelled.", src:"AC 25-17A", page:2},
+  {from:"etsoc",   to:"etsob",   proof:"Lignée inférée par convention d'édition (a → b → c), corroborée par les dates de publication des deux documents.", src:"inférence corroborée", page:null},
+  {from:"etsob",   to:"etsoa",   proof:"Lignée inférée par convention d'édition, corroborée par les dates : ETSO-C127b (2012) succède à ETSO-C127a (2003).", src:"inférence corroborée", page:null},
+  {from:"ac20146a",to:"ac20146", proof:"This AC cancels AC 20-146.", src:"AC 20-146A", page:5},
+];
+
+const RELS = [
+  {a:"ac2517a", b:"ac2517",  w:457, kind:"raffine",  tensions:39, confirmed:0},
+  {a:"ac2517a", b:"cfr25",   w:104, kind:"raffine",  tensions:80, confirmed:0},
+  {a:"ac2517",  b:"cfr25",   w:47,  kind:"raffine",  tensions:0,  confirmed:0},
+  {a:"ac25562", b:"etsoc",   w:38,  kind:"complète", tensions:12, confirmed:0},
+  {a:"ac25562", b:"cfr25",   w:42,  kind:"raffine",  tensions:0,  confirmed:0},
+  {a:"etsoc",   b:"npa",     w:26,  kind:"complète", tensions:6,  confirmed:0},
+  {a:"cfr25",   b:"npa",     w:31,  kind:"complète", tensions:9,  confirmed:0},
+  {a:"research",b:"etsob",   w:18,  kind:"complète", tensions:0,  confirmed:0},
+  {a:"ac2125b", b:"ac2517a", w:22,  kind:"complète", tensions:0,  confirmed:0},
+];
+
+const REGISTRY = [
+  {a:"AC 25.562-1B", b:"ETSO-C127c", verdict:"compl", vlabel:"COMPLÉMENTAIRES",
+   reason:"Les deux énoncés appartiennent au même cadre : l'un précise quelle preuve compte pour la démonstration (impact franc), l'autre l'applicabilité de la limite (tout contact). Chaque document contient les deux règles.",
+   method:"Juge LLM · 2 passages",
+   pa:"« The evaluation showing HIC of 1000 or less must be from an ATD head impact that is a solid strike and not a glancing blow. » — AC 25.562-1B, p.27",
+   pb:"« Regardless of whether the head contact is a solid strike or a glancing blow, the HIC value must be calculated and must not exceed 1000. » — ETSO-C127c, p.13"},
+  {a:"AC 25.562-1B", b:"NPA 2013-20", verdict:"equiv", vlabel:"ÉQUIVALENCE",
+   reason:"Mêmes valeurs numériques exprimées dans des unités différentes : 1 500 lb (6,67 kN) = 680 kg. Détection déterministe par conversion d'unités.",
+   method:"Déterministe · unités",
+   pa:"« …the maximum compressive load measure between the pelvis and the lumbar column of the ATD does not exceed 1,500 lbs (6.67 kN). » — AC 25.562-1B",
+   pb:"« …must not exceed 680 kg (1500 lb). » — NPA 2013-20"},
+  {a:"CFR Part 25", b:"NPA 2013-20", verdict:"scope", vlabel:"PORTÉES DIFFÉRENTES",
+   reason:"Conditions d'essai distinctes : 0,09 s / 16 g décrit l'essai longitudinal avant (lacet 10°), 0,08 s / 14 g l'essai vertical descendant (assiette –30°). Les deux documents énoncent les mêmes valeurs pour les mêmes conditions.",
+   method:"Juge LLM · 2 passages",
+   pa:"« A change in forward longitudinal velocity… Peak floor deceleration must occur in not more than 0.09 seconds… 16g. » — CFR Part 25",
+   pb:"« A change in downward vertical velocity… Peak floor deceleration must occur in not more than 0.08 seconds… 14 g. » — NPA 2013-20"},
+  {a:"CFR Part 25", b:"AC 25-17A", verdict:"scope", vlabel:"PORTÉES DIFFÉRENTES",
+   reason:"Le « § 25.853(b) » de l'AC est une citation historique (en-tête « APPENDIX F, AMENDMENT 25-59, 1984 ») — renvoi correct à l'époque, renuméroté (c) en 1995. Paire temporelle, pas une contradiction vive.",
+   method:"Revue humaine",
+   pa:"« …as determined by the test specified in § 25.853(c)… » — CFR Part 25 (texte courant)",
+   pb:"« …as determined by the test specified in § 25.853(b)… » — AC 25-17A, annexe historique Amdt 25-59 (1984)"},
+  {a:"AC 25-17A", b:"CFR Part 25", verdict:"scope", vlabel:"PORTÉES DIFFÉRENTES",
+   reason:"Températures de calibration distinctes (1 700 °F vs 1 900 °F) car essais distincts de l'Appendix F — étape procédurale quasi identique, cibles différentes.",
+   method:"Juge LLM + cohérence famille",
+   pa:"« …ensure that each of the seven thermocouples reads 1700 ± 100ºF… » — AC 25-17A, p.709",
+   pb:"« …ensure that the thermocouples are reading 1900 ± 100°F… » — CFR Part 25, p.46"},
+  {a:"AC 25-17A", b:"AC 25-17 (1991)", verdict:"compl", vlabel:"COMPLÉMENTAIRES",
+   reason:"Édition révisée vs édition annulée : 457 raffinements détectés — la nouvelle édition reformule et précise l'ancienne. Aucune incompatibilité vive entre exigences applicables.",
+   method:"Juge LLM · 2 passages",
+   pa:"« This amendment required that items of mass… (§ 25.789). » — AC 25-17A",
+   pb:"« …items of mass in galleys not become a hazard due to inertia forces. » — AC 25-17 (1991)"},
+];
+
+/* ═══════════════ RENDU CARTE ═══════════════ */
+const svg = document.getElementById("map");
+const N = Object.fromEntries(NODES.map(n=>[n.id,n]));
+const R = n => 16 + Math.sqrt(n.claims)/4.2;
+
+function curve(a,b,sag=0.16){
+  const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+  const dx=b.x-a.x, dy=b.y-a.y;
+  const cx=mx-dy*sag, cy=my+dx*sag;
+  return {d:`M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}`, mx:(mx+cx)/2+(mx- (mx-dy*sag))*0 , cx, cy};
+}
+function qpoint(a,c,b,t){ // point sur quadratique
+  const u=1-t;
+  return {x:u*u*a.x+2*u*t*c.x+t*t*b.x, y:u*u*a.y+2*u*t*c.y+t*t*b.y};
+}
+
+let html = `<defs>
+  <marker id="arrow-gold" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--gold)"/>
+  </marker>
+</defs>`;
+
+/* relations agrégées (sous les lignées) */
+RELS.forEach((r,i)=>{
+  const a=N[r.a], b=N[r.b];
+  const c=curve(a,b,0.13);
+  const w=Math.max(1, Math.min(7, r.w/70));
+  html+=`<path class="edge-rel" data-a="${r.a}" data-b="${r.b}" d="${c.d}" stroke-width="${w}"
+          style="animation:pop .5s ${0.9+i*0.05}s both"/>`;
+  if(r.tensions>0){
+    const p=qpoint(a,{x:c.cx,y:c.cy},b,0.5);
+    html+=`<g class="tension-pill" data-a="${r.a}" data-b="${r.b}" style="animation:pop .5s ${1.3+i*0.05}s both" onclick="goRegistry()">
+      <rect x="${p.x-62}" y="${p.y-11}" width="124" height="20"/>
+      <text x="${p.x}" y="${p.y+3.5}">${r.tensions} examinées · ${r.confirmed} confirmée</text></g>`;
+  }
+});
+
+/* lignées (fil d'or) */
+LINEAGE.forEach((l,i)=>{
+  const a=N[l.from], b=N[l.to];
+  const c=curve(b,a,0.10); // orienté annulé -> remplaçant pour la flèche vers le courant
+  html+=`<path class="edge-lineage draw" style="animation-delay:${0.5+i*0.18}s, ${1.9+i*0.18}s" d="${c.d}" marker-end="url(#arrow-gold)" data-li="${i}"/>`;
+  html+=`<path class="edge-hit" d="${c.d}" data-li="${i}"/>`;
+});
+
+/* nœuds */
+NODES.forEach((n,i)=>{
+  const r=R(n);
+  html+=`<g class="node ${n.status}" data-id="${n.id}" style="animation:pop .55s ${0.15+i*0.07}s both; transform-origin:${n.x}px ${n.y}px">
+    <circle class="core" cx="${n.x}" cy="${n.y}" r="${r}"/>
+    <circle class="ring" cx="${n.x}" cy="${n.y}" r="${r}"/>
+    <text class="authority ${n.auth.toLowerCase()==='easa'?'easa':(n.auth==='ÉTUDE'?'etude':'faa')}" x="${n.x}" y="${n.y+3.5}">${n.auth}</text>
+    <text class="nlabel" x="${n.x}" y="${n.y+r+17}">${n.label}</text>
+    <text class="nsub" x="${n.x}" y="${n.y+r+31}">${n.status==='dead'?'✝ '+n.sub:n.sub} · ${n.claims.toLocaleString('fr-FR')} faits</text>
+  </g>`;
+});
+svg.innerHTML = html;
+
+/* ═══════════════ INTERACTIONS ═══════════════ */
+const panel=document.getElementById("panel");
+function chainOf(id){
+  // remonte/descend la lignée
+  const up={}, down={};
+  LINEAGE.forEach(l=>{up[l.to]=l.from; down[l.from]=l.to;});
+  let chain=[id], cur=id;
+  while(down[cur]){chain.push(down[cur]); cur=down[cur];}
+  cur=id;
+  while(up[cur]){chain.unshift(up[cur]); cur=up[cur];}
+  return chain.reverse(); // ancien -> récent
+}
+function openPanel(id){
+  const n=N[id];
+  document.querySelectorAll(".node").forEach(el=>el.classList.toggle("sel", el.dataset.id===id));
+  const chain=chainOf(id);
+  const chainHtml = chain.length>1
+    ? `<div class="chain">${chain.map((c,i)=>{
+        const cn=N[c];
+        const cls = c===id ? "this" : (cn.status==="alive"?"current":"");
+        return `<span class="cnode ${cls}">${cn.label}</span>${i<chain.length-1?'<span class="carrow">→</span>':''}`;
+      }).join("")}</div>`
+    : `<div style="color:var(--faint);font-size:12px">Document hors lignée de supersession.</div>`;
+  const proof = LINEAGE.find(l=>l.to===id||l.from===id);
+  const tensions = RELS.filter(r=>(r.a===id||r.b===id)&&r.tensions>0);
+  document.getElementById("panel-content").innerHTML=`
+    <div class="product" style="font-family:'Spline Sans Mono';font-size:10px;letter-spacing:.3em;color:var(--faint)">DOCUMENT</div>
+    <h2>${n.label}</h2>
+    <span class="status-chip ${n.status}">${n.status==="alive"?"● En vigueur":"✝ Annulé"}</span>
+    <span class="auth-chip">${n.auth}</span>
+    <div class="pmeta">
+      <div><div class="v">${n.claims.toLocaleString('fr-FR')}</div><div class="k">faits extraits</div></div>
+      <div><div class="v">${tensions.reduce((s,t)=>s+t.tensions,0)}</div><div class="k">tensions examinées</div></div>
+      <div><div class="v" style="color:var(--green)">0</div><div class="k">confirmées</div></div>
+    </div>
+    <div class="psec"><h3>Position dans la lignée</h3>${chainHtml}
+      ${proof?`<div class="proofline">« ${proof.proof.slice(0,140)}${proof.proof.length>140?"…":""} »
+        <span class="src">↳ ${proof.src}${proof.page?` · page ${proof.page} · ouvrir ↗`:""}</span></div>`:""}
+    </div>
+    <div class="psec"><h3>Tensions avec d'autres documents</h3>
+      ${tensions.length?tensions.map(t=>{
+        const other=N[t.a===id?t.b:t.a];
+        return `<div class="tension-item">
+          <div class="pair">avec ${other.label} <span style="float:right;color:var(--green);font-size:11px">✓ 0 confirmée</span></div>
+          <div class="why">${t.tensions} paires examinées en contexte — portées différentes, équivalences d'unités ou compléments. Détail dans le registre.</div>
+        </div>`;}).join("")
+      :`<div style="color:var(--faint);font-size:12px">Aucune tension détectée avec d'autres documents.</div>`}
+    </div>
+    <button class="open-doc">Ouvrir le document source ↗</button>`;
+  panel.classList.add("open");
+}
+function closePanel(){panel.classList.remove("open");
+  document.querySelectorAll(".node").forEach(el=>el.classList.remove("sel"));}
+
+svg.addEventListener("click",e=>{
+  const node=e.target.closest(".node");
+  if(node){openPanel(node.dataset.id); return;}
+  const hit=e.target.closest("[data-li]");
+  if(hit){openProof(+hit.dataset.li); return;}
+  closePanel();
+});
+svg.addEventListener("mouseover",e=>{
+  const node=e.target.closest(".node");
+  if(!node) return;
+  const id=node.dataset.id;
+  document.querySelectorAll(".edge-rel").forEach(el=>{
+    el.classList.toggle("lit", el.dataset.a===id||el.dataset.b===id);
+  });
+});
+svg.addEventListener("mouseout",()=>{
+  document.querySelectorAll(".edge-rel").forEach(el=>el.classList.remove("lit"));
+});
+
+/* preuve */
+function openProof(i){
+  const l=LINEAGE[i];
+  document.getElementById("proof-rel").innerHTML=
+    `<span class="gold">${N[l.from].label}</span> remplace <span style="color:var(--muted)">${N[l.to].label}</span>`;
+  document.getElementById("proof-text").textContent=l.proof;
+  document.getElementById("proof-src").innerHTML=
+    l.page?`Source : <b>${l.src}</b> · page ${l.page}`:`Source : <b>${l.src}</b>`;
+  document.getElementById("proof").classList.add("open");
+}
+function closeProof(){document.getElementById("proof").classList.remove("open")}
+document.addEventListener("keydown",e=>{if(e.key==="Escape"){closeProof();closePanel();}});
+
+/* filtres */
+document.querySelectorAll(".filters .chip").forEach(ch=>{
+  ch.addEventListener("click",()=>{
+    document.querySelectorAll(".filters .chip").forEach(c=>c.classList.remove("on"));
+    ch.classList.add("on");
+    const f=ch.dataset.f;
+    document.querySelectorAll(".node").forEach(el=>{
+      const n=N[el.dataset.id];
+      const inLineage = LINEAGE.some(l=>l.from===el.dataset.id||l.to===el.dataset.id);
+      let show=true;
+      if(f==="alive") show=n.status==="alive";
+      if(f==="dead") show=n.status==="dead";
+      if(f==="lineage") show=inLineage;
+      el.classList.toggle("fade",!show);
+    });
+    document.querySelectorAll(".edge-rel,.tension-pill").forEach(el=>{
+      el.classList.toggle("dim", f==="lineage");
+    });
+    document.querySelectorAll(".edge-lineage").forEach(el=>{
+      el.classList.toggle("dim", f==="alive"||f==="dead");
+    });
+  });
+});
+
+/* ═══════════════ ONGLETS + REGISTRE ═══════════════ */
+document.querySelectorAll(".tab[data-view]").forEach(t=>{
+  t.addEventListener("click",()=>{
+    document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+    t.classList.add("active");
+    document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
+    document.getElementById("view-"+t.dataset.view).classList.add("active");
+  });
+});
+function goRegistry(){document.querySelector('.tab[data-view="registry"]').click();}
+
+const tb=document.getElementById("reg-body");
+tb.innerHTML = REGISTRY.map((r,i)=>`
+  <tr class="main" data-i="${i}">
+    <td class="paircell">${r.a}<span class="vs">VS</span>${r.b}</td>
+    <td><span class="verdict ${r.verdict}">${r.vlabel}</span></td>
+    <td class="reason">${r.reason}</td>
+    <td class="method">${r.method}</td>
+  </tr>
+  <tr class="detail" style="display:none"><td colspan="4">
+    <div class="passages">
+      <div class="passage" style="border-left-color:var(--blue)"><b>PASSAGE A</b>${r.pa}</div>
+      <div class="passage" style="border-left-color:var(--cyan)"><b>PASSAGE B</b>${r.pb}</div>
+    </div>
+  </td></tr>`).join("");
+tb.querySelectorAll("tr.main").forEach(tr=>{
+  tr.addEventListener("click",()=>{
+    const d=tr.nextElementSibling;
+    d.style.display = d.style.display==="none" ? "table-row" : "none";
+  });
+});
+</script>
+</body>
+</html>
