@@ -32,6 +32,8 @@ interface RefDocument {
   status: 'in_force' | 'superseded' | 'external'
   n_claims: number
   n_withdrawn: number
+  doc_date: string | null      // ISO — date documentaire (frise)
+  date_source: 'claims' | 'cited' | null
 }
 
 interface RefLineage {
@@ -132,7 +134,7 @@ const X0 = 150
 const Y0 = 120
 const GRID_COLS = 5
 
-function computeLayout(docs: RefDocument[], lineage: RefLineage[]): { nodes: NodePos[]; w: number; h: number } {
+function computeLayout(docs: RefDocument[], lineage: RefLineage[]): { nodes: NodePos[]; w: number; h: number; chains: string[][] } {
   const byId = new Map(docs.map((d) => [d.doc_id, d]))
   // composantes connexes du graphe de lignée (non orienté), puis ordre ancien → récent
   const adj = new Map<string, Set<string>>()
@@ -201,7 +203,7 @@ function computeLayout(docs: RefDocument[], lineage: RefLineage[]): { nodes: Nod
   })
   const w = Math.max(X0 + COL_W * Math.max(GRID_COLS, ...chains.map((c) => c.length)) + 40, 900)
   const h = y + ROW_H * Math.ceil(singles.length / GRID_COLS) + 60
-  return { nodes, w, h }
+  return { nodes, w, h, chains }
 }
 
 function curvePath(a: { x: number; y: number }, b: { x: number; y: number }, sag = 0.13) {
@@ -227,7 +229,7 @@ export default function ReferentielPage() {
   const [mapData, setMapData] = useState<RefMap | null>(null)
   const [tensions, setTensions] = useState<RefTensions | null>(null)
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState<'map' | 'registry'>('map')
+  const [view, setView] = useState<'map' | 'timeline' | 'registry'>('map')
   const [filter, setFilter] = useState<'all' | 'alive' | 'dead' | 'lineage'>('all')
   const [selectedDoc, setSelectedDoc] = useState<string | null>(null)
   const [selectedPair, setSelectedPair] = useState<RefPair | null>(null)
@@ -549,7 +551,7 @@ export default function ReferentielPage() {
 
       {/* ── Onglets ── */}
       <HStack mx={9} mt={4} spacing={1.5} position="relative">
-        {([['map', 'Carte'], ['registry', 'Registre des tensions']] as const).map(([v, label]) => (
+        {([['map', 'Carte'], ['timeline', 'Frise chronologique'], ['registry', 'Registre des tensions']] as const).map(([v, label]) => (
           <Button key={v} size="sm" variant="ghost"
             onClick={() => { setView(v); setProof(null); setPairFilter(null) }}
             color={view === v ? 'var(--fg-primary)' : 'var(--fg-secondary)'}
@@ -564,11 +566,6 @@ export default function ReferentielPage() {
             {v === 'registry' && <Box as="span" ml={2} fontSize="10px" color="var(--fg-muted)" fontFamily="var(--font-mono)">{fmtNum(S.tensions_examined)}</Box>}
           </Button>
         ))}
-        <Button size="sm" variant="ghost" isDisabled color="var(--fg-muted)" fontWeight={600}>
-          Frise chronologique
-          <Box as="span" ml={2} fontSize="9px" color="var(--warning-base)" border="1px solid var(--warning-border)"
-            borderRadius="4px" px={1.5} letterSpacing=".1em">V2</Box>
-        </Button>
       </HStack>
 
       {/* ── Scène ── */}
@@ -727,6 +724,22 @@ export default function ReferentielPage() {
               </HStack>
             </VStack>
 
+          </>
+        )}
+
+        {/* ════════ Frise chronologique ════════ */}
+        {view === 'timeline' && (
+          <TimelineView
+            docs={nodes}
+            chains={layout.chains}
+            selectedDoc={selectedDoc}
+            onSelect={(id) => { setSelectedDoc(id); setSelectedPair(null) }}
+          />
+        )}
+
+        {/* ── Éléments partagés carte + frise : tooltip, panneau, fiche preuve ── */}
+        {view !== 'registry' && (
+          <>
             {/* tooltip survol */}
             {hover && (
               <Box position="absolute" left={`${hover.x}px`} top={`${hover.y}px`} zIndex={30} pointerEvents="none"
@@ -892,6 +905,213 @@ export default function ReferentielPage() {
         )}
       </Box>
     </Box>
+  )
+}
+
+// ── Frise chronologique ─────────────────────────────────────────────────────
+//
+// Documents sur un axe temporel (date documentaire = valid_from modal des
+// faits, ou date citée par le remplaçant). Couloirs = chaînes de lignée ;
+// barres = période de validité (un doc remplacé « vit » jusqu'à la date de
+// son remplaçant ; l'en-vigueur court jusqu'à aujourd'hui). Les documents
+// sans date mais dans une lignée sont positionnés par interpolation (ordre
+// garanti, date inconnue) ; les autres vont sur l'étagère « non datés ».
+
+const TL_W = 1400
+const TL_PAD_L = 90
+const TL_PAD_R = 130
+const TL_TOP = 84
+const TL_LANE_H = 96
+
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })
+
+function TimelineView({ docs, chains, selectedDoc, onSelect }: {
+  docs: NodePos[]
+  chains: string[][]
+  selectedDoc: string | null
+  onSelect: (id: string) => void
+}) {
+  const byId = useMemo(() => new Map(docs.map((d) => [d.doc_id, d])), [docs])
+
+  const model = useMemo(() => {
+    const now = Date.now()
+    const dated = docs.filter((d) => d.doc_date)
+    const tMin = dated.length ? Math.min(...dated.map((d) => Date.parse(d.doc_date!))) : now - 1
+    const span = Math.max(1, now - tMin)
+    const x = (t: number) => TL_PAD_L + ((t - tMin) / span) * (TL_W - TL_PAD_L - TL_PAD_R)
+    const xToday = x(now)
+
+    interface TLNode { doc: NodePos; x: number; dated: boolean }
+    interface Lane { kind: 'chain' | 'singles'; nodes: TLNode[] }
+
+    const inChain = new Set(chains.flat())
+    const lanes: Lane[] = []
+
+    // 1) chaînes de lignée (ordre ancien → récent) ; membres non datés interpolés
+    for (const chain of chains) {
+      const members = chain.map((id) => byId.get(id)).filter(Boolean) as NodePos[]
+      const xs: (number | null)[] = members.map((d) => (d.doc_date ? x(Date.parse(d.doc_date)) : null))
+      for (let i = 0; i < xs.length; i++) {
+        if (xs[i] != null) continue
+        const prev = xs.slice(0, i).filter((v) => v != null).pop() ?? null
+        const next = xs.slice(i + 1).find((v) => v != null) ?? null
+        xs[i] = prev != null && next != null ? (prev + next) / 2
+          : prev != null ? Math.min(prev + 130, xToday - 40)
+          : next != null ? Math.max(next - 130, TL_PAD_L)
+          : TL_PAD_L + 130 * i
+      }
+      lanes.push({ kind: 'chain', nodes: members.map((d, i) => ({ doc: d, x: xs[i]!, dated: !!d.doc_date })) })
+    }
+
+    // 2) hors lignée datés : empaquetage glouton (évite le chevauchement des libellés)
+    const singles = docs.filter((d) => !inChain.has(d.doc_id) && d.doc_date)
+      .sort((a, b) => Date.parse(a.doc_date!) - Date.parse(b.doc_date!))
+    const singleLanes: TLNode[][] = []
+    for (const d of singles) {
+      const px = x(Date.parse(d.doc_date!))
+      let lane = singleLanes.find((l) => px - l[l.length - 1].x > 175)
+      if (!lane) { lane = []; singleLanes.push(lane) }
+      lane.push({ doc: d, x: px, dated: true })
+    }
+    for (const l of singleLanes) lanes.push({ kind: 'singles', nodes: l })
+
+    // 3) étagère : hors lignée ET sans date — on n'invente rien
+    const undated = docs.filter((d) => !inChain.has(d.doc_id) && !d.doc_date)
+
+    // graduations (années rondes, pas adapté à l'étendue)
+    const y0 = new Date(tMin).getFullYear()
+    const y1 = new Date(now).getFullYear()
+    const step = y1 - y0 > 30 ? 10 : 5
+    const ticks: number[] = []
+    for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) ticks.push(y)
+
+    const shelfY = TL_TOP + lanes.length * TL_LANE_H + 46
+    const height = shelfY + (undated.length ? 110 : 30)
+    return { lanes, undated, ticks, x, xToday, height }
+  }, [docs, chains, byId])
+
+  const { lanes, undated, ticks, x, xToday, height } = model
+
+  return (
+    <>
+      <Text position="absolute" top="18px" right="20px" zIndex={8} fontSize="11.5px"
+        color="var(--fg-muted)" fontFamily="var(--font-mono)">
+        barre verte : période de validité du texte en vigueur · clic : document
+      </Text>
+      <Box position="absolute" inset={0} overflowY="auto" overflowX="hidden">
+        <svg viewBox={`0 0 ${TL_W} ${height}`} style={{ width: '100%', display: 'block' }}>
+          {/* graduations années */}
+          {ticks.map((y) => {
+            const tx = x(Date.UTC(y, 0, 1))
+            return (
+              <g key={y}>
+                <line x1={tx} y1={TL_TOP - 26} x2={tx} y2={height - 16}
+                  stroke="var(--border-faint)" strokeWidth={1} />
+                <text x={tx} y={TL_TOP - 34} textAnchor="middle"
+                  fontFamily="var(--font-mono)" fontSize="11" fill="var(--fg-muted)">{y}</text>
+              </g>
+            )
+          })}
+          {/* aujourd'hui */}
+          <line x1={xToday} y1={TL_TOP - 26} x2={xToday} y2={height - 16}
+            stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="5 4" opacity={0.8} />
+          <text x={xToday} y={TL_TOP - 34} textAnchor="middle"
+            fontFamily="var(--font-mono)" fontSize="11" fontWeight={700} fill="var(--accent)">aujourd&apos;hui</text>
+
+          {/* couloirs */}
+          {lanes.map((lane, li) => {
+            const y = TL_TOP + li * TL_LANE_H + 40
+            return (
+              <g key={li}>
+                {/* barres de période de validité (chaînes uniquement) */}
+                {lane.kind === 'chain' && lane.nodes.map((n, i) => {
+                  const next = lane.nodes[i + 1]
+                  const xEnd = next ? next.x : xToday
+                  const alive = !next && n.doc.status === 'in_force'
+                  return (
+                    <g key={`span-${n.doc.doc_id}`}>
+                      <line x1={n.x} y1={y} x2={xEnd} y2={y}
+                        stroke={alive ? 'var(--success-base)' : 'var(--border-strong)'}
+                        strokeWidth={alive ? 4 : 3} opacity={alive ? 0.85 : 0.45}
+                        strokeDasharray={n.dated && (next ? next.dated : true) ? undefined : '6 5'} />
+                      {next && (
+                        <text x={xEnd - 9} y={y - 8} fontSize="11" fill="var(--fg-muted)">✝</text>
+                      )}
+                      {alive && (
+                        <text x={xToday + 8} y={y + 4} fontSize="10.5" fontFamily="var(--font-mono)"
+                          fill="var(--success-base)">en vigueur</text>
+                      )}
+                    </g>
+                  )
+                })}
+                {/* nœuds */}
+                {lane.nodes.map((n) => {
+                  const alive = n.doc.status === 'in_force'
+                  const sub = n.dated
+                    ? `${fmtDate(n.doc.doc_date!)}${n.doc.date_source === 'cited' ? ' · citée' : ''}`
+                    : 'date inconnue'
+                  return (
+                    <g key={n.doc.doc_id} style={{ cursor: 'pointer' }} onClick={() => onSelect(n.doc.doc_id)}>
+                      <circle cx={n.x} cy={y} r={11} fill="var(--bg-surface-alt)" />
+                      <circle cx={n.x} cy={y} r={11} fill="none" strokeWidth={2.5}
+                        stroke={alive ? 'var(--success-base)' : n.dated ? 'var(--fg-disabled)' : 'var(--warning-base)'}
+                        strokeDasharray={!n.dated ? '3 4' : alive ? undefined : '4 4'}
+                        style={selectedDoc === n.doc.doc_id ? { stroke: 'var(--warning-base)', strokeWidth: 4 } : undefined} />
+                      <text x={n.x} y={y - 20} textAnchor="middle" fontFamily="var(--font-sans)"
+                        fontWeight={600} fontSize="12" fill={alive ? 'var(--fg-primary)' : 'var(--fg-muted)'}>
+                        {n.doc.title}
+                      </text>
+                      <text x={n.x} y={y + 27} textAnchor="middle" fontFamily="var(--font-mono)"
+                        fontSize="9.5" fill="var(--fg-muted)">{sub}</text>
+                    </g>
+                  )
+                })}
+              </g>
+            )
+          })}
+
+          {/* étagère des non datés */}
+          {undated.length > 0 && (
+            <g>
+              <line x1={TL_PAD_L - 30} y1={TL_TOP + lanes.length * TL_LANE_H + 18}
+                x2={TL_W - 40} y2={TL_TOP + lanes.length * TL_LANE_H + 18}
+                stroke="var(--border-default)" strokeWidth={1} strokeDasharray="3 5" />
+              <text x={TL_PAD_L - 30} y={TL_TOP + lanes.length * TL_LANE_H + 40}
+                fontFamily="var(--font-mono)" fontSize="10.5" fill="var(--fg-muted)" letterSpacing=".12em">
+                NON DATÉS — aucune date extraite ni citée, position chronologique inconnue
+              </text>
+              {undated.map((d, i) => {
+                const ux = TL_PAD_L + 40 + i * 230
+                const uy = TL_TOP + lanes.length * TL_LANE_H + 76
+                return (
+                  <g key={d.doc_id} style={{ cursor: 'pointer' }} onClick={() => onSelect(d.doc_id)}>
+                    <circle cx={ux} cy={uy} r={10} fill="var(--bg-surface-alt)" />
+                    <circle cx={ux} cy={uy} r={10} fill="none" strokeWidth={2.5}
+                      stroke="var(--fg-disabled)" strokeDasharray="3 4"
+                      style={selectedDoc === d.doc_id ? { stroke: 'var(--warning-base)', strokeWidth: 4 } : undefined} />
+                    <text x={ux + 18} y={uy + 4} fontFamily="var(--font-sans)" fontWeight={600}
+                      fontSize="11.5" fill="var(--fg-muted)">{d.title}</text>
+                  </g>
+                )
+              })}
+            </g>
+          )}
+        </svg>
+      </Box>
+
+      {/* légende frise */}
+      <VStack position="absolute" left="18px" bottom="16px" zIndex={8} align="stretch" spacing={1.5}
+        bg="var(--bg-surface)" border="1px solid var(--border-default)" borderRadius="10px"
+        px={4} py={3} fontSize="11.5px" color="var(--fg-secondary)" opacity={0.95}>
+        <HStack><Box w="30px" borderTop="4px solid var(--success-base)" /><Text fontSize="11.5px">Période de validité du texte en vigueur</Text></HStack>
+        <HStack><Box w="30px" borderTop="3px solid var(--border-strong)" opacity={0.6} /><Text fontSize="11.5px">Période révolue (jusqu&apos;au remplacement ✝)</Text></HStack>
+        <HStack>
+          <Box w="11px" h="11px" borderRadius="50%" border="2.5px dashed var(--warning-base)" bg="var(--bg-surface-alt)" />
+          <Text fontSize="11.5px">Date inconnue — position interpolée, ordre garanti par la lignée</Text>
+        </HStack>
+      </VStack>
+    </>
   )
 }
 

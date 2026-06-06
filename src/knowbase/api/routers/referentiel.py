@@ -41,6 +41,36 @@ def _doc_title(doc_id: str, reg_key: Optional[str]) -> str:
     return _DOC_HASH_RE.sub("", doc_id or "").replace("_", " ")
 
 
+# ── Parsing des dates citées dans les déclarations de supersession ───────────
+# Formats rencontrés dans les preuves : « 4/24/89 », « 6/3/97 », « July 15, 1991 »
+_MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+}
+_RE_US_NUMERIC = re.compile(r"^\s*(\d{1,2})/(\d{1,2})/(\d{2,4})\s*$")
+_RE_MONTH_NAME = re.compile(r"^\s*([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})\s*$")
+
+
+def _parse_stated_date(raw: Optional[str]) -> Optional[str]:
+    """Date citée → ISO (best-effort, None si non reconnue)."""
+    if not raw:
+        return None
+    m = _RE_US_NUMERIC.match(raw)
+    if m:
+        mo, da, yr = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if yr < 100:  # « 89 » → 1989 (les citations réglementaires sont passées)
+            yr += 1900 if yr > 30 else 2000
+        if 1 <= mo <= 12 and 1 <= da <= 31:
+            return f"{yr:04d}-{mo:02d}-{da:02d}"
+    m = _RE_MONTH_NAME.match(raw)
+    if m:
+        mo = _MONTHS.get(m.group(1).lower())
+        da, yr = int(m.group(2)), int(m.group(3))
+        if mo and 1 <= da <= 31:
+            return f"{yr:04d}-{mo:02d}-{da:02d}"
+    return None
+
+
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class RefDocument(BaseModel):
@@ -51,6 +81,8 @@ class RefDocument(BaseModel):
     status: str  # in_force | superseded | external (référencé mais non ingéré)
     n_claims: int = 0
     n_withdrawn: int = 0
+    doc_date: Optional[str] = None  # ISO — date documentaire (frise chronologique)
+    date_source: Optional[str] = None  # claims (valid_from modal) | cited (citée par le remplaçant)
 
 
 class RefLineage(BaseModel):
@@ -140,7 +172,18 @@ RETURN a.doc_id AS superseder, b.doc_id AS superseded,
        r.scope AS scope, r.detection_source AS detection,
        coalesce(r.evidence, cl.text) AS evidence,
        r.source_claim_id AS evidence_claim_id,
-       cl.doc_id AS evidence_doc_id, cl.page_no AS evidence_page
+       cl.doc_id AS evidence_doc_id, cl.page_no AS evidence_page,
+       r.stated_date AS stated_date
+"""
+
+# Date documentaire = valid_from MODAL des claims du doc (héritage documentaire,
+# même règle que lineage_resolution._doc_keys_and_dates).
+_CY_DOC_DATES = """
+MATCH (c:Claim {tenant_id: $tenant_id}) WHERE c.doc_id IS NOT NULL
+WITH c.doc_id AS doc_id, toString(c.valid_from) AS vf, count(*) AS n
+ORDER BY doc_id, (vf IS NULL), n DESC
+WITH doc_id, collect(vf)[0] AS modal
+RETURN doc_id, modal
 """
 
 # NOTE : le MATCH non-orienté + filtre doc_a < doc_b donne UNE ligne par arête
@@ -198,8 +241,23 @@ async def get_map(tenant_id: str = Query(default="default")) -> RefMap:
         lin_rows = [dict(r) for r in s.run(_CY_LINEAGE, tenant_id=tenant_id)]
         pair_rows = [dict(r) for r in s.run(_CY_PAIRS, tenant_id=tenant_id)]
         tens_rows = [dict(r) for r in s.run(_CY_TENSION_COUNTS, tenant_id=tenant_id)]
+        date_rows = {r["doc_id"]: r["modal"] for r in s.run(_CY_DOC_DATES, tenant_id=tenant_id)}
 
     superseded_ids = {l["superseded"] for l in lin_rows}
+    # dates citées : « AC X, dated 6/3/97, is canceled » date le doc REMPLACÉ
+    cited_dates = {}
+    for l in lin_rows:
+        iso = _parse_stated_date(l.get("stated_date"))
+        if iso and l["superseded"]:
+            cited_dates[l["superseded"]] = iso
+
+    def _doc_date(doc_id: str):
+        modal = date_rows.get(doc_id)
+        if modal:
+            return modal[:10], "claims"
+        if doc_id in cited_dates:
+            return cited_dates[doc_id], "cited"
+        return None, None
     documents = []
     seen_ids = set()
     total_claims = 0
@@ -208,6 +266,7 @@ async def get_map(tenant_id: str = Query(default="default")) -> RefMap:
             continue
         seen_ids.add(d["doc_id"])
         total_claims += d["n_claims"] or 0
+        dt, src = _doc_date(d["doc_id"])
         documents.append(RefDocument(
             doc_id=d["doc_id"],
             title=_doc_title(d["doc_id"], d.get("reg_key")),
@@ -215,18 +274,21 @@ async def get_map(tenant_id: str = Query(default="default")) -> RefMap:
             status="superseded" if d["doc_id"] in superseded_ids else "in_force",
             n_claims=d["n_claims"] or 0,
             n_withdrawn=d["n_withdrawn"] or 0,
+            doc_date=dt, date_source=src,
         ))
     # Documents fantômes : référencés par la lignée mais jamais ingérés
     for d in ext_rows:
         if not d["doc_id"] or d["doc_id"] in seen_ids:
             continue
         seen_ids.add(d["doc_id"])
+        dt, src = _doc_date(d["doc_id"])
         documents.append(RefDocument(
             doc_id=d["doc_id"],
             title=_doc_title(d["doc_id"], d.get("reg_key")),
             authority=regulatory_authority(d.get("reg_key") or d["doc_id"]),
             status="external" if d["doc_id"] not in superseded_ids else "superseded",
             n_claims=0, n_withdrawn=0,
+            doc_date=dt, date_source=src,
         ))
 
     lineage = [RefLineage(
