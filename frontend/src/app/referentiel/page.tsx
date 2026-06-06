@@ -19,7 +19,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   Box, Flex, Heading, Text, Spinner, VStack, HStack, Icon, Button,
 } from '@chakra-ui/react'
-import { FiMap, FiX, FiExternalLink, FiShield, FiAlertTriangle } from 'react-icons/fi'
+import { FiMap, FiX, FiExternalLink, FiShield, FiAlertTriangle, FiMaximize, FiMinimize } from 'react-icons/fi'
 import { api } from '@/lib/api'
 import { openSourceFile } from '@/lib/openSourceFile'
 
@@ -285,6 +285,8 @@ export default function ReferentielPage() {
   // filtre du registre sur une paire de documents (posé par les pills / panneaux)
   const [pairFilter, setPairFilter] = useState<{ a: string; b: string } | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
+  // plein écran natif sur la scène (Échap = sortie gérée par le navigateur)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const stageRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   // drag en cours : id du nœud, offset curseur→centre, et si un vrai déplacement a eu lieu
@@ -293,10 +295,12 @@ export default function ReferentielPage() {
   // les index des lignes changent avec les filtres → referme la ligne dépliée
   useEffect(() => { setExpanded(null) }, [verdictFilter, pairFilter])
 
-  // Échap : ferme preuve, puis panneau
+  // Échap : ferme preuve, puis panneau — sauf en plein écran (le navigateur
+  // consomme Échap pour en sortir ; on ne vide pas l'état en même temps)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
+      if (document.fullscreenElement) return
       setProof(null)
       setSelectedDoc(null)
       setSelectedPair(null)
@@ -304,6 +308,21 @@ export default function ReferentielPage() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // suit l'état plein écran (bouton OU Échap navigateur)
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onFs)
+    return () => document.removeEventListener('fullscreenchange', onFs)
+  }, [])
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {})
+    } else {
+      stageRef.current?.requestFullscreen().catch(() => {})
+    }
   }, [])
 
   useEffect(() => {
@@ -628,8 +647,47 @@ export default function ReferentielPage() {
       <Box ref={stageRef} mx={9} mb={3} position="relative"
         border="1px solid var(--border-default)" borderRadius="0 12px 12px 12px"
         bg="var(--bg-surface)"
-        h={view === 'registry' ? 'calc(100vh - 296px)' : 'calc(100vh - 348px)'}
+        h={isFullscreen ? '100vh' : view === 'registry' ? 'calc(100vh - 296px)' : 'calc(100vh - 348px)'}
         minH="440px" overflow="hidden">
+
+        {/* plein écran (carte + frise) */}
+        {view !== 'registry' && (
+          <Box as="button" onClick={toggleFullscreen}
+            position="absolute" top="12px" right="14px" zIndex={9}
+            w="32px" h="32px" borderRadius="8px"
+            border="1px solid var(--border-default)" bg="var(--bg-surface)"
+            color="var(--fg-secondary)" display="flex" alignItems="center" justifyContent="center"
+            title={isFullscreen ? 'Quitter le plein écran (Échap)' : 'Plein écran'}
+            _hover={{ color: 'var(--fg-primary)', borderColor: 'var(--border-strong)' }}>
+            <Icon as={isFullscreen ? FiMinimize : FiMaximize} boxSize={4} />
+          </Box>
+        )}
+
+        {/* légende compacte en plein écran (la légende normale vit sous la scène) */}
+        {isFullscreen && view !== 'registry' && (
+          <Flex position="absolute" left="18px" bottom="16px" zIndex={8} gap={6} wrap="wrap" align="center"
+            bg="var(--bg-surface)" border="1px solid var(--border-default)" borderRadius="10px"
+            px={4} py={2.5} fontSize="11.5px" color="var(--fg-secondary)" opacity={0.95}>
+            {view === 'map' ? (
+              <>
+                <HStack><Box w="26px" borderTop="2.5px solid var(--warning-base)" /><Text fontSize="11.5px">Lignée (clic = preuve)</Text></HStack>
+                <HStack><Box w="26px" borderTop="1.5px solid var(--border-strong)" /><Text fontSize="11.5px">Relations entre faits</Text></HStack>
+                <HStack>
+                  <Box w="11px" h="11px" borderRadius="50%" border="2.5px solid var(--success-base)" bg="var(--bg-surface-alt)" />
+                  <Text fontSize="11.5px">En vigueur</Text>
+                  <Box w="11px" h="11px" borderRadius="50%" border="2.5px dashed var(--fg-disabled)" bg="var(--bg-surface)" ml={2} />
+                  <Text fontSize="11.5px">Annulé</Text>
+                </HStack>
+              </>
+            ) : (
+              <>
+                <HStack><Box w="26px" borderTop="4px solid var(--success-base)" /><Text fontSize="11.5px">Validité du texte en vigueur</Text></HStack>
+                <HStack><Box w="26px" borderTop="3px solid var(--border-strong)" opacity={0.6} /><Text fontSize="11.5px">Période révolue ✝</Text></HStack>
+                <HStack><Box w="26px" borderTop="3px dashed var(--border-strong)" opacity={0.7} /><Text fontSize="11.5px">Borne(s) non datée(s)</Text></HStack>
+              </>
+            )}
+          </Flex>
+        )}
 
         {view === 'map' && (
           <>
@@ -667,7 +725,7 @@ export default function ReferentielPage() {
                 </Box>
               )}
             </HStack>
-            <Text position="absolute" top="18px" right="20px" zIndex={8} fontSize="11.5px"
+            <Text position="absolute" top="18px" right="56px" zIndex={8} fontSize="11.5px"
               color="var(--fg-muted)" fontFamily="var(--font-mono)">
               clic : document · double-clic : isoler son voisinage · fil ambré : preuve · arête fine : détail
             </Text>
@@ -1070,7 +1128,7 @@ function TimelineView({ docs, chains, selectedDoc, onSelect }: {
 
   return (
     <>
-      <Text position="absolute" top="18px" right="20px" zIndex={8} fontSize="11.5px"
+      <Text position="absolute" top="18px" right="56px" zIndex={8} fontSize="11.5px"
         color="var(--fg-muted)" fontFamily="var(--font-mono)">
         barre verte : période de validité du texte en vigueur · clic : document
       </Text>
