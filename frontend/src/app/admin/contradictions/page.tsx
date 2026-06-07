@@ -1,6 +1,13 @@
 'use client'
 
 /**
+ * ⚠️ OBSOLETE_FRONTEND — page retirée du menu admin le 07/06/2026 (décision Fred).
+ * Remplacée par : adjudication des contradictions en post-import (#446) + page Référentiel (registre des tensions).
+ * À SUPPRIMER au prochain nettoyage frontend (migration osmosis).
+ * La route reste accessible par URL directe en attendant.
+ */
+
+/**
  * Contradiction Explorer — Navigation interactive dans les tensions du corpus.
  *
  * Chaque contradiction = deux claims face-a-face avec type de tension,

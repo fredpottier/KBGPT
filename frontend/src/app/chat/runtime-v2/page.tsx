@@ -1,6 +1,13 @@
 'use client'
 
 /**
+ * ⚠️ OBSOLETE_FRONTEND — page retirée du menu admin le 07/06/2026 (décision Fred).
+ * Chat Runtime V2 (anchor-driven) — remplacé par le chat principal sur runtime_a3 (Parse→Plan→Execute→Evaluate→Synthesize).
+ * À SUPPRIMER au prochain nettoyage frontend (migration osmosis).
+ * La route reste accessible par URL directe en attendant.
+ */
+
+/**
  * V2-S5 — Runtime V2 Chat (anchor-driven, simplifié)
  *
  * Frontend pour le pipeline anchor-driven (Vision recentrée 30/04/2026) :

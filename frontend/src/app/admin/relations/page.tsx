@@ -1,6 +1,13 @@
 'use client'
 
 /**
+ * ⚠️ OBSOLETE_FRONTEND — page retirée du menu admin le 07/06/2026 (décision Fred).
+ * Relations Explorer V3.3 — pipeline LOGICAL_RELATION abandonné au profit du claim-first (relations typées REFINES/CONTRADICTS… en post-import).
+ * À SUPPRIMER au prochain nettoyage frontend (migration osmosis).
+ * La route reste accessible par URL directe en attendant.
+ */
+
+/**
  * S3.E — Relations Explorer V3.3
  *
  * Mini-runtime UI pour explorer les LOGICAL_RELATION typées V3.3.

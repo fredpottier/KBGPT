@@ -34,12 +34,9 @@ import {
   FiBookOpen,
   FiEdit,
   FiBarChart2,
-  FiAlertTriangle,
   FiActivity,
   FiMenu,
   FiDroplet,
-  FiCheckCircle,
-  FiZap,
 } from 'react-icons/fi'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
@@ -92,13 +89,12 @@ const ADMIN_SECTIONS: SidebarSection[] = [
     title: 'Analyse',
     icon: FiActivity,
     color: 'cyan',
+    // Retirés du menu le 07/06/2026 (pages obsolètes, marquées OBSOLETE_FRONTEND,
+    // à supprimer au prochain nettoyage) : Contradictions (remplacé par
+    // l'adjudication post-import + page Référentiel), Relations V3.3,
+    // Golden Set (annotation), Runtime V2 (chat), Runtime Calibration.
     items: [
       { label: 'Corpus Intelligence', href: '/admin/corpus-intelligence', icon: FiBarChart2 },
-      { label: 'Contradictions', href: '/admin/contradictions', icon: FiAlertTriangle },
-      { label: 'Relations V3.3', href: '/admin/relations', icon: FiActivity },
-      { label: 'Golden Set (annotation)', href: '/admin/relations/golden-set', icon: FiCheckCircle },
-      { label: 'Runtime V2 (chat)', href: '/chat/runtime-v2', icon: FiZap },
-      { label: 'Runtime Calibration', href: '/admin/runtime-calibration', icon: FiTarget },
       { label: 'Audit Corpus', href: '/admin/corpus-audit', icon: FiActivity },
       { label: 'Benchmarks', href: '/admin/benchmarks', icon: FiBarChart2 },
     ],

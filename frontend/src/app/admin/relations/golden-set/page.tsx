@@ -1,6 +1,13 @@
 'use client'
 
 /**
+ * ⚠️ OBSOLETE_FRONTEND — page retirée du menu admin le 07/06/2026 (décision Fred).
+ * Annotation golden-set V3.3 — remplacée par les gold-sets JSON versionnés (benchmark/questions/) et le bench a38.
+ * À SUPPRIMER au prochain nettoyage frontend (migration osmosis).
+ * La route reste accessible par URL directe en attendant.
+ */
+
+/**
  * S3.F.2 — Golden set annotation UI.
  *
  * Liste les GoldenPair non annotés, permet à l'admin de cocher pour chaque paire :
