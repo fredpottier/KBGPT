@@ -18,6 +18,7 @@ contexte domaine). Usage :
 
 from __future__ import annotations
 
+import argparse
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,13 +26,12 @@ from pathlib import Path
 from knowbase.ontology.domain_context import DomainContextProfile
 from knowbase.ontology.domain_context_store import get_domain_context_store
 
-TENANT = "default"
 BACKUP_DIR = Path("/data/staging_new_docs")
 
 
-def build_profile() -> DomainContextProfile:
+def build_profile(tenant: str) -> DomainContextProfile:
     return DomainContextProfile(
-        tenant_id=TENANT,
+        tenant_id=tenant,
         domain_summary=(
             "Certification aeronautique des sieges passagers et systemes de retenue "
             "(crashworthiness) FAA/EASA. Advisory Circulars (series AC 21-25, 25-17, "
@@ -194,27 +194,31 @@ def build_profile() -> DomainContextProfile:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tenant", default="aero",
+                    help="tenant cible (default: aero, le futur tenant courant)")
+    args = ap.parse_args()
+    tenant = args.tenant
     store = get_domain_context_store()
 
-    old = store.get_profile(TENANT)
+    old = store.get_profile(tenant)
     if old is not None:
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        backup = BACKUP_DIR / f"domain_context_{TENANT}_backup_{stamp}.json"
+        backup = BACKUP_DIR / f"domain_context_{tenant}_backup_{stamp}.json"
         backup.write_text(
             json.dumps(dict(old.__dict__), default=str, ensure_ascii=False, indent=1),
             encoding="utf-8",
         )
         print(f"backup ancien profil -> {backup}")
 
-    profile = build_profile()
+    profile = build_profile(tenant)
     store.save_profile(profile)
-    print(f"profil '{TENANT}' remplace (industry={profile.industry}).")
+    print(f"profil '{tenant}' ecrit (industry={profile.industry}).")
 
-    check = store.get_profile(TENANT)
+    check = store.get_profile(tenant)
     print("relecture:", check.industry, "|", len(check.common_acronyms), "acronymes |",
           len(check.key_concepts), "concepts")
-    print("axis_policy:", check.axis_policy)
 
 
 if __name__ == "__main__":
