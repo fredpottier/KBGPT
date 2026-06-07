@@ -97,6 +97,33 @@ def main() -> int:
         log(f"⚠️ activation burst échec : {e} — ABANDON")
         return 2
 
+    # ---------- 3bis. Warmup burst (évite le fallback deepinfra au démarrage) ----------
+    # Le routage async vers vLLM n'est effectif qu'une fois le client async
+    # initialisé via la gate Redis. À froid, le 1er appel peut retomber en mode
+    # normal (deepinfra) → extraction silencieusement sur le mauvais provider.
+    # On force le routage et on ABANDONNE si le burst n'est pas joignable.
+    import asyncio
+    from knowbase.common.llm_router import get_llm_router, TaskType
+    router = get_llm_router()
+    warm_ok = False
+    for attempt in range(8):
+        try:
+            resp = asyncio.run(router.acomplete(
+                task_type=TaskType.LONG_TEXT_SUMMARY,
+                messages=[{"role": "user", "content": "Reply with exactly: WARMUP_OK"}],
+                max_tokens=10, temperature=0))
+            if resp and "WARMUP_OK" in resp:
+                warm_ok = True
+                log(f"warmup burst OK (essai {attempt + 1}) : routage vLLM confirmé")
+                break
+            log(f"warmup essai {attempt + 1} : réponse inattendue {resp!r}")
+        except Exception as e:
+            log(f"warmup essai {attempt + 1} échec : {e}")
+        time.sleep(15)
+    if not warm_ok:
+        log("⚠️ warmup burst échoué (8 essais) — l'extraction tomberait sur deepinfra. ABANDON.")
+        return 2
+
     # ---------- 4. Ingestion staged vers aero ----------
     from knowbase.claimfirst.worker_job import claimfirst_process_job
 

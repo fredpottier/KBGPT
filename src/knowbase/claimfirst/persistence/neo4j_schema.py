@@ -48,16 +48,23 @@ class SchemaConstraint:
     constraint_type: str = "UNIQUE"  # UNIQUE, EXISTS, etc.
 
     def to_cypher(self) -> str:
-        """Génère le Cypher pour créer la contrainte."""
+        """Génère le Cypher pour créer la contrainte.
+
+        `property_key` peut être composite : plusieurs propriétés séparées par
+        des virgules (ex: "tenant_id, doc_id" → contrainte d'unicité par tenant).
+        """
+        keys = [k.strip() for k in self.property_key.split(",")]
+        props = ", ".join(f"n.{k}" for k in keys)
+        require = f"({props})"  # parenthèses valides pour 1 ou N propriétés
         if self.constraint_type == "UNIQUE":
             return (
                 f"CREATE CONSTRAINT {self.name} IF NOT EXISTS "
-                f"FOR (n:{self.label}) REQUIRE n.{self.property_key} IS UNIQUE"
+                f"FOR (n:{self.label}) REQUIRE {require} IS UNIQUE"
             )
         elif self.constraint_type == "NODE_KEY":
             return (
                 f"CREATE CONSTRAINT {self.name} IF NOT EXISTS "
-                f"FOR (n:{self.label}) REQUIRE (n.{self.property_key}) IS NODE KEY"
+                f"FOR (n:{self.label}) REQUIRE {require} IS NODE KEY"
             )
         else:
             raise ValueError(f"Unsupported constraint type: {self.constraint_type}")
@@ -180,11 +187,14 @@ class ClaimFirstSchema:
             constraint_type="UNIQUE"
         ),
 
-        # DocumentContext: unique par doc_id (INV-8)
+        # DocumentContext: unique par (tenant_id, doc_id) — multi-tenant (INV-8).
+        # Corrigé 08/06/2026 : la contrainte sur doc_id SEUL empêchait d'importer
+        # le même document dans deux tenants (ex: default + aero pour comparer
+        # deux extractions). Le MERGE du persister est déjà (doc_id, tenant_id).
         SchemaConstraint(
             name="doc_context_unique",
             label="DocumentContext",
-            property_key="doc_id",
+            property_key="tenant_id, doc_id",
             constraint_type="UNIQUE"
         ),
 
