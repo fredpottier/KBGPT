@@ -2189,8 +2189,8 @@ class LLMRouter:
         - json_schema: Dict avec le JSON schema pour guided generation
         - guided_json: Alias pour json_schema (legacy vLLM)
         """
-        if not self._burst_async_vllm_client:
-            raise RuntimeError("Burst mode async client not initialized")
+        if not self._burst_endpoint:
+            raise RuntimeError("Burst mode endpoint not configured")
 
         # Limite de contexte dynamique (16K Qwen2.5, 32K Qwen3)
         # vLLM max_model_len = TOTAL tokens (input + output)
@@ -2249,13 +2249,28 @@ class LLMRouter:
             if not any(x in self._burst_model.lower() for x in ['qwen', 'mistral']):
                 api_kwargs.pop('response_format', None)
 
-        response = await self._burst_async_vllm_client.chat.completions.create(
-            model=self._burst_vllm_served_model,  # Nom du modèle servi par vLLM
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **api_kwargs
-        )
+        # Client async ÉPHÉMÈRE lié à l'event loop courant. Le client partagé
+        # `_burst_async_vllm_client` est attaché au loop où il a été créé
+        # (enable_burst_mode) ; quand le singleton get_llm_router() est réutilisé
+        # dans un AUTRE event loop — typiquement claimfirst_process_job qui
+        # ouvre son/ses propres loop(s) — httpx lève "Connection error" /
+        # "Event loop is closed". Créer le client par appel évite cette classe
+        # de bug (coût TCP négligeable en ingestion). Cf incident import aero 08/06.
+        from openai import AsyncOpenAI as _AsyncOpenAI
+        _ephemeral_client = _AsyncOpenAI(api_key="EMPTY", base_url=f"{self._burst_endpoint}/v1")
+        try:
+            response = await _ephemeral_client.chat.completions.create(
+                model=self._burst_vllm_served_model,  # Nom du modèle servi par vLLM
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **api_kwargs
+            )
+        finally:
+            try:
+                await _ephemeral_client.close()
+            except Exception:
+                pass
 
         # Log et tracking
         if response.usage:
