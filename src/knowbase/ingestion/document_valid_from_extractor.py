@@ -82,7 +82,7 @@ class DocumentValidFromResult:
 # Mots-clés multilingues exprimant "date de publication/effet" (sémantique pure,
 # pas de filtrage corpus-spécifique). Ordre = priorité.
 DATE_KEYWORDS = [
-    # English
+    # English — keywords spécifiques testés EN PREMIER (priorité)
     "publication date", "release date", "effective date", "version date",
     "document date", "date of issue", "valid from",
     "published", "released", "effective", "approved", "issued",
@@ -90,6 +90,11 @@ DATE_KEYWORDS = [
     "date de publication", "date de parution", "date d'effet",
     "date d'application", "date du document", "date d'édition",
     "valable à compter", "publié", "en vigueur",
+    # Cartouche d'en-tête (#457) — « date: » suivi de la date dans les
+    # cartouches FAA/officiels (« Date:\n01/19/96 »). Placé en DERNIER pour
+    # que les keywords spécifiques ci-dessus l'emportent. Le deux-points
+    # restreint au libellé de champ (évite « as of the date », « at the date »).
+    "date:", "date :",
 ]
 
 MONTH_MAP = {
@@ -120,9 +125,31 @@ DATE_PATTERNS_PAGE1 = [
         ),
         "month_year",
     ),
-    # DD/MM/YYYY
+    # D/M/YYYY ou M/D/YYYY (désambiguïsation par plausibilité dans _normalize_match)
     (re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b"), "slash"),
+    # M/D/YY ou D/M/YY — format court à 2 chiffres d'année (#457, cartouches US
+    # type « 01/19/96 »). Testé APRÈS le format 4 chiffres pour ne pas tronquer
+    # une année pleine. Pivot de siècle dans _normalize_match.
+    (re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{2})\b"), "slash_short"),
 ]
+
+
+def _disambiguate_dmy(g1: int, g2: int) -> Optional[tuple[int, int]]:
+    """Tranche (jour, mois) depuis deux composants ambigus par plausibilité.
+
+    Retourne (day, month) ou None si impossible. Règle :
+      - un composant > 12 ne peut être qu'un jour → l'autre est le mois ;
+      - sinon (les deux ≤ 12) le format slash reste ambigu : on retient
+        l'interprétation US M/D (g1=mois) car le format slash à année courte
+        est très majoritairement nord-américain dans les cartouches officiels.
+    """
+    if g1 > 12 and g2 <= 12:
+        return g1, g2  # D/M
+    if g2 > 12 and g1 <= 12:
+        return g2, g1  # M/D
+    if g1 > 12 and g2 > 12:
+        return None
+    return g2, g1  # ambigu → US M/D (day=g2, month=g1)
 
 
 def _normalize_match(pattern_type: str, groups: tuple[str, ...]) -> Optional[str]:
@@ -146,11 +173,26 @@ def _normalize_match(pattern_type: str, groups: tuple[str, ...]) -> Optional[str
                 return None
             return f"{y}-{m:02d}-01"
         if pattern_type == "slash":
-            # Hypothèse européenne : DD/MM/YYYY (ambiguïté avec MM/DD/YYYY US assumée
-            # côté EU — domain-agnostic, à override via Domain Pack si corpus US dominant).
-            d, m, y = groups
-            datetime(int(y), int(m), int(d))
-            return f"{y}-{int(m):02d}-{int(d):02d}"
+            # Désambiguïsation par plausibilité (un composant > 12 = jour) ; à
+            # défaut US M/D (cf _disambiguate_dmy). Année déjà sur 4 chiffres.
+            g1, g2, y = int(groups[0]), int(groups[1]), int(groups[2])
+            dm = _disambiguate_dmy(g1, g2)
+            if not dm:
+                return None
+            d, m = dm
+            datetime(y, m, d)
+            return f"{y}-{m:02d}-{d:02d}"
+        if pattern_type == "slash_short":
+            # Format court : pivot de siècle (YY > 30 → 19YY, sinon 20YY — les
+            # cartouches réglementaires sont passés/présent, jamais futur lointain).
+            g1, g2, yy = int(groups[0]), int(groups[1]), int(groups[2])
+            y = 1900 + yy if yy > 30 else 2000 + yy
+            dm = _disambiguate_dmy(g1, g2)
+            if not dm:
+                return None
+            d, m = dm
+            datetime(y, m, d)
+            return f"{y}-{m:02d}-{d:02d}"
     except (ValueError, TypeError):
         return None
     return None
