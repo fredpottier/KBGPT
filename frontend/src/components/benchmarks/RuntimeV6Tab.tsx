@@ -51,6 +51,8 @@ interface PerTypeStat { n: number; mean: number; n_judge_failed?: number }
 interface A38Run {
   filename: string
   arm: string
+  tenant?: string | null   // tenant/corpus du run (multi-tenant) ; null = run legacy = default
+  corpus?: string | null
   timestamp: string
   config?: Record<string, any>
   total_duration_s?: number | null
@@ -185,9 +187,13 @@ function GateBadge({ gateKey, gate }: { gateKey: string; gate: any }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// Tenant d'un run : les runs legacy (non tagués) ont tourné sur le tenant default.
+function runTenant(r: A38Run): string { return r.tenant || 'default' }
+
 export function RuntimeV6Tab() {
   const [runs, setRuns] = useState<A38Run[]>([])
   const [loading, setLoading] = useState(true)
+  const [selectedTenant, setSelectedTenant] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -202,8 +208,36 @@ export function RuntimeV6Tab() {
     return () => { cancelled = true }
   }, [])
 
-  const osm = useMemo(() => runs.find(r => r.arm === 'osmosis') ?? null, [runs])
-  const rag = useMemo(() => runs.find(r => r.arm === 'classic_rag') ?? null, [runs])
+  // Tenants présents parmi les runs osmosis (runs déjà triés récent→ancien par l'API).
+  const osmTenants = useMemo(() => {
+    const seen: string[] = []
+    for (const r of runs) {
+      if (r.arm !== 'osmosis') continue
+      const t = runTenant(r)
+      if (!seen.includes(t)) seen.push(t)
+    }
+    // default en tête, puis les autres dans l'ordre d'apparition (récence)
+    return seen.sort((a, b) => (a === 'default' ? -1 : b === 'default' ? 1 : 0))
+  }, [runs])
+
+  // Tenant actif : choix explicite, sinon celui du run osmosis le plus récent.
+  const activeTenant = selectedTenant ?? (runs.find(r => r.arm === 'osmosis') ? runTenant(runs.find(r => r.arm === 'osmosis')!) : 'default')
+
+  // Run osmosis le plus récent du tenant actif + baseline default (pour le delta).
+  const osm = useMemo(
+    () => runs.find(r => r.arm === 'osmosis' && runTenant(r) === activeTenant) ?? null,
+    [runs, activeTenant],
+  )
+  const osmDefault = useMemo(
+    () => runs.find(r => r.arm === 'osmosis' && runTenant(r) === 'default') ?? null,
+    [runs],
+  )
+  const rag = useMemo(
+    () => runs.find(r => r.arm === 'classic_rag' && runTenant(r) === activeTenant)
+       ?? runs.find(r => r.arm === 'classic_rag') ?? null,
+    [runs, activeTenant],
+  )
+  const isDefaultTenant = activeTenant === 'default'
 
   if (loading) {
     return <HStack py={10} justify="center"><Spinner color={T.accentOsm} /><Text color={T.textMuted}>Chargement…</Text></HStack>
@@ -226,6 +260,17 @@ export function RuntimeV6Tab() {
   const ref = osm ?? rag!
   const nTotal = ref.n_total ?? 50
 
+  // Carte de comparaison : sur default = OSMOSIS vs moteur classique ;
+  // sur un autre tenant = ce corpus vs la référence default (verdict du ré-import).
+  const cmpRun = isDefaultTenant ? rag : osmDefault
+  const cmpName = isDefaultTenant ? 'Moteur classique' : 'default'
+  const cmpTitle = isDefaultTenant
+    ? 'OSMOSIS vs un moteur de recherche classique'
+    : `Corpus « ${activeTenant} » vs « default »`
+  const cmpDesc = isDefaultTenant
+    ? "Même corpus, mêmes questions, même IA de rédaction. La seule différence : le moteur classique se contente de chercher des passages de texte ressemblants, là où OSMOSIS s'appuie sur une base de connaissances structurée."
+    : `Mêmes questions, même moteur OSMOSIS, seul le corpus change. Compare la nouvelle extraction « ${activeTenant} » à la référence « default » — c'est le verdict du ré-import.`
+
   return (
     <VStack spacing={6} align="stretch">
       {/* ── Bandeau explicatif du test ── */}
@@ -242,12 +287,38 @@ export function RuntimeV6Tab() {
         </HStack>
       </Box>
 
+      {/* ── Sélecteur de tenant (multi-tenant : chaque corpus a ses propres runs) ── */}
+      {osmTenants.length > 1 && (
+        <HStack spacing={2} flexWrap="wrap" align="center">
+          <Text fontSize="11px" color={T.textMuted} textTransform="uppercase" fontWeight="600">Corpus / tenant :</Text>
+          {osmTenants.map(t => {
+            const on = t === activeTenant
+            return (
+              <Box
+                as="button" key={t} onClick={() => setSelectedTenant(t)}
+                px={3} py={1} rounded="md" fontSize="12px" fontWeight="700"
+                fontFamily="'Fira Code', monospace"
+                bg={on ? T.accentOsm : T.bgElevated}
+                color={on ? '#0B0F1A' : T.textSecondary}
+                border="1px solid" borderColor={on ? T.accentOsm : T.borderSubtle}
+                _hover={{ borderColor: T.accentOsm }}
+              >
+                {t}
+              </Box>
+            )
+          })}
+        </HStack>
+      )}
+
       {/* ── Indicateurs clés (langage clair) ── */}
       <Card accent={T.accentOsm}>
         <HStack justify="space-between" align="baseline" mb={4}>
           <HStack spacing={2}>
             <FiZap size={16} color={T.accentOsm} />
             <Text fontSize="sm" fontWeight="800" color={T.textPrimary}>OSMOSIS — qualité des réponses</Text>
+            <Box px={2} py="1px" rounded="md" bg={`${T.accentOsm}22`} border="1px solid" borderColor={`${T.accentOsm}55`}>
+              <Text fontSize="11px" fontWeight="700" fontFamily="'Fira Code', monospace" color={T.accentOsm}>{activeTenant}</Text>
+            </Box>
           </HStack>
           <HStack spacing={1}><FiClock size={11} color={T.textMuted} /><Text fontSize="11px" color={T.textMuted}>testé le {fmtTs(ref.timestamp)}</Text></HStack>
         </HStack>
@@ -298,26 +369,25 @@ export function RuntimeV6Tab() {
         </HStack>
       </Card>
 
-      {/* ── OSMOSIS vs moteur de recherche classique ── */}
-      {osm && rag ? (
+      {/* ── Comparaison (OSMOSIS vs moteur classique sur default ; vs default sinon) ── */}
+      {osm && cmpRun ? (
         <Card accent={T.statusOk}>
           <HStack spacing={2} mb={1}>
             <FiAward size={15} color={T.statusOk} />
-            <Text fontSize="sm" fontWeight="800" color={T.textPrimary}>OSMOSIS vs un moteur de recherche classique</Text>
+            <Text fontSize="sm" fontWeight="800" color={T.textPrimary}>{cmpTitle}</Text>
           </HStack>
           <Text fontSize="12px" color={T.textSecondary} mb={3} lineHeight="1.6">
-            Même corpus, mêmes questions, même IA de rédaction. La seule différence : le moteur classique se contente de
-            chercher des passages de texte ressemblants, là où OSMOSIS s’appuie sur une base de connaissances structurée.
+            {cmpDesc}
           </Text>
 
           {/* Synthèse chiffrée (entièrement recalculée à chaque test — aucune
               interprétation figée : seuls les nombres parlent). */}
           <Box bg={`${T.statusOk}10`} border="1px solid" borderColor={`${T.statusOk}33`} rounded="md" px={4} py={3} mb={4}>
             <Text fontSize="13px" color={T.textPrimary} lineHeight="1.7">
-              👉 Sur ces <b>{nTotal} questions</b> : OSMOSIS adopte le bon comportement répondre/s’abstenir{' '}
-              <b>{pct(osm.abstention_correct_rate)}</b> du temps (moteur classique : <b>{pct(rag.abstention_correct_rate)}</b>),
-              et cite les bonnes références <b>{pct(osm.exact_id_recall_mean)}</b> du temps (moteur classique :{' '}
-              <b>{pct(rag.exact_id_recall_mean)}</b>).
+              👉 Sur ces <b>{nTotal} questions</b> : « {activeTenant} » adopte le bon comportement répondre/s’abstenir{' '}
+              <b>{pct(osm.abstention_correct_rate)}</b> du temps ({cmpName} : <b>{pct(cmpRun.abstention_correct_rate)}</b>),
+              et cite les bonnes références <b>{pct(osm.exact_id_recall_mean)}</b> du temps ({cmpName} :{' '}
+              <b>{pct(cmpRun.exact_id_recall_mean)}</b>).
             </Text>
           </Box>
 
@@ -326,16 +396,16 @@ export function RuntimeV6Tab() {
               <Thead>
                 <Tr borderBottom="1px solid" borderColor={T.borderSubtle}>
                   <Th color={T.textMuted} fontSize="10px" py={2} textTransform="none">Ce qu’on mesure</Th>
-                  <Th color={T.accentOsm} fontSize="10px" py={2} isNumeric>OSMOSIS</Th>
-                  <Th color={T.textMuted} fontSize="10px" py={2} isNumeric textTransform="none">Moteur classique</Th>
+                  <Th color={T.accentOsm} fontSize="10px" py={2} isNumeric>{activeTenant}</Th>
+                  <Th color={T.textMuted} fontSize="10px" py={2} isNumeric textTransform="none">{cmpName}</Th>
                   <Th color={T.textMuted} fontSize="10px" py={2} isNumeric>Écart</Th>
                 </Tr>
               </Thead>
               <Tbody>
                 {([
-                  ['Précision des références', 'Donne-t-il les bons codes / identifiants ?', osm.exact_id_recall_mean, rag.exact_id_recall_mean],
-                  ['Honnêteté', 'Répond s’il sait, s’abstient sinon', osm.abstention_correct_rate, rag.abstention_correct_rate],
-                  ['Qualité globale (IA)', 'Jugée par une IA — indicatif', osm.C1_mean, rag.C1_mean],
+                  ['Précision des références', 'Donne-t-il les bons codes / identifiants ?', osm.exact_id_recall_mean, cmpRun.exact_id_recall_mean],
+                  ['Honnêteté', 'Répond s’il sait, s’abstient sinon', osm.abstention_correct_rate, cmpRun.abstention_correct_rate],
+                  ['Qualité globale (IA)', 'Jugée par une IA — indicatif', osm.C1_mean, cmpRun.C1_mean],
                 ] as [string, string, number | null | undefined, number | null | undefined][]).map(([label, help, o, r]) => {
                   const d = o != null && r != null ? o - r : null
                   return (
@@ -350,8 +420,8 @@ export function RuntimeV6Tab() {
                 <Tr>
                   <Td py={2}><Text fontSize="12px" color={T.textMuted}>Temps de réponse</Text></Td>
                   <Td py={2} isNumeric><Text fontSize="12px" fontFamily="'Fira Code', monospace" color={T.textMuted}>{osm.latency_p50_s != null ? `${Math.round(osm.latency_p50_s)}s` : '--'}</Text></Td>
-                  <Td py={2} isNumeric><Text fontSize="12px" fontFamily="'Fira Code', monospace" color={T.statusOk}>{rag.latency_p50_s != null ? `${Math.round(rag.latency_p50_s)}s` : '--'}</Text></Td>
-                  <Td py={2} isNumeric><Text fontSize="11px" color={T.textMuted}>classique + rapide</Text></Td>
+                  <Td py={2} isNumeric><Text fontSize="12px" fontFamily="'Fira Code', monospace" color={T.textMuted}>{cmpRun.latency_p50_s != null ? `${Math.round(cmpRun.latency_p50_s)}s` : '--'}</Text></Td>
+                  <Td py={2} isNumeric><Text fontSize="11px" color={T.textMuted}>{isDefaultTenant ? 'classique + rapide' : 'médian (p50)'}</Text></Td>
                 </Tr>
               </Tbody>
             </Table>
@@ -365,7 +435,9 @@ export function RuntimeV6Tab() {
       ) : (
         <Card>
           <Text fontSize="13px" color={T.textMuted}>
-            Comparaison avec le moteur classique non disponible — lance <Text as="span" fontFamily="'Fira Code', monospace" fontSize="11px">scripts/bench_a38_classic_rag.py</Text>.
+            {isDefaultTenant
+              ? <>Comparaison avec le moteur classique non disponible — lance <Text as="span" fontFamily="'Fira Code', monospace" fontSize="11px">scripts/bench_a38_classic_rag.py</Text>.</>
+              : <>Pas de run « default » pour comparer le corpus « {activeTenant} ». Lance le bench sur le tenant default pour obtenir l’écart.</>}
           </Text>
         </Card>
       )}

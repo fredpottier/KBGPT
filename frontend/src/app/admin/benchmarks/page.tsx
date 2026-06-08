@@ -119,17 +119,17 @@ interface RunProgress {
   current_question?: string
 }
 
-type TabKey = 'runtime_v6' | 'overview' | 'ragas' | 'contradictions' | 'robustness'
+type TabKey = 'runtime_v6' | 'overview'
 
 // ── Tab definitions ───────────────────────────────────────────────────
 // `group` distingue le bench décisionnel actuel (a38) des évaluateurs V3 legacy.
 
+// Évaluateurs V3 legacy (RAGAS / Contradictions / Robustesse) retirés le 08/06/2026 :
+// le bench décisionnel est le gold-set a38 (onglet Runtime v6). Code mort associé
+// (state/fetch/panels) à balayer dans une passe dédiée.
 const TABS: { key: TabKey; label: string; Icon: React.ElementType; accent: string; group: 'current' | 'archive' }[] = [
   { key: 'runtime_v6', label: 'Runtime v6', Icon: FiZap, accent: T.accentRagas, group: 'current' },
   { key: 'overview', label: 'Vue d\'ensemble', Icon: FiActivity, accent: T.accentRagas, group: 'current' },
-  { key: 'ragas', label: 'RAGAS', Icon: FiBarChart2, accent: T.textMuted, group: 'archive' },
-  { key: 'contradictions', label: 'Contradictions', Icon: FiAlertTriangle, accent: T.textMuted, group: 'archive' },
-  { key: 'robustness', label: 'Robustesse', Icon: FiShield, accent: T.textMuted, group: 'archive' },
 ]
 
 const PROFILES = [
@@ -560,38 +560,7 @@ export default function BenchmarksPage() {
         />
       )}
 
-      {activeTab === 'ragas' && (
-        <RagasTab
-          reports={ragasReports}
-          latestDetail={latestRagas}
-          onLaunch={handleLaunch}
-          isRunning={isRunning}
-          runProgress={runProgress}
-        />
-      )}
-
-      {activeTab === 'contradictions' && (
-        <ContradictionsTab
-          reports={t2t5Reports}
-          onLaunch={handleLaunch}
-          isRunning={isRunning}
-          runProgress={runProgress}
-        />
-      )}
-
-      {activeTab === 'robustness' && (
-        <RobustnessTab
-          reports={robustnessReports.map(r => {
-            if (r.filename === latestRobustnessDetail?.filename && latestRobustnessDetail?.per_sample) {
-              return { ...r, per_sample: latestRobustnessDetail.per_sample }
-            }
-            return r
-          })}
-          onLaunch={(profile, tag, description) => handleLaunch('robustness', profile, tag, description)}
-          isRunning={isRunning && runType === 'robustness'}
-          runProgress={runType === 'robustness' ? runProgress : null}
-        />
-      )}
+      {/* Onglets V3 legacy (ragas / contradictions / robustness) retirés — cf. TABS. */}
 
       {/* Onglet Comparaison supprime — deltas vs RAG pur dans chaque onglet */}
     </Box>
