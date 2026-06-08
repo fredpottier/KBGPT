@@ -390,11 +390,6 @@ def _ensure_vllm_for_full_local() -> bool:
     """
     try:
         from knowbase.common.llm_router import get_llm_router, LlmMode
-        mode = get_llm_router()._get_llm_mode()
-        if mode != LlmMode.FULL_LOCAL:
-            return False
-
-        # Verifier si le burst est deja actif via Redis
         from knowbase.ingestion.burst.provider_switch import (
             get_burst_state_from_redis,
             start_local_vllm,
@@ -405,10 +400,18 @@ def _ensure_vllm_for_full_local() -> bool:
             VLLM_LOCAL_CONTAINER,
         )
 
+        # Burst EC2 actif (vLLM DISTANT) = backend parallélisable, quel que soit
+        # le LlmMode local. Ce check DOIT précéder le test FULL_LOCAL : sinon un
+        # burst distant tombe dans le fallback Ollama séquentiel (#461 — constaté
+        # sur l'import aero 08/06, post-import bloqué en mode 1-appel-à-la-fois).
         redis_state = get_burst_state_from_redis()
         if redis_state and redis_state.get("active"):
-            logger.info("[PostImport] vLLM burst already active — using it")
+            logger.info("[PostImport] vLLM burst actif (EC2/distant) — mode parallèle")
             return True
+
+        mode = get_llm_router()._get_llm_mode()
+        if mode != LlmMode.FULL_LOCAL:
+            return False
 
         # vLLM container deja lance mais burst pas active?
         if is_local_vllm_running():
