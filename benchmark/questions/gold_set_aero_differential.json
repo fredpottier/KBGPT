@@ -1,12 +1,12 @@
 [
   {
     "id": "DIFF_CMP_01",
-    "question": "Do the FAA and EASA specify the same maximum allowable average burn length for self-extinguishing seat materials?",
+    "question": "Do the FAA and EASA specify the same maximum average burn length for self-extinguishing seat materials?",
     "primary_type": "comparison",
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "No — they diverge. FAA AC 25-17 specifies 3 inches and CFR Part 25 specifies 8 inches, while EASA ETSO-C127c allows 6 inches.",
+      "answer": "No — they diverge: FAA AC 25-17 = 3 inches and CFR Part 25 = 8 inches, while EASA ETSO-C127c allows 6 inches.",
       "exact_identifiers": [
         "3 inches",
         "6 inches",
@@ -21,7 +21,7 @@
   },
   {
     "id": "DIFF_CMP_02",
-    "question": "Is the peak floor deceleration timing requirement identical between the FAA (CFR Part 25) and the EASA NPA 2013-20?",
+    "question": "Is the peak floor deceleration timing requirement identical between CFR Part 25 and EASA NPA 2013-20?",
     "primary_type": "comparison",
     "secondary_types": [],
     "language": "en",
@@ -40,15 +40,15 @@
   },
   {
     "id": "DIFF_CMP_03",
-    "question": "Are the specimen conditioning relative-humidity requirements the same in CFR Part 25 and in AC 25-17A?",
+    "question": "Are the specimen conditioning relative-humidity requirements the same in CFR Part 25 and AC 25-17A?",
     "primary_type": "comparison",
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "No. CFR Part 25 specifies 55% relative humidity, whereas AC 25-17 / AC 25-17A specify 50%.",
+      "answer": "No. CFR Part 25 specifies 55% relative humidity; AC 25-17/AC 25-17A specify 50%.",
       "exact_identifiers": [
         "55%",
-        "50%"
+        "50"
       ],
       "supporting_doc_ids": [],
       "answerability": "answerable",
@@ -64,7 +64,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "AC 25-17 (1991) required the average burn rate not to exceed 4 inches per minute; AC 25-17A raised it to 20 inches per minute.",
+      "answer": "AC 25-17 (1991) required not exceeding 4 inches per minute; AC 25-17A raised it to 20 inches per minute.",
       "exact_identifiers": [
         "4 inches",
         "20 inches"
@@ -83,7 +83,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "No. AC 25-17 (1991): about 2.25 gallons/hour; AC 25-17A: 6.0 gal/hr.",
+      "answer": "No. AC 25-17 (1991): ~2.25 gallons/hour; AC 25-17A: 6.0 gal/hr.",
       "exact_identifiers": [
         "2.25",
         "6.0"
@@ -97,12 +97,12 @@
   },
   {
     "id": "DIFF_CMP_06",
-    "question": "Is the calorimeter placement distance the same in AC 25-17A and in CFR Part 25?",
+    "question": "Is the calorimeter placement distance the same in AC 25-17A and CFR Part 25?",
     "primary_type": "comparison",
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "No. AC 25-17A places the calorimeter at 8 inches (203 mm); CFR Part 25 at 4 inches (102 mm).",
+      "answer": "No. AC 25-17A: 8 inches (203 mm); CFR Part 25: 4 inches (102 mm).",
       "exact_identifiers": [
         "8-inches",
         "4"
@@ -121,7 +121,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "The descriptions differ: AC 23.562-1 describes it as a deceleration; AC 25.562-1A describes an acceleration sled (controlled acceleration).",
+      "answer": "Descriptions differ: AC 23.562-1 = deceleration; AC 25.562-1A = controlled acceleration (acceleration sled).",
       "exact_identifiers": [
         "deceleration",
         "acceleration"
@@ -140,10 +140,200 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "ETSO-C127b supersedes ETSO-C127a; it carries the updated MPS/elective requirements relative to ETSO-C127a.",
+      "answer": "ETSO-C127b supersedes ETSO-C127a, carrying updated MPS/elective requirements.",
       "exact_identifiers": [
         "ETSO-C127b",
         "ETSO-C127a"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "comparison"
+  },
+  {
+    "id": "DIFF_CMP_09",
+    "question": "Is the maximum average flame time after removal of the flame source the same in AC 25-17A and CFR Part 25?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No. AC 25-17A: 15 seconds; CFR Part 25: 30 seconds.",
+      "exact_identifiers": [
+        "15 seconds",
+        "30 seconds"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "comparison"
+  },
+  {
+    "id": "DIFF_CMP_10",
+    "question": "For how long is the flame applied to the specimen — does AC 25-17 (1991) agree with AC 25-17A?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No. AC 25-17 (1991): 15 seconds; AC 25-17A: 60 seconds.",
+      "exact_identifiers": [
+        "15 seconds",
+        "60 seconds"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "comparison"
+  },
+  {
+    "id": "DIFF_CMP_11",
+    "question": "Do AC 25.562-1A and AC 25.562-1B agree on what happens to the pelvic restraint during the acceleration pulse?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No. AC 25.562-1B: the pelvic restraint must remain on the ATD pelvis; AC 25.562-1A: it becomes slack after rebound.",
+      "exact_identifiers": [
+        "remain",
+        "slack"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "comparison"
+  },
+  {
+    "id": "DIFF_CMP_12",
+    "question": "Is the date of the cited policy memorandum the same in AC 25.562-1B and AC 25-17A?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No. AC 25.562-1B cites December 14, 2005; AC 25-17A cites July 7, 2003.",
+      "exact_identifiers": [
+        "2005",
+        "2003"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "comparison"
+  },
+  {
+    "id": "DIFF_CMP_13",
+    "question": "In which direction should passengers flow along the main aisle — does AC 25-17A agree with AC 25-17 (1991)?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No. AC 25-17A: from the aft direction; AC 25-17 (1991): from the forward direction.",
+      "exact_identifiers": [
+        "aft",
+        "forward"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "comparison"
+  },
+  {
+    "id": "DIFF_CMP_14",
+    "question": "Is the minimum exposed specimen area the same in AC 25-17A and CFR Part 25?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No. AC 25-17A: at least 8 inches by 8 inches; CFR Part 25: at least 2 inches wide by 12 inches long.",
+      "exact_identifiers": [
+        "8inches by 8-inches",
+        "2 inches"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "comparison"
+  },
+  {
+    "id": "DIFF_CMP_15",
+    "question": "To start the burner test, does AC 25-17A swing the burner into position or away from it, compared with AC 25-17 (1991)?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Opposite: AC 25-17A swings the burner INTO the test position to begin; AC 25-17 (1991) immediately swings it AWAY.",
+      "exact_identifiers": [
+        "into",
+        "away"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "comparison"
+  },
+  {
+    "id": "DIFF_CMP_16",
+    "question": "Do the FAA (CFR Part 25) and EASA (ETSO-C127c) agree on the maximum burn length, and by how much do they differ?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "They differ: CFR Part 25 allows 8 inches, ETSO-C127c allows 6 inches.",
+      "exact_identifiers": [
+        "8 inches",
+        "6 inches"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "comparison"
+  },
+  {
+    "id": "DIFF_CMP_17",
+    "question": "How does AC 25-17A modify the specimen conditioning temperature relative to AC 25-17 (1991)?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "AC 25-17 (1991) mentions 75 degrees F in one passage; AC 25-17A specifies 70 +/- 5 degrees F.",
+      "exact_identifiers": [
+        "75 degrees",
+        "70"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "comparison"
+  },
+  {
+    "id": "DIFF_CMP_18",
+    "question": "Compared with AC 25-17 (1991), what nozzle spray characteristics does AC 25-17A change?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "AC 25-17 (1991): 80-degree spray angle, ~2.25 gal/hr; AC 25-17A: 6.0 gal/hr nozzle delivery.",
+      "exact_identifiers": [
+        "80-degree",
+        "6.0"
       ],
       "supporting_doc_ids": [],
       "answerability": "answerable",
@@ -159,7 +349,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "No. AC 21-25A has been superseded by AC 21-25B (lineage: AC 21-25B replaced AC 21-25A, which replaced AC 21-25).",
+      "answer": "No — superseded by AC 21-25B (lineage AC 21-25B -> AC 21-25A -> AC 21-25).",
       "exact_identifiers": [
         "AC 21-25B"
       ],
@@ -177,7 +367,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "AC 25.785-1B — it superseded AC 25.785-1A, which superseded AC 25.785-1.",
+      "answer": "AC 25.785-1B (it superseded AC 25.785-1A, which superseded AC 25.785-1).",
       "exact_identifiers": [
         "AC 25.785-1B"
       ],
@@ -195,7 +385,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "No. The 1991 edition has been cancelled and superseded by AC 25-17A.",
+      "answer": "No — cancelled and superseded by AC 25-17A.",
       "exact_identifiers": [
         "AC 25-17A"
       ],
@@ -231,7 +421,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "Yes, by ETSO-C127b.",
+      "answer": "Yes — by ETSO-C127b.",
       "exact_identifiers": [
         "ETSO-C127b"
       ],
@@ -261,13 +451,157 @@
     "category": "lifecycle"
   },
   {
+    "id": "DIFF_LIN_07",
+    "question": "Is AC 25.785-1A the current revision to cite for seat occupant protection?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No — superseded by AC 25.785-1B.",
+      "exact_identifiers": [
+        "AC 25.785-1B"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_LIN_08",
+    "question": "Which advisory circular replaced AC 25.562-1?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "AC 25.562-1A.",
+      "exact_identifiers": [
+        "AC 25.562-1A"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_LIN_09",
+    "question": "If a document cites AC 21-25 (the original, no letter), is that the current guidance?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No — it has been revised twice; AC 21-25B is current.",
+      "exact_identifiers": [
+        "AC 21-25B"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_LIN_10",
+    "question": "Between ETSO-C127a and ETSO-C127b, which is the superseding (newer) standard?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "ETSO-C127b supersedes ETSO-C127a.",
+      "exact_identifiers": [
+        "ETSO-C127b"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_LIN_11",
+    "question": "Was AC 20-146 (no letter) cancelled, and if so by what?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Yes — cancelled and replaced by AC 20-146A.",
+      "exact_identifiers": [
+        "AC 20-146A"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_LIN_12",
+    "question": "For AC 25-17 fire-protection guidance, which revision should currently be used?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "AC 25-17A (the 1991 edition is cancelled).",
+      "exact_identifiers": [
+        "AC 25-17A"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_LIN_13",
+    "question": "Is AC 25.785-1 (original) still the document to apply for seat installation requirements?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No — superseded through AC 25.785-1A to the current AC 25.785-1B.",
+      "exact_identifiers": [
+        "AC 25.785-1B"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_LIN_14",
+    "question": "Which revision of AC 25.562-1 is the most recent in the corpus?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "AC 25.562-1B is the most recent (after AC 25.562-1A and AC 25.562-1).",
+      "exact_identifiers": [
+        "AC 25.562-1B"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
     "id": "DIFF_TMP_01",
     "question": "Which FAA advisory circular governed seat fire-protection compliance in 1995, before AC 25-17A existed?",
     "primary_type": "lifecycle",
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "AC 25-17 (the 1991 edition), effective from 1991; AC 25-17A only became effective in 2009.",
+      "answer": "AC 25-17 (1991 edition), effective from 1991; AC 25-17A only became effective in 2009.",
       "exact_identifiers": [
         "AC 25-17",
         "1991"
@@ -286,7 +620,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "No. Appendix J did not exist prior to Amendment 25-72 (introduced with AC 25-17A, effective 2009).",
+      "answer": "No — Appendix J did not exist prior to Amendment 25-72 (introduced with AC 25-17A, effective 2009).",
       "exact_identifiers": [
         "25-72"
       ],
@@ -304,7 +638,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "No. Section 25.791 did not exist prior to Amendment 25-32.",
+      "answer": "No — Section 25.791 did not exist prior to Amendment 25-32.",
       "exact_identifiers": [
         "25.791",
         "25-32"
@@ -342,7 +676,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "No. NPA 2013-20 dates from 2013, so it was not applicable in 2010.",
+      "answer": "No — NPA 2013-20 dates from 2013.",
       "exact_identifiers": [
         "2013"
       ],
@@ -360,9 +694,121 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "No. Section 25.791 did not exist prior to Amendment 25-32.",
+      "answer": "No — § 25.791 did not exist prior to Amendment 25-32.",
       "exact_identifiers": [
         "25-32"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_TMP_07",
+    "question": "In 2008, did Appendix J of the fire-test guidance already apply?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No — Appendix J did not exist prior to Amendment 25-72 (effective 2009).",
+      "exact_identifiers": [
+        "25-72"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_TMP_08",
+    "question": "Which seat fire-protection burn-rate criterion was in force in 2000 — 4 in/min or 20 in/min?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "4 inches per minute (AC 25-17, 1991 edition); the 20 in/min value came later with AC 25-17A (2009).",
+      "exact_identifiers": [
+        "4 inches",
+        "1991"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_TMP_09",
+    "question": "Was the EASA NPA 2013-20 vertical-velocity criterion applicable to a seat certified in 2009?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No — NPA 2013-20 dates from 2013, after 2009.",
+      "exact_identifiers": [
+        "2013"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_TMP_10",
+    "question": "Which document, effective 1983, addressed seat crashworthiness for small aircraft?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "AC 23.562-1 (effective March 1983).",
+      "exact_identifiers": [
+        "AC 23.562-1",
+        "1983"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_TMP_11",
+    "question": "Was the 6.0 gal/hr burner nozzle (AC 25-17A) the specification in effect in 1995?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No — in 1995 AC 25-17 (1991) applied, with a ~2.25 gallons/hour nozzle; the 6.0 gal/hr value is from AC 25-17A (2009).",
+      "exact_identifiers": [
+        "2.25",
+        "1991"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_TMP_12",
+    "question": "For a seat certified in 1992, which flame-application duration applied — 15s or 60s?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "15 seconds (AC 25-17, 1991 edition); the 60-second value came with AC 25-17A (2009).",
+      "exact_identifiers": [
+        "15 seconds",
+        "1991"
       ],
       "supporting_doc_ids": [],
       "answerability": "answerable",
@@ -378,7 +824,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "Specimens are conditioned at 70 +/- 5 degrees F; relative humidity is 50% in AC 25-17/25-17A and 55% in CFR Part 25.",
+      "answer": "70 +/- 5 degrees F; relative humidity 50% (AC 25-17/25-17A) or 55% (CFR Part 25).",
       "exact_identifiers": [
         "70",
         "50",
@@ -398,7 +844,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "16g for the horizontal test and 14g for the vertical test.",
+      "answer": "16g horizontal and 14g vertical.",
       "exact_identifiers": [
         "16g",
         "14g"
@@ -412,12 +858,12 @@
   },
   {
     "id": "DIFF_AGG_03",
-    "question": "What injury-protection limits apply to an occupant in the 25.562 dynamic tests (HIC and femur load)?",
+    "question": "What injury-protection limits apply in the 25.562 dynamic tests (HIC and femur load)?",
     "primary_type": "list",
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "Head Injury Criterion (HIC) limit of 1,000 and a femur axial compressive load not exceeding 2,250 lb.",
+      "answer": "HIC limit of 1,000 and femur axial compressive load not exceeding 2,250 lb.",
       "exact_identifiers": [
         "1,000",
         "2,250"
@@ -436,7 +882,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "An 80-degree spray angle, nominally rated at 2.25 gallons/hour at 100 psi.",
+      "answer": "80-degree spray angle, nominally rated at 2.25 gallons/hour at 100 psi.",
       "exact_identifiers": [
         "80-degree",
         "2.25"
@@ -449,13 +895,90 @@
     "category": "list"
   },
   {
+    "id": "DIFF_AGG_05",
+    "question": "What are the pass/fail flammability criteria for seat cushions under CFR Part 25 (burn length and flame time)?",
+    "primary_type": "list",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Average burn length may not exceed 8 inches and average flame time after removal not exceed 30 seconds.",
+      "exact_identifiers": [
+        "8 inches",
+        "30 seconds"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "list"
+  },
+  {
+    "id": "DIFF_AGG_06",
+    "question": "Combining the EASA NPA 2013-20 requirements, what defines a '9g seat' dynamic vertical test (velocity change and pitch)?",
+    "primary_type": "multi_hop",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "A downward vertical velocity change of at least 35 ft/s (10.7 m/s) with the longitudinal axis pitched down 30 degrees.",
+      "exact_identifiers": [
+        "35 ft",
+        "30 degree"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "multi_hop"
+  },
+  {
+    "id": "DIFF_AGG_07",
+    "question": "What conditions define the AC 25-17A oil-burner fire test setup (nozzle flow, calorimeter distance, flame time)?",
+    "primary_type": "list",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "6.0 gal/hr nozzle; calorimeter at 8 inches; flame applied 60 seconds.",
+      "exact_identifiers": [
+        "6.0",
+        "8-inches",
+        "60 seconds"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "list"
+  },
+  {
+    "id": "DIFF_AGG_08",
+    "question": "What thickness must thick foam parts (seat cushions) be tested at, and under which appendix?",
+    "primary_type": "multi_hop",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "1/2-inch thickness, as required by Appendix F.",
+      "exact_identifiers": [
+        "1/2-inch",
+        "Appendix F"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "multi_hop"
+  },
+  {
     "id": "DIFF_FP_01",
     "question": "Why is the HIC limit of 2000 in AC 20-146A more permissive than the CFR value?",
     "primary_type": "false_premise",
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "False premise: the HIC limit is 1,000, not 2000. There is no 2000 HIC limit to compare.",
+      "answer": "False premise: the HIC limit is 1,000, not 2000.",
       "exact_identifiers": [
         "1,000",
         "2000"
@@ -493,7 +1016,7 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "False premise: ETSO-C127c sets the burn length at 6 inches; 3 inches is the FAA AC 25-17 value, not the ETSO one.",
+      "answer": "False premise: ETSO-C127c sets it at 6 inches; 3 inches is the FAA AC 25-17 value.",
       "exact_identifiers": [
         "6 inches",
         "3 inches"
@@ -551,10 +1074,164 @@
     "secondary_types": [],
     "language": "en",
     "ground_truth": {
-      "answer": "False premise: NPA 2013-20 requires a downward vertical velocity change of 35 ft/s (10.7 m/s), not 55 ft/s.",
+      "answer": "False premise: NPA 2013-20 requires 35 ft/s (10.7 m/s), not 55 ft/s.",
       "exact_identifiers": [
         "35 ft",
         "55 ft"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FP_07",
+    "question": "Which annex of AC 25.562-1C defines the 25g vertical sled test?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: there is no AC 25.562-1C (current is AC 25.562-1B), and the vertical test is 14g, not 25g.",
+      "exact_identifiers": [
+        "AC 25.562-1C",
+        "AC 25.562-1B",
+        "14g"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FP_08",
+    "question": "Per AC 25-17A, why is the flame applied for 90 seconds during the oil-burner test?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: AC 25-17A applies the flame for 60 seconds, not 90.",
+      "exact_identifiers": [
+        "60 seconds",
+        "90 seconds"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FP_09",
+    "question": "Which transport-seat standard sets the Type I forward load at 12g under ETSO-C39b?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: ETSO-C39b Type I forward load is 9g, not 12g.",
+      "exact_identifiers": [
+        "9g",
+        "12g"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FP_10",
+    "question": "How does CFR Part 25 require peak floor deceleration within 0.05 seconds?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: CFR Part 25 requires it within 0.09 seconds (EASA NPA 2013-20 uses 0.08 s), not 0.05 s.",
+      "exact_identifiers": [
+        "0.09",
+        "0.05"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FP_11",
+    "question": "What is AC 25-17B, the latest revision of the seat fire-protection AC?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: there is no AC 25-17B; the current revision is AC 25-17A.",
+      "exact_identifiers": [
+        "AC 25-17B",
+        "AC 25-17A"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FP_12",
+    "question": "Why does AC 25-17A allow an average burn rate of 40 inches per minute?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: AC 25-17A allows up to 20 inches per minute, not 40.",
+      "exact_identifiers": [
+        "20 inches",
+        "40 inches"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FP_13",
+    "question": "Which section requires conditioning specimens at 90 percent relative humidity?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: conditioning humidity is 50% (AC) or 55% (CFR), not 90%.",
+      "exact_identifiers": [
+        "50",
+        "55",
+        "90 percent"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FP_14",
+    "question": "How is AC 20-146B applied to seat certification by analysis?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: there is no AC 20-146B; the current revision is AC 20-146A.",
+      "exact_identifiers": [
+        "AC 20-146B",
+        "AC 20-146A"
       ],
       "supporting_doc_ids": [],
       "answerability": "answerable",
@@ -583,7 +1260,7 @@
   },
   {
     "id": "DIFF_FACT_02",
-    "question": "What forward load level defines a Type I (Transport/Large Aeroplane) seat under ETSO-C39b?",
+    "question": "What forward load defines a Type I (Transport/Large Aeroplane) seat under ETSO-C39b?",
     "primary_type": "factual",
     "secondary_types": [],
     "language": "en",
@@ -627,6 +1304,562 @@
       "answer": "35 ft/s (10.7 m/s).",
       "exact_identifiers": [
         "35 ft"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "factual"
+  },
+  {
+    "id": "DIFF_FACT_05",
+    "question": "What is the horizontal dynamic sled-test pulse level for § 25.562 seats?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "16g.",
+      "exact_identifiers": [
+        "16g"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "factual"
+  },
+  {
+    "id": "DIFF_FACT_06",
+    "question": "At what spray angle is the AC 25-17 (1991) burner nozzle rated?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "80 degrees.",
+      "exact_identifiers": [
+        "80-degree"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "factual"
+  },
+  {
+    "id": "DIFF_FACT_07",
+    "question": "What flow rate does the AC 25-17A burner nozzle deliver?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "6.0 gal/hr (0.378 L/min).",
+      "exact_identifiers": [
+        "6.0"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "factual"
+  },
+  {
+    "id": "DIFF_FACT_08",
+    "question": "What thickness must thick foam seat-cushion specimens be tested at?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "1/2-inch.",
+      "exact_identifiers": [
+        "1/2-inch"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "factual"
+  },
+  {
+    "id": "DIFF_FACT_09",
+    "question": "What is the maximum average flame time after flame removal under CFR Part 25?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "30 seconds.",
+      "exact_identifiers": [
+        "30 seconds"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "factual"
+  },
+  {
+    "id": "DIFF_FACT_10",
+    "question": "What is the vertical dynamic sled-test pulse level for § 25.562 seats?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "14g.",
+      "exact_identifiers": [
+        "14g"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "factual"
+  },
+  {
+    "id": "DIFF_CMP_19",
+    "question": "Between FAA AC 25-17 and EASA ETSO-C127c, which allows a longer maximum burn length?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "EASA ETSO-C127c (6 inches) allows longer than FAA AC 25-17 (3 inches).",
+      "exact_identifiers": [
+        "6 inches",
+        "3 inches"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "comparison"
+  },
+  {
+    "id": "DIFF_CMP_20",
+    "question": "Which requires a longer flame application during the burner test, AC 25-17 (1991) or AC 25-17A?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "AC 25-17A (60 seconds) is longer than AC 25-17 (1991) (15 seconds).",
+      "exact_identifiers": [
+        "60 seconds",
+        "15 seconds"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "comparison"
+  },
+  {
+    "id": "DIFF_CMP_21",
+    "question": "Do AC 25-17A and CFR Part 25 specify the same maximum average flame time after flame removal?",
+    "primary_type": "comparison",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No. AC 25-17A: 15 seconds; CFR Part 25: 30 seconds.",
+      "exact_identifiers": [
+        "15 seconds",
+        "30 seconds"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "comparison"
+  },
+  {
+    "id": "DIFF_LIN_15",
+    "question": "A maintenance manual cites 'AC 25-17'. Should compliance rely on that 1991 edition or a newer revision?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "A newer revision — AC 25-17A (the 1991 edition is cancelled).",
+      "exact_identifiers": [
+        "AC 25-17A"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_LIN_16",
+    "question": "Is ETSO-C127a current, or has EASA issued a newer ETSO-C127 revision?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Newer: ETSO-C127b supersedes ETSO-C127a.",
+      "exact_identifiers": [
+        "ETSO-C127b"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_LIN_17",
+    "question": "Give the revision lineage of AC 25.785-1.",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "AC 25.785-1 -> AC 25.785-1A -> AC 25.785-1B (current).",
+      "exact_identifiers": [
+        "AC 25.785-1B"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_LIN_18",
+    "question": "Which is newer, AC 21-25A or AC 21-25B?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "AC 21-25B is newer (it supersedes AC 21-25A).",
+      "exact_identifiers": [
+        "AC 21-25B"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_LIN_19",
+    "question": "Is AC 25-17 (1991) the active reference for the oil-burner test, or has it been revised?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Revised — AC 25-17A is the active reference.",
+      "exact_identifiers": [
+        "AC 25-17A"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_TMP_13",
+    "question": "A seat certified in 1996 — which AC 25-17 edition applied to it?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "The AC 25-17 1991 edition (AC 25-17A only became effective in 2009).",
+      "exact_identifiers": [
+        "AC 25-17",
+        "1991"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_TMP_14",
+    "question": "Did the 20 inches/minute burn-rate criterion apply in 2007?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No — in 2007 the AC 25-17 (1991) limit of 4 inches per minute applied; 20 in/min came with AC 25-17A (2009).",
+      "exact_identifiers": [
+        "4 inches",
+        "1991"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_TMP_15",
+    "question": "Was § 25.791 a requirement to satisfy in 1985?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "No — § 25.791 did not exist prior to Amendment 25-32.",
+      "exact_identifiers": [
+        "25-32"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_TMP_16",
+    "question": "Which crashworthiness AC predates the 2009 AC 25-17A by more than two decades?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "AC 23.562-1 (effective 1983).",
+      "exact_identifiers": [
+        "AC 23.562-1",
+        "1983"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_TMP_17",
+    "question": "In 1990, which crashworthiness advisory circular for small aircraft applied?",
+    "primary_type": "lifecycle",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "AC 23.562-1 (effective March 1983).",
+      "exact_identifiers": [
+        "AC 23.562-1"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "lifecycle"
+  },
+  {
+    "id": "DIFF_AGG_09",
+    "question": "List the AC 25-17 (1991) oil-burner test parameters: flame application time, nozzle spray angle, nozzle flow rate.",
+    "primary_type": "list",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "Flame applied 15 seconds; 80-degree spray angle; ~2.25 gallons/hour.",
+      "exact_identifiers": [
+        "15 seconds",
+        "80-degree",
+        "2.25"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "list"
+  },
+  {
+    "id": "DIFF_AGG_10",
+    "question": "A complete answer on the maximum seat-material burn length must cite which values across FAA and EASA?",
+    "primary_type": "multi_hop",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "FAA AC 25-17 = 3 inches, CFR Part 25 = 8 inches, EASA ETSO-C127c = 6 inches.",
+      "exact_identifiers": [
+        "3 inches",
+        "8 inches",
+        "6 inches"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "multi_hop"
+  },
+  {
+    "id": "DIFF_FP_15",
+    "question": "Why does AC 25-17A apply the flame for only 10 seconds during the burner test?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: AC 25-17A applies the flame for 60 seconds, not 10.",
+      "exact_identifiers": [
+        "60 seconds",
+        "10 seconds"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FP_16",
+    "question": "Which paragraph sets the § 25.562 horizontal dynamic test at 20g?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: the § 25.562 horizontal test is 16g, not 20g.",
+      "exact_identifiers": [
+        "16g",
+        "20g"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FP_17",
+    "question": "How does ETSO-C39b set the Type I forward load at 16g?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: ETSO-C39b Type I forward load is 9g, not 16g.",
+      "exact_identifiers": [
+        "9g",
+        "16g"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FP_18",
+    "question": "Why is the calorimeter placed at 12 inches from the burner in AC 25-17A?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: AC 25-17A places the calorimeter at 8 inches (203 mm), not 12 inches.",
+      "exact_identifiers": [
+        "8-inches",
+        "12 inches"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FP_19",
+    "question": "Why does NPA 2013-20 require peak floor deceleration within 0.12 seconds?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: NPA 2013-20 requires it within 0.08 seconds, not 0.12.",
+      "exact_identifiers": [
+        "0.08",
+        "0.12"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FP_20",
+    "question": "What is AC 25.785-1C, the latest seat-installation advisory circular?",
+    "primary_type": "false_premise",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "False premise: there is no AC 25.785-1C; the current revision is AC 25.785-1B.",
+      "exact_identifiers": [
+        "AC 25.785-1C",
+        "AC 25.785-1B"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": true
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "false_premise"
+  },
+  {
+    "id": "DIFF_FACT_11",
+    "question": "What is the maximum average burn length under EASA ETSO-C127c?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "6 inches.",
+      "exact_identifiers": [
+        "6 inches"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "factual"
+  },
+  {
+    "id": "DIFF_FACT_12",
+    "question": "Under AC 25-17 (1991), how long is the flame applied during the burner test?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "15 seconds.",
+      "exact_identifiers": [
+        "15 seconds"
+      ],
+      "supporting_doc_ids": [],
+      "answerability": "answerable",
+      "false_premise": false
+    },
+    "source_set": "aero_kg_grounded_differential",
+    "category": "factual"
+  },
+  {
+    "id": "DIFF_FACT_13",
+    "question": "What is the maximum average burn length under FAA AC 25-17 (1991)?",
+    "primary_type": "factual",
+    "secondary_types": [],
+    "language": "en",
+    "ground_truth": {
+      "answer": "3 inches.",
+      "exact_identifiers": [
+        "3 inches"
       ],
       "supporting_doc_ids": [],
       "answerability": "answerable",
