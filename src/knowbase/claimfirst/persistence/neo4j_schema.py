@@ -198,6 +198,18 @@ class ClaimFirstSchema:
             constraint_type="UNIQUE"
         ),
 
+        # Document: unique par (tenant_id, doc_id) — multi-tenant.
+        # Corrigé 08/06/2026 : la contrainte legacy `document_id` sur doc_id SEUL
+        # bloquait la lignée (explicit_lineage / lineage_resolution) pour un tenant
+        # quand le même document existait déjà dans un autre tenant (ex: default).
+        # Le MERGE du détecteur de lignée est déjà (doc_id, tenant_id).
+        SchemaConstraint(
+            name="document_tenant_unique",
+            label="Document",
+            property_key="tenant_id, doc_id",
+            constraint_type="UNIQUE"
+        ),
+
         # ApplicabilityAxis: unique par axis_id (INV-12/14/25)
         SchemaConstraint(
             name="axis_id_unique",
