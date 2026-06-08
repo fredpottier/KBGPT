@@ -49,6 +49,7 @@ class StageStatus:
 @dataclass
 class PipelineStatus:
     name: str  # claim-first|post-import|burst-extract
+    tenant: Optional[str] = None  # tenant ciblé (post-import multi-tenant) ; None = global/non-tenant
     run_id: str = ""
     started_at: Optional[str] = None
     elapsed_s: int = 0
@@ -78,6 +79,7 @@ class ContainerGroupStatus:
 
 @dataclass
 class KnowledgeStatus:
+    tenant: Optional[str] = None  # None = agrégat tous tenants ; sinon counts filtrés par tenant_id
     qdrant_ok: bool = False
     qdrant_chunks: int = 0
     qdrant_collections: int = 0
@@ -90,6 +92,8 @@ class KnowledgeStatus:
     neo4j_subjects: int = 0
     neo4j_relations: int = 0
     neo4j_contradictions: int = 0
+    neo4j_documents: int = 0
+    neo4j_supersedes_doc: int = 0  # chaînes de lignée (démo)
     last_refresh: Optional[str] = None
 
 
@@ -157,6 +161,7 @@ class RobustnessReport:
 @dataclass
 class A38Report:
     """Gold-set (bench a38 runtime_v6) — remplace les rapports V3 RAGAS/T2T5/Robustesse."""
+    tenant: Optional[str] = None       # tenant/corpus du run ; None = run non tagué (legacy/global)
     exact_id_recall: float = 0.0       # déterministe — précision des références
     abstention_correct: float = 0.0    # déterministe — honnêteté répondre/abstenir
     c1_mean: float = 0.0               # juge LLM (bruité, indicatif)
@@ -184,10 +189,13 @@ class CockpitState:
     burst: BurstStatus = field(default_factory=BurstStatus)
     pipelines: list[PipelineStatus] = field(default_factory=list)
     container_groups: list[ContainerGroupStatus] = field(default_factory=list)
-    knowledge: KnowledgeStatus = field(default_factory=KnowledgeStatus)
+    knowledge: KnowledgeStatus = field(default_factory=KnowledgeStatus)  # agrégat (compat)
+    knowledge_tenants: list[KnowledgeStatus] = field(default_factory=list)  # par tenant (onglets)
+    tenants: list[str] = field(default_factory=list)  # tenants découverts dans le KG
     llm_session: LLMSessionStatus = field(default_factory=LLMSessionStatus)
     llm_balances: LLMBalanceStatus = field(default_factory=LLMBalanceStatus)
-    a38: Optional[A38Report] = None          # gold-set (bench décisionnel actuel)
+    a38: Optional[A38Report] = None          # gold-set (bench décisionnel actuel — run le plus récent)
+    a38_tenants: list[A38Report] = field(default_factory=list)  # gold-set par tenant (onglets)
     ragas: Optional[RagasReport] = None      # V3 legacy (conservé, non affiché)
     t2t5: Optional[T2T5Report] = None        # V3 legacy
     robustness: Optional[RobustnessReport] = None  # V3 legacy

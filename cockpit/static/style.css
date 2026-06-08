@@ -765,3 +765,34 @@ body {
         transition-duration: 0.01ms !important;
     }
 }
+
+/* ── Onglets tenant (multi-tenant : Knowledge, Qualité Osmosis) ────────── */
+.tenant-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+.tenant-tab {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    padding: 2px 10px;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    text-transform: lowercase;
+}
+.tenant-tab:hover {
+    color: var(--text-accent);
+    border-color: var(--text-accent);
+}
+.tenant-tab.active {
+    color: var(--bg-canvas, #0B0F1A);
+    background: var(--text-accent);
+    border-color: var(--text-accent);
+}

@@ -24,45 +24,77 @@ class A38Collector:
     def __init__(self):
         self._api_base = OSMOSIS_API_URL.rstrip("/")
 
+    @staticmethod
+    def _run_tenant(run: dict) -> Optional[str]:
+        """Extrait le tenant/corpus d'un run gold-set.
+
+        Les runs récents portent `tenant` (ou `corpus`) ; les anciens runs
+        non tagués retournent None (bucket « global »). Le bench runner doit
+        écrire `tenant` dans le résumé JSON pour alimenter le par-tenant.
+        """
+        return run.get("tenant") or run.get("corpus") or None
+
+    @staticmethod
+    def _to_report(run: dict, tenant: Optional[str]) -> A38Report:
+        eir = run.get("exact_id_recall_mean") or 0.0
+        abst = run.get("abstention_correct_rate") or 0.0
+        c1 = run.get("C1_mean") or 0.0
+        if eir >= 0.75 and abst >= 0.80:
+            diagnostic = "Systeme fiable"
+        elif eir >= 0.50:
+            diagnostic = "A surveiller"
+        else:
+            diagnostic = "Probleme RETRIEVAL"
+        return A38Report(
+            tenant=tenant,
+            exact_id_recall=round(eir, 4),
+            abstention_correct=round(abst, 4),
+            c1_mean=round(c1, 4),
+            n_total=run.get("n_total") or 0,
+            n_with_ids=run.get("n_with_expected_ids") or 0,
+            latency_p50=round(run.get("latency_p50_s") or 0.0, 1),
+            latency_p95=round(run.get("latency_p95_s") or 0.0, 1),
+            arm=run.get("arm", "osmosis"),
+            timestamp=run.get("timestamp", ""),
+            diagnostic=diagnostic,
+        )
+
     def collect(self) -> Optional[A38Report]:
-        """GET /api/benchmarks/a38 → run le plus récent (bras osmosis)."""
+        """Run osmosis le plus récent (compat — widget mono). Cf collect_full()."""
+        recent, _ = self.collect_full()
+        return recent
+
+    def collect_full(self) -> tuple[Optional[A38Report], list[A38Report]]:
+        """Retourne (run le plus récent, [A38Report par tenant]).
+
+        Par tenant : le run osmosis le plus récent de chaque tenant taggué.
+        Les runs non tagués sont regroupés sous le bucket tenant=None.
+        """
         try:
             resp = requests.get(f"{self._api_base}/api/benchmarks/a38", timeout=5)
             if resp.status_code != 200:
-                return None
-
+                return None, []
             runs = (resp.json() or {}).get("runs", [])
             if not runs:
-                return None
+                return None, []
 
-            # Bras osmosis prioritaire (sinon le plus récent, déjà trié par l'API)
+            # Run le plus récent (osmosis prioritaire) — compat widget mono
             osm = next((r for r in runs if r.get("arm") == "osmosis"), runs[0])
+            recent = self._to_report(osm, self._run_tenant(osm))
 
-            eir = osm.get("exact_id_recall_mean") or 0.0
-            abst = osm.get("abstention_correct_rate") or 0.0
-            c1 = osm.get("C1_mean") or 0.0
-
-            # Diagnostic piloté par les 2 mesures déterministes (pas le juge bruité)
-            if eir >= 0.75 and abst >= 0.80:
-                diagnostic = "Systeme fiable"
-            elif eir >= 0.50:
-                diagnostic = "A surveiller"
-            else:
-                diagnostic = "Probleme RETRIEVAL"
-
-            return A38Report(
-                exact_id_recall=round(eir, 4),
-                abstention_correct=round(abst, 4),
-                c1_mean=round(c1, 4),
-                n_total=osm.get("n_total") or 0,
-                n_with_ids=osm.get("n_with_expected_ids") or 0,
-                latency_p50=round(osm.get("latency_p50_s") or 0.0, 1),
-                latency_p95=round(osm.get("latency_p95_s") or 0.0, 1),
-                arm=osm.get("arm", "osmosis"),
-                timestamp=osm.get("timestamp", ""),
-                diagnostic=diagnostic,
-            )
+            # Par tenant : 1er run osmosis rencontré par tenant (runs déjà triés récent→ancien)
+            by_tenant: dict[Optional[str], A38Report] = {}
+            for r in runs:
+                if r.get("arm") != "osmosis":
+                    continue
+                tid = self._run_tenant(r)
+                if tid not in by_tenant:
+                    by_tenant[tid] = self._to_report(r, tid)
+            # Tenants tagués d'abord, bucket global (None) en dernier
+            ordered = sorted(by_tenant.values(),
+                             key=lambda rep: (rep.tenant is None, rep.tenant or ""))
+            return recent, ordered
 
         except Exception as e:
             logger.warning(f"[COCKPIT:A38] API collect failed: {e}")
-            return None
+            return None, []

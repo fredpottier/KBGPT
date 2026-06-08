@@ -54,6 +54,17 @@ class PipelineCollector:
 
         for pipeline_name, defn in self._defs.items():
             try:
+                if defn.get("per_tenant"):
+                    # Multi-tenant : un pipeline par clé tenant active (catch-all)
+                    for tenant, key in self._scan_tenant_keys(rc, defn):
+                        state = self._read_state_key(rc, key, defn)
+                        if state is None or not self._is_active(state, defn):
+                            continue
+                        ps = self._build_pipeline_status(pipeline_name, state, defn)
+                        ps.tenant = tenant
+                        active.append(ps)
+                    continue
+
                 state = self._read_state(rc, defn)
                 if state is None:
                     continue
@@ -64,6 +75,37 @@ class PipelineCollector:
                 logger.debug(f"[COCKPIT:PIPELINE] Error reading {pipeline_name}: {e}")
 
         return active
+
+    def _scan_tenant_keys(self, rc: redis.Redis, defn: dict) -> list[tuple[str, str]]:
+        """Découvre les clés Redis multi-tenant via SCAN.
+
+        Retourne [(tenant, redis_key)] à partir du `redis_key_pattern`
+        (ex: 'osmose:post_import:state:*' → tenant = dernier segment).
+        """
+        pattern = defn.get("redis_key_pattern")
+        if not pattern:
+            return []
+        prefix = pattern.rstrip("*")
+        out: list[tuple[str, str]] = []
+        try:
+            for key in rc.scan_iter(match=pattern, count=100):
+                tenant = key[len(prefix):] if key.startswith(prefix) else key.rsplit(":", 1)[-1]
+                if tenant:
+                    out.append((tenant, key))
+        except Exception as e:
+            logger.debug(f"[COCKPIT:PIPELINE] scan {pattern} failed: {e}")
+        return out
+
+    def _read_state_key(self, rc: redis.Redis, key: str, defn: dict) -> Optional[dict]:
+        """Lit l'état pour une clé explicite (variante multi-tenant de _read_state)."""
+        redis_type = defn.get("redis_type", "json")
+        if redis_type == "hash":
+            data = rc.hgetall(key)
+            return data if data else None
+        raw = rc.get(key)
+        if raw:
+            return json.loads(raw)
+        return None
 
     def _read_state(self, rc: redis.Redis, defn: dict) -> Optional[dict]:
         """Lit l'état depuis Redis selon le type (hash ou json)."""

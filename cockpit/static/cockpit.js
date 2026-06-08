@@ -129,13 +129,49 @@
     // (LLM reset removed — replaced by RAGAS widget)
 
     // ── Render orchestrator ───────────────────────────────────────
+    // Onglet tenant sélectionné par widget (multi-tenant). Persistant entre
+    // les push WS ; null = premier tenant disponible. _lastState permet de
+    // re-rendre un widget au clic d'onglet sans attendre le prochain push.
+    let _kTab = null, _qTab = null, _lastState = null;
+
     function render(s) {
+        _lastState = s;
         renderBurst(s.burst);
         renderPipelines(s.pipelines || []);
         renderContainers(s.container_groups);
-        renderKnowledge(s.knowledge);
-        renderQuality(s.a38);
+        renderKnowledge(s);
+        renderQuality(s);
         renderEvents(s.events);
+    }
+
+    // Barre d'onglets tenant réutilisable. `items` = [{tenant, ...}].
+    // Retourne le HTML ; les clics sont câblés par wireTenantTabs après injection.
+    function tenantTabsHtml(items, selected, widget) {
+        if (!items || items.length <= 1) return '';
+        const tabs = items.map(it => {
+            const t = it.tenant || 'global';
+            const on = (it.tenant === selected) || (!it.tenant && !selected);
+            return `<button class="tenant-tab${on ? ' active' : ''}" data-widget="${widget}" data-tenant="${escapeHtml(it.tenant || '')}">${escapeHtml(t)}</button>`;
+        }).join('');
+        return `<div class="tenant-tabs">${tabs}</div>`;
+    }
+
+    function wireTenantTabs(containerEl) {
+        containerEl.querySelectorAll('.tenant-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const w = btn.getAttribute('data-widget');
+                const t = btn.getAttribute('data-tenant') || null;
+                if (w === 'knowledge') { _kTab = t; renderKnowledge(_lastState); }
+                else if (w === 'quality') { _qTab = t; renderQuality(_lastState); }
+            });
+        });
+    }
+
+    // Choisit l'entrée active dans une liste par tenant selon l'onglet retenu.
+    function pickTenant(items, selected) {
+        if (!items || items.length === 0) return null;
+        const hit = items.find(it => it.tenant === selected);
+        return hit || items[0];
     }
 
     // ── W1: EC2 Burst ─────────────────────────────────────────────
@@ -248,6 +284,15 @@
             nameEl.style.cssText = 'font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.08em;';
             nameEl.textContent = p.name || '';
             header.appendChild(nameEl);
+
+            // Badge tenant (multi-tenant : POST-IMPORT etc. peuvent tourner sur
+            // n'importe quel tenant ; on l'affiche clairement pour ne pas confondre).
+            if (p.tenant) {
+                const tEl = document.createElement('span');
+                tEl.style.cssText = 'font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--bg-canvas,#0b0b0f);background:var(--text-accent);border-radius:8px;padding:1px 8px;letter-spacing:0.04em;';
+                tEl.textContent = p.tenant;
+                header.appendChild(tEl);
+            }
 
             if (p.run_id) {
                 const runEl = document.createElement('span');
@@ -619,9 +664,16 @@
         body.innerHTML = html;
     }
 
-    // ── W4: Knowledge ─────────────────────────────────────────────
-    function renderKnowledge(k) {
+    // ── W4: Knowledge (multi-tenant : onglet par tenant) ──────────
+    function renderKnowledge(s) {
         const body = document.getElementById('knowledge-body');
+        // Liste par tenant ; repli sur l'agrégat si pas de ventilation.
+        const list = (s && s.knowledge_tenants && s.knowledge_tenants.length)
+            ? s.knowledge_tenants
+            : (s && s.knowledge ? [s.knowledge] : []);
+        const k = pickTenant(list, _kTab);
+        if (!k) { body.innerHTML = ''; return; }
+
         const qdrantDot = k.qdrant_ok ? 'ok' : 'error';
         const neo4jDot = k.neo4j_ok ? 'ok' : 'error';
 
@@ -634,6 +686,7 @@
         }
 
         body.innerHTML = `
+            ${tenantTabsHtml(list, k.tenant, 'knowledge')}
             <div class="knowledge-section">
                 <div class="knowledge-section-label">
                     <div class="knowledge-section-dot ${qdrantDot}"></div>
@@ -652,17 +705,18 @@
                     NEO4J
                 </div>
                 <div class="knowledge-tiles">
-                    ${tile(k.neo4j_nodes, 'nodes')}
                     ${tile(k.neo4j_claims, 'claims', 'highlight')}
                     ${tile(k.neo4j_entities, 'entities')}
                     ${tile(k.neo4j_relations, 'relations')}
-                    ${tile(k.neo4j_subjects, 'subjects')}
+                    ${tile(k.neo4j_documents, 'documents')}
+                    ${tile(k.neo4j_supersedes_doc, 'lignée', k.neo4j_supersedes_doc > 0 ? 'highlight' : '')}
                     ${tile(k.neo4j_facets, 'facets')}
                     ${tile(k.neo4j_perspectives, 'perspectives')}
                     ${tile(k.neo4j_contradictions, 'contrad.', k.neo4j_contradictions > 0 ? 'contradictions' : '')}
                 </div>
             </div>
         `;
+        wireTenantTabs(body);
     }
 
     // ── W5: Qualité Osmosis (RAGAS + T2/T5) ────────────────────────
@@ -768,17 +822,25 @@
         return s.replace('T', ' ').split('.')[0];
     }
 
-    function renderQuality(a38) {
+    function renderQuality(s) {
         const el = document.getElementById('a38-section');
         if (!el) return;
         try {
+            // Liste par tenant ; repli sur le run récent unique.
+            const list = (s && s.a38_tenants && s.a38_tenants.length)
+                ? s.a38_tenants
+                : (s && s.a38 ? [s.a38] : []);
+            const a38 = pickTenant(list, _qTab);
+            const tabs = tenantTabsHtml(list, a38 ? a38.tenant : null, 'quality');
             if (!a38 || (!a38.n_total && !a38.exact_id_recall)) {
-                el.innerHTML = '<div style="color:var(--text-tertiary);font-size:15px;padding:8px 0;">Pas de run gold-set</div>';
+                el.innerHTML = tabs + '<div style="color:var(--text-tertiary);font-size:15px;padding:8px 0;">Pas de run gold-set</div>';
+                wireTenantTabs(el);
                 return;
             }
-            // En-tête : titre + volume du run
-            let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                <span style="font-family:var(--font-sans);font-size:16px;font-weight:600;color:var(--text-primary);">Gold-set</span>
+            // En-tête : onglets tenant + titre + volume du run
+            // (tenant=null = run non tagué → libellé « global » dans l'onglet)
+            let h = tabs + `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <span style="font-family:var(--font-sans);font-size:16px;font-weight:600;color:var(--text-primary);">Gold-set${a38.tenant ? ' · ' + escapeHtml(a38.tenant) : ''}</span>
                 <span style="font-family:var(--font-mono);font-size:13px;color:var(--text-tertiary);">${a38.n_total}q</span>
             </div>`;
             // Badge diagnostic (piloté par les métriques déterministes, calculé côté collecteur)
@@ -801,6 +863,7 @@
                 h += `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);margin-top:10px;line-height:1.7;">${meta.join('<br>')}</div>`;
             }
             el.innerHTML = h;
+            wireTenantTabs(el);
         } catch (err) {
             el.innerHTML = `<div style="color:red;font-size:11px;">Gold-set error: ${err.message}</div>`;
         }

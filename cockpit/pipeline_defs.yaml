@@ -40,6 +40,11 @@ pipelines:
 
   post-import:
     display_name: "POST-IMPORT"
+    # Multi-tenant : scan TOUS les tenants (osmose:post_import:state:<tenant>).
+    # Le cockpit attrape ainsi tout post-import actif, quel que soit le tenant,
+    # et étiquette chaque pipeline de son tenant. `redis_key` reste comme repli.
+    per_tenant: true
+    redis_key_pattern: "osmose:post_import:state:*"
     redis_key: "osmose:post_import:state:default"
     redis_type: json  # GET → JSON parse
     stages:

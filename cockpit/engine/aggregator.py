@@ -91,10 +91,12 @@ class Aggregator:
             logger.warning(f"[COCKPIT:AGG] Docker collect failed: {e}")
 
     async def _bg_knowledge(self):
-        """Collecte Knowledge en background."""
+        """Collecte Knowledge en background (agrégat + par tenant)."""
         try:
-            result = await asyncio.to_thread(self.knowledge_collector.collect)
-            self._state.knowledge = result
+            agg, per_tenant = await asyncio.to_thread(self.knowledge_collector.collect_full)
+            self._state.knowledge = agg
+            self._state.knowledge_tenants = per_tenant
+            self._state.tenants = [s.tenant for s in per_tenant if s.tenant]
             self._last_knowledge_ts = time.time()
         except Exception as e:
             logger.warning(f"[COCKPIT:AGG] Knowledge collect failed: {e}")
@@ -149,7 +151,7 @@ class Aggregator:
         # Qualité — gold-set (a38) affiché ; V3 (RAGAS/T2T5/Robustesse) conservé en arrière-plan
         if now - self._last_ragas_ts >= RAGAS_COLLECT_INTERVAL:
             try:
-                self._state.a38 = self.a38_collector.collect()
+                self._state.a38, self._state.a38_tenants = self.a38_collector.collect_full()
                 self._state.ragas = self.ragas_collector.collect()
                 self._state.t2t5 = self.t2t5_collector.collect()
                 self._state.robustness = self.robustness_collector.collect()
