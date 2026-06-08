@@ -91,18 +91,19 @@ def _rag_is_abstention(answer: str) -> bool:
 # ============================================================================
 
 
-def run_bench_rag(rag: ClassicRAG, gold_path: Path, limit: Optional[int]) -> List[Dict[str, Any]]:
+def run_bench_rag(rag: ClassicRAG, gold_path: Path, limit: Optional[int],
+                  tenant_id: str = "default") -> List[Dict[str, Any]]:
     with open(gold_path, "r", encoding="utf-8") as f:
         questions = json.load(f)
     if limit:
         questions = questions[:limit]
-    logger.info("Bench RAG: %d questions", len(questions))
+    logger.info("Bench RAG: %d questions (tenant=%s)", len(questions), tenant_id)
 
     results: List[Dict[str, Any]] = []
     for i, q in enumerate(questions, 1):
         logger.info("[RAG %d/%d] type=%s id=%s", i, len(questions),
                     q.get("primary_type"), q.get("id"))
-        run = rag.answer(q["question"])
+        run = rag.answer(q["question"], tenant_id=tenant_id)
         gt = q.get("ground_truth", {})
         gt_answer = gt.get("answer", "")
         if gt_answer and run.get("ok"):
@@ -145,6 +146,8 @@ def main():
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--corpus", default="",
                         help="Label corpus pour l'attribution (protocole non-régression).")
+    parser.add_argument("--tenant", default="default",
+                        help="Tenant KG à interroger (chunks Qdrant filtrés par tenant_id).")
     args = parser.parse_args()
 
     rag = ClassicRAG(
@@ -156,7 +159,7 @@ def main():
     t0 = time.perf_counter()
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-    results = run_bench_rag(rag, args.gold_50q, args.limit)
+    results = run_bench_rag(rag, args.gold_50q, args.limit, tenant_id=args.tenant)
     agg = bench.aggregate_50q(results) if results else {}
     total_duration = time.perf_counter() - t0
 
@@ -193,7 +196,8 @@ def main():
             "arm": "classic_rag",
             # Protocole non-régression multi-corpus : étiquetage corpus + sha
             # (même convention que bench_a38_runtime_v6 → compare_runs.py).
-            "corpus": getattr(args, "corpus", "") or "aero_staged_150q_rag",
+            "corpus": getattr(args, "corpus", "") or args.tenant,
+            "tenant": args.tenant,
             "git_sha": __import__("os").getenv("GIT_SHA", "unknown"),
             "gold_50q_file": str(args.gold_50q),
             "config": {
