@@ -2,7 +2,7 @@
 
 import logging
 from functools import lru_cache
-from typing import Callable
+from typing import Callable, Optional
 
 from fastapi import Request
 
@@ -13,7 +13,7 @@ from knowbase.common.clients import (
     get_sentence_transformer,
 )
 from knowbase.config.settings import get_settings
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 
@@ -191,6 +191,31 @@ def get_tenant_id(current_user: dict = Depends(get_current_user)) -> str:
     return tenant_id
 
 
+def get_cockpit_tenant(
+    tenant_id: Optional[str] = Query(
+        None,
+        description="Override tenant pour le cockpit (ADMINS uniquement, lecture).",
+    ),
+    current_user: dict = Depends(get_current_user),
+) -> str:
+    """Tenant ciblé par les widgets du cockpit (lecture multi-tenant).
+
+    Un ADMIN peut cibler n'importe quel tenant via `?tenant_id=X` (suivi
+    d'imports comparatifs, supervision de plusieurs corpus). Les utilisateurs
+    non-admins restent verrouillés sur le tenant de leur JWT — la sécurité de
+    `get_tenant_id` est préservée (un override n'est honoré que pour un admin).
+    """
+    jwt_tenant = current_user.get("tenant_id")
+    if tenant_id and current_user.get("role") == "admin":
+        return tenant_id
+    if not jwt_tenant:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="tenant_id manquant dans token JWT",
+        )
+    return jwt_tenant
+
+
 __all__ = [
     "get_settings",
     "get_logger",
@@ -205,4 +230,5 @@ __all__ = [
     "require_admin",
     "require_editor",
     "get_tenant_id",
+    "get_cockpit_tenant",
 ]

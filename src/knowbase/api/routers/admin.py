@@ -98,6 +98,38 @@ async def purge_all_data(
         raise HTTPException(status_code=500, detail=f"Erreur purge: {str(e)}")
 
 
+@router.get("/tenants")
+async def list_tenants(
+    admin: dict = Depends(require_admin),
+) -> Dict:
+    """Liste les tenants présents dans le KG (pour le sélecteur du cockpit).
+
+    Réservé aux admins. Le tenant du compte est marqué `is_own=True`.
+    Permet au cockpit de cibler un autre tenant (suivi d'imports comparatifs).
+    """
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    driver = get_neo4j_client().driver
+    own = admin.get("tenant_id")
+    tenants = []
+    with driver.session() as s:
+        rows = s.run(
+            "MATCH (c:Claim) WHERE c.tenant_id IS NOT NULL "
+            "RETURN c.tenant_id AS tenant, count(c) AS n_claims, "
+            "count(DISTINCT c.doc_id) AS n_docs ORDER BY n_claims DESC"
+        )
+        for r in rows:
+            tenants.append({
+                "tenant_id": r["tenant"],
+                "n_claims": r["n_claims"],
+                "n_docs": r["n_docs"],
+                "is_own": r["tenant"] == own,
+            })
+    # garantir que le tenant du compte figure même sans claims
+    if own and not any(t["tenant_id"] == own for t in tenants):
+        tenants.insert(0, {"tenant_id": own, "n_claims": 0, "n_docs": 0, "is_own": True})
+    return {"tenants": tenants, "own_tenant": own}
+
+
 @router.get("/health")
 async def admin_health(
     admin: dict = Depends(require_admin),

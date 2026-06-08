@@ -657,12 +657,20 @@ export const api = {
   postImport: {
     steps: () =>
       apiClient.get('/admin/post-import/steps'),
-    status: () =>
-      apiClient.get('/admin/post-import/status'),
+    // tenantId optionnel : un admin peut suivre un autre tenant (cockpit multi-tenant)
+    status: (tenantId?: string) =>
+      apiClient.get('/admin/post-import/status', {
+        params: tenantId ? { tenant_id: tenantId } : undefined,
+      }),
     run: (steps: string[], tenantId: string = 'default') =>
       apiClient.post('/admin/post-import/run', { steps, tenant_id: tenantId }, {
         timeout: 1800000,  // 30 min max
       }),
+  },
+
+  // Liste des tenants présents dans le KG (sélecteur cockpit multi-tenant)
+  tenants: {
+    list: () => apiClient.get('/admin/tenants'),
   },
 
   // Atlas — Narrative knowledge atlas (dual-axis: product + theme)

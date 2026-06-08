@@ -25,7 +25,7 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from knowbase.api.dependencies import get_tenant_id
+from knowbase.api.dependencies import get_tenant_id, get_cockpit_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -265,9 +265,14 @@ async def list_steps():
 
 @router.get("/status", response_model=PipelineStatusResponse)
 async def pipeline_status(
-    tenant_id: str = Depends(get_tenant_id),
+    tenant_id: str = Depends(get_cockpit_tenant),
 ):
-    """État du pipeline en cours d'exécution."""
+    """État du pipeline en cours d'exécution.
+
+    Multi-tenant : un admin peut suivre un autre tenant via `?tenant_id=X`
+    (ex: suivre un import comparatif sur le tenant `aero` depuis le compte
+    `default`). Cf get_cockpit_tenant.
+    """
     try:
         from knowbase.common.clients.redis_client import get_redis_client
         rc = get_redis_client()

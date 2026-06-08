@@ -15,10 +15,13 @@ import {
   Icon,
   Progress,
   Divider,
+  Select,
+  Tooltip,
 } from '@chakra-ui/react'
 import {
   FiPlay, FiCheck, FiX, FiClock, FiZap,
   FiRefreshCw, FiLayers, FiLink2, FiGrid, FiPackage,
+  FiDatabase,
 } from 'react-icons/fi'
 import { api } from '@/lib/api'
 
@@ -48,6 +51,13 @@ interface PipelineResult {
   error_count: number
 }
 
+interface TenantInfo {
+  tenant_id: string
+  n_claims: number
+  n_docs: number
+  is_own: boolean
+}
+
 const STEP_ICONS: Record<string, typeof FiRefreshCw> = {
   canonicalize: FiLayers,
   facets: FiGrid,
@@ -66,13 +76,31 @@ export default function PostImportPage() {
   const [stepDetail, setStepDetail] = useState<string>('')
   const [completedSteps, setCompletedSteps] = useState<string[]>([])
   const [results, setResults] = useState<PipelineResult | null>(null)
+  // Cockpit multi-tenant : un admin peut suivre/lancer le post-import d'un autre tenant
+  const [tenants, setTenants] = useState<TenantInfo[]>([])
+  const [selectedTenant, setSelectedTenant] = useState<string>('')
+  const [ownTenant, setOwnTenant] = useState<string>('')
   const toast = useToast()
+
+  // Charger la liste des tenants (sélecteur)
+  useEffect(() => {
+    api.tenants.list()
+      .then((res) => {
+        const list: TenantInfo[] = res.data?.tenants || []
+        setTenants(list)
+        const own = res.data?.own_tenant || list.find((t) => t.is_own)?.tenant_id || ''
+        setOwnTenant(own)
+        setSelectedTenant((cur) => cur || own)
+      })
+      .catch(() => { /* sélecteur masqué si indisponible */ })
+  }, [])
 
   const loadSteps = useCallback(async () => {
     try {
       const [stepsRes, statusRes] = await Promise.all([
         api.postImport.steps(),
-        api.postImport.status(),
+        // tenant vide → backend retombe sur le tenant du JWT (get_cockpit_tenant)
+        api.postImport.status(selectedTenant || undefined),
       ])
       setSteps(stepsRes.data || [])
 
@@ -97,16 +125,27 @@ export default function PostImportPage() {
     } finally {
       setLoading(false)
     }
-  }, [toast])
+  }, [toast, selectedTenant])
 
   useEffect(() => { loadSteps() }, [loadSteps])
+
+  // Au changement de tenant : reset l'affichage avant de recharger le statut ciblé
+  const onTenantChange = (next: string) => {
+    if (next === selectedTenant) return
+    setResults(null)
+    setCompletedSteps([])
+    setCurrentStep(null)
+    setRunning(false)
+    setLoading(true)
+    setSelectedTenant(next)
+  }
 
   // Polling status pendant l'exécution
   useEffect(() => {
     if (!running) return
     const interval = setInterval(async () => {
       try {
-        const res = await api.postImport.status()
+        const res = await api.postImport.status(selectedTenant)
         const data = res.data
         if (data.current_step) setCurrentStep(data.current_step)
         setStepProgress(data.step_progress || 0)
@@ -131,7 +170,7 @@ export default function PostImportPage() {
       } catch { /* ignore */ }
     }, 3000)
     return () => clearInterval(interval)
-  }, [running, toast])
+  }, [running, toast, selectedTenant])
 
   const toggleStep = (stepId: string) => {
     const next = new Set(selectedSteps)
@@ -156,7 +195,7 @@ export default function PostImportPage() {
     setCompletedSteps([])
 
     try {
-      const res = await api.postImport.run(Array.from(selectedSteps))
+      const res = await api.postImport.run(Array.from(selectedSteps), selectedTenant || ownTenant)
       if (res.data?.success) {
         toast({
           title: `Pipeline lancé (${res.data.steps_queued?.length} étapes)`,
@@ -243,6 +282,60 @@ export default function PostImportPage() {
           Sélectionnez les étapes souhaitées — elles s'exécutent dans l'ordre optimal.
         </Text>
       </VStack>
+
+      {/* Bannière TENANT ciblé — claire et visible (cockpit multi-tenant) */}
+      {tenants.length > 0 && (
+        <HStack
+          mb={6}
+          p={3}
+          px={4}
+          bg={selectedTenant !== ownTenant ? 'rgba(234, 179, 8, 0.10)' : 'rgba(99, 102, 241, 0.08)'}
+          border="1px solid"
+          borderColor={selectedTenant !== ownTenant ? 'orange.400' : 'border.default'}
+          rounded="lg"
+          justify="space-between"
+          flexWrap="wrap"
+          gap={3}
+        >
+          <HStack spacing={3}>
+            <Icon as={FiDatabase} color={selectedTenant !== ownTenant ? 'orange.300' : 'brand.300'} />
+            <Text fontSize="sm" color="text.secondary">Tenant ciblé :</Text>
+            <Badge
+              colorScheme={selectedTenant !== ownTenant ? 'orange' : 'brand'}
+              fontSize="sm"
+              px={3}
+              py={1}
+              rounded="md"
+            >
+              {selectedTenant || ownTenant}
+            </Badge>
+            {selectedTenant !== ownTenant && (
+              <Tooltip label={`Vous suivez un autre tenant que le vôtre (${ownTenant}). Lecture/lancement en supervision admin.`}>
+                <Badge colorScheme="orange" variant="outline" fontSize="xs">
+                  hors de votre tenant
+                </Badge>
+              </Tooltip>
+            )}
+          </HStack>
+          <HStack spacing={2}>
+            <Text fontSize="xs" color="text.muted">Changer :</Text>
+            <Select
+              size="sm"
+              maxW="280px"
+              value={selectedTenant}
+              onChange={(e) => onTenantChange(e.target.value)}
+              isDisabled={running}
+              bg="bg.secondary"
+            >
+              {tenants.map((t) => (
+                <option key={t.tenant_id} value={t.tenant_id}>
+                  {t.tenant_id}{t.is_own ? ' (le vôtre)' : ''} — {t.n_claims.toLocaleString()} claims · {t.n_docs} docs
+                </option>
+              ))}
+            </Select>
+          </HStack>
+        </HStack>
+      )}
 
       {/* Progress bar (pendant l'exécution) */}
       {running && (
