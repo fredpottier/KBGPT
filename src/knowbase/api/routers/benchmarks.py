@@ -875,6 +875,10 @@ def _a38_summary(filepath: Path) -> dict[str, Any] | None:
         "arm": arm,
         "run_dir": filepath.parent.name,
         "timestamp": data.get("timestamp", filepath.stem.replace("run_", "")),
+        # Multi-tenant : le runner tague tenant/corpus → exposé pour la ventilation
+        # par tenant (cockpit « Qualité OSMOSIS »). Absent sur les runs legacy.
+        "tenant": data.get("tenant"),
+        "corpus": data.get("corpus"),
         "config": data.get("config", {}),
         "total_duration_s": data.get("total_duration_s"),
         # Métriques déterministes (décisionnelles)
