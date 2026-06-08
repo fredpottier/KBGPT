@@ -232,9 +232,10 @@ export function RuntimeV6Tab() {
     () => runs.find(r => r.arm === 'osmosis' && runTenant(r) === 'default') ?? null,
     [runs],
   )
+  // classic_rag STRICTEMENT du tenant actif (pas de repli cross-tenant : on ne
+  // veut jamais comparer aero-OSMOSIS au RAG d'un autre corpus).
   const rag = useMemo(
-    () => runs.find(r => r.arm === 'classic_rag' && runTenant(r) === activeTenant)
-       ?? runs.find(r => r.arm === 'classic_rag') ?? null,
+    () => runs.find(r => r.arm === 'classic_rag' && runTenant(r) === activeTenant) ?? null,
     [runs, activeTenant],
   )
   const isDefaultTenant = activeTenant === 'default'
@@ -260,15 +261,17 @@ export function RuntimeV6Tab() {
   const ref = osm ?? rag!
   const nTotal = ref.n_total ?? 50
 
-  // Carte de comparaison : sur default = OSMOSIS vs moteur classique ;
-  // sur un autre tenant = ce corpus vs la référence default (verdict du ré-import).
-  const cmpRun = isDefaultTenant ? rag : osmDefault
-  const cmpName = isDefaultTenant ? 'Moteur classique' : 'default'
-  const cmpTitle = isDefaultTenant
-    ? 'OSMOSIS vs un moteur de recherche classique'
+  // Carte de comparaison : priorité à OSMOSIS (KG) vs RAG classique du MÊME
+  // tenant (l'apport du KG) ; à défaut (pas de run RAG pour ce tenant), repli
+  // sur la comparaison du corpus vs la référence « default ».
+  const cmpRun = rag ?? osmDefault
+  const cmpIsRag = !!rag
+  const cmpName = cmpIsRag ? 'RAG classique' : 'default'
+  const cmpTitle = cmpIsRag
+    ? `Apport du KG — OSMOSIS vs RAG classique (« ${activeTenant} »)`
     : `Corpus « ${activeTenant} » vs « default »`
-  const cmpDesc = isDefaultTenant
-    ? "Même corpus, mêmes questions, même IA de rédaction. La seule différence : le moteur classique se contente de chercher des passages de texte ressemblants, là où OSMOSIS s'appuie sur une base de connaissances structurée."
+  const cmpDesc = cmpIsRag
+    ? "Même corpus, mêmes questions, même IA de rédaction. La seule différence : OSMOSIS s'appuie sur le graphe de connaissances (KG), là où le RAG classique se contente de chercher des passages de texte ressemblants (chunks bruts)."
     : `Mêmes questions, même moteur OSMOSIS, seul le corpus change. Compare la nouvelle extraction « ${activeTenant} » à la référence « default » — c'est le verdict du ré-import.`
 
   return (
