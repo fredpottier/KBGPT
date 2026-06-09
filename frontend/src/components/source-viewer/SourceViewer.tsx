@@ -82,6 +82,7 @@ export default function SourceViewer({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [nHighlights, setNHighlights] = useState(0)
+  const [matchMode, setMatchMode] = useState<'exact' | 'approx' | 'none'>('none')
 
   const openInTab = useCallback(async () => {
     if (!target) return
@@ -154,56 +155,79 @@ export default function SourceViewer({
         await page.render({ canvasContext: ctx, viewport }).promise
         if (cancelled) return
 
-        // Surlignage : on retrouve la citation comme SOUS-CHAÎNE CONTIGUË du text-layer
-        // (et non par tokens épars, qui surlignaient les mots fréquents partout sur la
-        // page). On reconstruit la chaîne de la page + une map des offsets par fragment,
-        // on localise la citation, et on ne surligne que les fragments chevauchant le span.
+        // Surlignage en 2 niveaux (jamais de tokens épars) :
+        //  (1) match EXACT de la citation comme sous-chaîne contiguë → span précis ;
+        //  (2) sinon « meilleure fenêtre contiguë » par recouvrement des mots
+        //      significatifs (tolère OCR/garbles via préfixes) → on surligne la ZONE
+        //      la plus probable. Si recouvrement trop faible → rien (honnête).
         overlay.innerHTML = ''
         let hits = 0
+        let mode: 'exact' | 'approx' | 'none' = 'none'
         const quote = target?.quote || ''
         if (quote) {
           const tc = await page.getTextContent()
           let concat = ''
-          const ranges: { start: number; end: number; item: any }[] = []
+          const ranges: { start: number; end: number; item: any; words: string[] }[] = []
           for (const item of tc.items as any[]) {
             const ns = normalize(item.str || '')
             if (!ns) continue
             const start = concat.length
             concat += ns
-            ranges.push({ start, end: concat.length, item })
-            concat += ' ' // séparateur inter-fragments
+            ranges.push({ start, end: concat.length, item, words: ns.split(' ') })
+            concat += ' '
           }
+          const draw = (item: any) => {
+            const tx = pdfjs.Util.transform(viewport.transform, item.transform)
+            const fontH = Math.hypot(tx[2], tx[3]) || 10
+            const w = (item.width || 0) * scale
+            const mark = document.createElement('div')
+            mark.style.cssText =
+              `position:absolute;left:${tx[4]}px;top:${tx[5] - fontH}px;width:${w}px;` +
+              `height:${fontH * 1.15}px;background:rgba(255,213,0,0.42);` +
+              `border-radius:2px;pointer-events:none;mix-blend-mode:multiply;`
+            overlay.appendChild(mark)
+            hits++
+          }
+          // (1) exact contigu
           let nq = normalize(quote)
           let mStart = concat.indexOf(nq)
           if (mStart < 0) {
-            // tolérance : retire la ponctuation de tête/queue de la citation
             const stripped = nq.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')
             if (stripped && stripped !== nq) {
-              mStart = concat.indexOf(stripped)
-              if (mStart >= 0) nq = stripped
+              const k = concat.indexOf(stripped)
+              if (k >= 0) { mStart = k; nq = stripped }
             }
           }
           if (mStart >= 0) {
             const mEnd = mStart + nq.length
-            for (const r of ranges) {
-              if (r.end <= mStart || r.start >= mEnd) continue // hors du span
-              const item = r.item
-              const tx = pdfjs.Util.transform(viewport.transform, item.transform)
-              const fontH = Math.hypot(tx[2], tx[3]) || 10
-              const w = (item.width || 0) * scale
-              const left = tx[4]
-              const top = tx[5] - fontH
-              const mark = document.createElement('div')
-              mark.style.cssText =
-                `position:absolute;left:${left}px;top:${top}px;width:${w}px;` +
-                `height:${fontH * 1.15}px;background:rgba(255,213,0,0.42);` +
-                `border-radius:2px;pointer-events:none;mix-blend-mode:multiply;`
-              overlay.appendChild(mark)
-              hits++
+            for (const r of ranges) if (!(r.end <= mStart || r.start >= mEnd)) draw(r.item)
+            mode = 'exact'
+          } else {
+            // (2) meilleure fenêtre contiguë par recouvrement de tokens significatifs
+            const sig = Array.from(new Set(
+              nq.split(/[^a-z0-9]+/).filter((t) => t.length >= 4 || /\d/.test(t)),
+            ))
+            const covers = (w: string, t: string) =>
+              w === t || (Math.min(w.length, t.length) >= 4 && (w.startsWith(t) || t.startsWith(w)))
+            const win = Math.max(nq.length, 40)
+            let best = { score: -1, i: 0, j: 0 }
+            for (let i = 0; i < ranges.length; i++) {
+              let j = i
+              while (j < ranges.length && ranges[j].end - ranges[i].start < win) j++
+              const cov = new Set<string>()
+              for (let k = i; k < j; k++)
+                for (const w of ranges[k].words)
+                  for (const t of sig) if (covers(w, t)) cov.add(t)
+              if (cov.size > best.score) best = { score: cov.size, i, j }
+            }
+            const need = Math.max(2, Math.ceil(sig.length * 0.34))
+            if (sig.length > 0 && best.score >= need) {
+              for (let k = best.i; k < best.j; k++) draw(ranges[k].item)
+              mode = 'approx'
             }
           }
         }
-        if (!cancelled) setNHighlights(hits)
+        if (!cancelled) { setNHighlights(hits); setMatchMode(mode) }
       } catch {
         /* rendu best-effort : on n'efface pas la modale sur échec d'une page */
       }
@@ -232,9 +256,11 @@ export default function SourceViewer({
           </Flex>
           {target?.quote ? (
             <Text fontSize="11px" color="text.secondary" fontWeight="normal" mt={1} noOfLines={2}>
-              Span recherché : « {target.quote} » {nHighlights > 0
+              Span recherché : « {target.quote} » {matchMode === 'exact'
                 ? '· span surligné'
-                : '· non localisé exactement sur cette page'}
+                : matchMode === 'approx'
+                ? '· zone la plus probable surlignée (citation source approximative)'
+                : '· non localisé sur cette page'}
             </Text>
           ) : null}
         </ModalHeader>
