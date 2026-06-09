@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from typing import Dict, List, Optional
 
@@ -506,6 +507,27 @@ def run_pipeline_job(steps: List[str], tenant_id: str) -> dict:
         )
 
         step_start = time.time()
+        # Heartbeat watchdog (#460) : log périodique « phase en cours depuis Ns »
+        # même si l'étape est silencieuse → tue l'impression de blocage. Met aussi
+        # à jour une clé Redis légère pour lecture cockpit sans dépendre du log.
+        _hb_stop = threading.Event()
+
+        def _heartbeat(_step=step_name, _sid=step_id, _t=tenant_id, _t0=step_start):
+            while not _hb_stop.wait(30):
+                el = int(time.time() - _t0)
+                logger.info(f"[PostImport] ⏳ {_step} en cours depuis {el}s…")
+                try:
+                    from knowbase.common.clients.redis_client import get_redis_client
+                    get_redis_client().set(
+                        f"osmose:ingest:progress:{_t}",
+                        json.dumps({"phase": _sid, "elapsed_s": el}),
+                        ex=600,
+                    )
+                except Exception:
+                    pass
+
+        _hb_thread = threading.Thread(target=_heartbeat, daemon=True)
+        _hb_thread.start()
         try:
             details = _execute_step(step_id, tenant_id, on_step_progress)
             duration = round(time.time() - step_start, 1)
@@ -535,6 +557,8 @@ def run_pipeline_job(steps: List[str], tenant_id: str) -> dict:
                 "duration_s": duration,
                 "details": {},
             })
+        finally:
+            _hb_stop.set()  # arrête le heartbeat de l'étape (#460)
 
     total_duration = round(time.time() - pipeline_start, 1)
 

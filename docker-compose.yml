@@ -41,6 +41,7 @@ services:
     environment:
       TZ: Europe/Paris  # Timezone Paris pour tous les logs
       PYTHONPATH: /app:/app/src
+      PYTHONUNBUFFERED: "1"  # flush stdout/logs en continu (#460 — éviter le log figé)
       HF_HOME: /data/models
       ONNXTR_CACHE_DIR: /data/models/onnxtr  # Persister cache OnnxTR (sinon re-download à chaque restart)
       KNOWBASE_DATA_DIR: /data
@@ -136,6 +137,7 @@ services:
     environment:
       TZ: Europe/Paris  # Timezone Paris pour tous les logs
       PYTHONPATH: /app:/app/src
+      PYTHONUNBUFFERED: "1"  # flush stdout/logs en continu (#460 — éviter le log figé)
       HF_HOME: /data/models
       ONNXTR_CACHE_DIR: /data/models/onnxtr  # Persister cache OnnxTR
       KNOWBASE_DATA_DIR: /data
@@ -236,6 +238,7 @@ services:
     environment:
       TZ: Europe/Paris
       PYTHONPATH: /app:/app/src
+      PYTHONUNBUFFERED: "1"  # flush stdout/logs en continu (#460 — éviter le log figé)
       HF_HOME: /data/models
       ONNXTR_CACHE_DIR: /data/models/onnxtr
       KNOWBASE_DATA_DIR: /data
@@ -299,6 +302,7 @@ services:
     environment:
       TZ: Europe/Paris
       PYTHONPATH: /app:/app/src
+      PYTHONUNBUFFERED: "1"  # flush stdout/logs en continu (#460 — éviter le log figé)
       KNOWBASE_DATA_DIR: /data
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
