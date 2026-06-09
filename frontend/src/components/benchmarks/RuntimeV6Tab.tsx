@@ -537,8 +537,11 @@ export function RuntimeV6Tab() {
       {/* ── Famille 1 : questions avec une réponse attendue ── */}
       <Card>
         <Text fontSize="sm" fontWeight="700" color={T.textPrimary} mb={1}>Questions avec une réponse attendue</Text>
-        <Text fontSize="12px" color={T.textSecondary} mb={3}>
-          Ici, bien répondre = donner la bonne information précise. On regarde la précision des références et la qualité jugée.
+        <Text fontSize="12px" color={T.textSecondary} mb={3} lineHeight="1.6">
+          Ici, bien répondre = donner la bonne information. La mesure de tête est la <b>Qualité IA</b> (une IA juge si la
+          réponse est juste) — OSMOSIS y mène sur <b>tous</b> les types. La <b>Précision réf.</b> (à droite, atténuée) ne
+          compte que la présence des codes attendus : elle <b>flatte le moteur classique</b>, qui recopie les codes de ses
+          extraits sans forcément répondre. À lire comme un indice secondaire, pas comme un verdict.
         </Text>
         <Box overflowX="auto">
           <Table size="sm" variant="unstyled">
@@ -546,9 +549,10 @@ export function RuntimeV6Tab() {
               <Tr borderBottom="1px solid" borderColor={T.borderSubtle}>
                 <Th color={T.textMuted} fontSize="10px" py={2} textTransform="none">Type de question</Th>
                 <Th color={T.textMuted} fontSize="10px" py={2} isNumeric>Nb</Th>
-                <Th color={T.accentOsm} fontSize="10px" py={2} isNumeric textTransform="none">Précision réf. (OSMOSIS)</Th>
-                {rag && <Th color={T.textMuted} fontSize="10px" py={2} isNumeric textTransform="none">(classique)</Th>}
                 <Th color={T.accentOsm} fontSize="10px" py={2} isNumeric textTransform="none">Qualité IA (OSMOSIS)</Th>
+                {rag && <Th color={T.textMuted} fontSize="10px" py={2} isNumeric textTransform="none">(classique)</Th>}
+                {rag && <Th color={T.textMuted} fontSize="10px" py={2} isNumeric>Écart</Th>}
+                <Th color={T.textMuted} fontSize="10px" py={2} isNumeric textTransform="none">Précision réf. (OSM.)</Th>
                 {rag && <Th color={T.textMuted} fontSize="10px" py={2} isNumeric textTransform="none">(classique)</Th>}
               </Tr>
             </Thead>
@@ -564,24 +568,28 @@ export function RuntimeV6Tab() {
                 const oC1 = osm?.per_type?.[t]?.mean
                 const rC1 = rag?.per_type?.[t]?.mean
                 const n = ref.per_type?.[t]?.n ?? 0
-                // Cellule précision : valeur + ·n réel ; gris + ⚠ si échantillon réduit.
+                // Cellule précision réf. = indice SECONDAIRE ici → toujours atténuée
+                // (gris, fin), avec son vrai ·n et ⚠ si échantillon réduit. On ne la
+                // colore pas en vert pour ne pas laisser croire que le RAG « gagne ».
                 const precCell = (stat?: PerTypeStat) => {
-                  if (!stat || stat.mean == null) return <Text fontSize="12px" fontFamily="'Fira Code', monospace" color={T.textMuted}>—</Text>
+                  if (!stat || stat.mean == null) return <Text fontSize="11px" fontFamily="'Fira Code', monospace" color={T.textMuted}>—</Text>
                   const small = stat.n < EIR_MIN_N
                   return (
-                    <Text fontSize="12px" fontWeight={small ? 400 : 700} fontFamily="'Fira Code', monospace" color={small ? T.textMuted : scoreColor(stat.mean)}>
-                      {pct(stat.mean)}<Text as="span" fontSize="10px" opacity={0.65}> ·{stat.n}{small ? ' ⚠' : ''}</Text>
+                    <Text fontSize="11px" fontWeight={400} fontFamily="'Fira Code', monospace" color={T.textMuted}>
+                      {pct(stat.mean)}<Text as="span" fontSize="9px" opacity={0.7}> ·{stat.n}{small ? ' ⚠' : ''}</Text>
                     </Text>
                   )
                 }
+                const qDelta = (oC1 != null && rC1 != null) ? oC1 - rC1 : null
                 return (
                   <Tr key={t} borderBottom="1px solid" borderColor={T.borderSubtle} _hover={{ bg: T.bgElevated }}>
                     <Td py={2}><InfoLabel text={typeLabel(t)} help={typeHelp(t)} fontSize="12px" fontWeight="600" color={T.textSecondary} /></Td>
                     <Td py={2} isNumeric><Text fontSize="11px" color={T.textMuted} fontFamily="'Fira Code', monospace">{n}</Text></Td>
+                    <Td py={2} isNumeric><Text fontSize="13px" fontWeight="700" fontFamily="'Fira Code', monospace" color={oC1 != null ? scoreColor(oC1) : T.textMuted}>{oC1 != null ? pct(oC1) : '—'}</Text></Td>
+                    {rag && <Td py={2} isNumeric><Text fontSize="12px" fontFamily="'Fira Code', monospace" color={rC1 != null ? scoreColor(rC1) : T.textMuted}>{rC1 != null ? pct(rC1) : '—'}</Text></Td>}
+                    {rag && <Td py={2} isNumeric><Text fontSize="12px" fontWeight="700" fontFamily="'Fira Code', monospace" color={qDelta != null ? deltaColor(qDelta) : T.textMuted}>{qDelta != null ? fmtDeltaPp(qDelta) : '—'}</Text></Td>}
                     <Td py={2} isNumeric>{precCell(oStat)}</Td>
                     {rag && <Td py={2} isNumeric>{precCell(rStat)}</Td>}
-                    <Td py={2} isNumeric><Text fontSize="12px" fontFamily="'Fira Code', monospace" color={oC1 != null ? scoreColor(oC1) : T.textMuted}>{oC1 != null ? pct(oC1) : '—'}</Text></Td>
-                    {rag && <Td py={2} isNumeric><Text fontSize="12px" fontFamily="'Fira Code', monospace" color={rC1 != null ? scoreColor(rC1) : T.textMuted}>{rC1 != null ? pct(rC1) : '—'}</Text></Td>}
                   </Tr>
                 )
               })}
@@ -589,11 +597,11 @@ export function RuntimeV6Tab() {
           </Table>
         </Box>
         <Text fontSize="10px" color={T.textMuted} mt={2}>
-          « Précision réf. » = mesure exacte (sans IA), suivie de <b>·n</b> = le nombre de questions à identifiant sur
-          lesquelles elle est réellement calculée (souvent ≪ au « Nb » du type). <b>⚠</b> = échantillon réduit (&lt;{EIR_MIN_N} q),
-          à lire avec prudence : sur ces familles, l’exact_id est trompeur (le moteur classique recopie les identifiants des
-          extraits sans pour autant répondre) — la « Qualité IA », jugée par une IA (indicative), reflète mieux la vraie réponse.
-          Un « — » = ce type n’attend pas d’identifiant précis.
+          <b>Qualité IA</b> = verdict de justesse, jugé par une IA (indicatif, ±30%) ; <b>Écart</b> = OSMOSIS − classique.
+          <b> Précision réf.</b> (atténuée, indice secondaire) = part des codes attendus cités (mesure exacte), suivie de
+          <b> ·n</b> = nombre de questions à identifiant concernées (souvent ≪ au « Nb »), <b>⚠</b> = échantillon &lt;{EIR_MIN_N} q.
+          Le moteur classique la gonfle en recopiant les codes de ses extraits sans répondre. Un « — » = ce type n’attend
+          pas d’identifiant précis.
         </Text>
       </Card>
 
