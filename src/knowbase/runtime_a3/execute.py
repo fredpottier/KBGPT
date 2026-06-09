@@ -1472,12 +1472,20 @@ class Executor:
         to_id: str,
         rel_props: Dict[str, Any],
     ) -> RelationSummary:
+        # Coercition temporels Neo4j → datetime Python natif : les props de
+        # relation (detected_at, posé via datetime() en Cypher) arrivent en
+        # neo4j.time.DateTime que Pydantic (Optional[datetime]) rejette →
+        # ValidationError qui faisait perdre le surfaçage de contradictions
+        # sur certaines questions (cf #463).
+        detected = rel_props.get("detected_at") or rel_props.get("created_at")
+        if detected is not None and hasattr(detected, "to_native"):
+            detected = detected.to_native()
         return RelationSummary(
             relation_type=rel_type,
             from_claim_id=from_id,
             to_claim_id=to_id,
             confidence=rel_props.get("confidence"),
-            detected_at=rel_props.get("detected_at") or rel_props.get("created_at"),
+            detected_at=detected,
         )
 
 
