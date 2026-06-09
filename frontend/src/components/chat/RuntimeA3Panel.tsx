@@ -27,6 +27,8 @@ import {
   FiCheckCircle,
   FiShield,
 } from 'react-icons/fi'
+// [SOURCE_VIEWER] module autonome Phase C — voir components/source-viewer/README.md
+import { SourceViewer, SOURCE_VIEWER_ENABLED, type SourceViewerTarget } from '@/components/source-viewer'
 
 interface CitedClaim {
   claim_id: string
@@ -36,6 +38,25 @@ interface CitedClaim {
   page?: number | null
   source_doc_id?: string | null
   n?: number
+  // Phase C (traçabilité enrichie) — tous optionnels, dégradation silencieuse.
+  source_verbatim_quote?: string | null
+  valid_from?: string | null
+  valid_until?: string | null
+  invalidated_at?: string | null
+  lifecycle_status?: string | null
+}
+
+// Phase C — badge bitemporel calculé depuis les dates/lifecycle du claim cité.
+// Texte intemporel/factuel (cf principe UI : les données portent le verdict).
+function lifecycleBadge(c: CitedClaim): { label: string; color: string } | null {
+  const obsolete = !!c.invalidated_at || !!c.valid_until ||
+    (c.lifecycle_status && /withdraw|cancel|supersed|obsolet|replac/i.test(c.lifecycle_status))
+  if (obsolete) {
+    const since = c.invalidated_at || c.valid_until
+    return { label: since ? `obsolète (${since})` : 'obsolète', color: 'orange' }
+  }
+  if (c.valid_from) return { label: `en vigueur · depuis ${c.valid_from}`, color: 'green' }
+  return null
 }
 
 interface IterationTrace {
@@ -72,6 +93,8 @@ export default function RuntimeA3Panel({
 }) {
   const [showCitations, setShowCitations] = useState(false)
   const [showTrace, setShowTrace] = useState(false)
+  // [SOURCE_VIEWER] cible courante du viewer PDF in-app (null = fermé)
+  const [viewerTarget, setViewerTarget] = useState<SourceViewerTarget | null>(null)
 
   if (!runtimeA3) return null
 
@@ -286,17 +309,25 @@ export default function RuntimeA3Panel({
           borderLeft="2px solid"
           borderColor="border.active"
         >
-          {citations.map((c, i) => (
+          {citations.map((c, i) => {
+            const badge = lifecycleBadge(c)
+            return (
             <Box key={c.claim_id || i} fontSize="xs">
               <Text color="text.primary">
                 <Text as="span" color="text.secondary" fontWeight="semibold">
                   [{c.n ?? i + 1}]{' '}
                 </Text>
                 “{c.claim_verbatim}”
+                {/* Phase C — badge bitemporel (en vigueur / obsolète) */}
+                {badge ? (
+                  <Badge ml={2} colorScheme={badge.color} fontSize="9px" verticalAlign="middle" textTransform="none">
+                    {badge.color === 'green' ? '✓ ' : '⚠ '}{badge.label}
+                  </Badge>
+                ) : null}
               </Text>
-              {/* Click-to-source (fix régression 05/06) : ouvre le document
-                  source dans un onglet — PDF directement à la bonne page
-                  (#page=N, RFC 3778) via openSourceFile + page_no du KG. */}
+              {/* Click-to-source. [SOURCE_VIEWER] : si le module est actif, ouvre le
+                  PDF IN-APP avec surlignage du span ; sinon onglet natif (openSourceFile
+                  + #page=N, RFC 3778). */}
               {c.source_doc_id ? (
                 <Text
                   as="button"
@@ -308,14 +339,23 @@ export default function RuntimeA3Panel({
                   textDecoration="underline"
                   _hover={{ color: 'brand.200' }}
                   onClick={async () => {
-                    const { openSourceFile } = await import(
-                      '@/lib/openSourceFile'
-                    )
+                    // [SOURCE_VIEWER] branche in-app
+                    if (SOURCE_VIEWER_ENABLED) {
+                      setViewerTarget({
+                        docId: c.source_doc_id!,
+                        page: c.page ?? undefined,
+                        quote: c.source_verbatim_quote || c.claim_verbatim,
+                        docTitle: c.doc_title || c.source_doc_id,
+                      })
+                      return
+                    }
+                    const { openSourceFile } = await import('@/lib/openSourceFile')
                     await openSourceFile(c.source_doc_id!, c.page ?? undefined)
                   }}
                 >
                   {c.doc_title || c.source_doc_id}
-                  {c.page != null ? ` · p.${c.page}` : ''} ↗
+                  {c.page != null ? ` · p.${c.page}` : ''}
+                  {SOURCE_VIEWER_ENABLED ? ' ⊕' : ' ↗'}
                 </Text>
               ) : (
                 <Text color="text.secondary" mt="2px" pl={4}>
@@ -324,7 +364,8 @@ export default function RuntimeA3Panel({
                 </Text>
               )}
             </Box>
-          ))}
+            )
+          })}
         </VStack>
       </Collapse>
 
@@ -347,6 +388,9 @@ export default function RuntimeA3Panel({
           ))}
         </VStack>
       </Collapse>
+
+      {/* [SOURCE_VIEWER] viewer PDF in-app (Modal en portal) — module autonome */}
+      <SourceViewer target={viewerTarget} onClose={() => setViewerTarget(null)} />
     </VStack>
   )
 }

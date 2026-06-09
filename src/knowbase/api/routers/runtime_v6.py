@@ -109,6 +109,17 @@ class CitedClaimRef(BaseModel):
             "GET /api/documents/source-file?doc_id=… (+ #page=N pour les PDF)."
         ),
     )
+    # --- Phase C (traçabilité enrichie, 09/06/2026) — champs ADDITIFS ---------
+    # Tous optionnels et hydratés en best-effort : si absents, l'UI dégrade sans
+    # erreur. Conçus pour être retirables (cf doc viewer autonome).
+    source_verbatim_quote: Optional[str] = Field(
+        default=None,
+        description="Citation verbatim exacte dans la source (span à surligner dans le viewer).",
+    )
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    invalidated_at: Optional[str] = None
+    lifecycle_status: Optional[str] = None
 
 
 class IterationTraceDict(BaseModel):
@@ -314,11 +325,22 @@ def _hydrate_citation_sources(claim_ids: List[str]) -> Dict[str, Dict[str, Any]]
         from knowbase.common.clients.neo4j_client import get_neo4j_client
         rows = get_neo4j_client().execute_query(
             "MATCH (c:Claim) WHERE c.claim_id IN $ids "
-            "RETURN c.claim_id AS id, c.doc_id AS doc_id, c.page_no AS page",
+            "RETURN c.claim_id AS id, c.doc_id AS doc_id, c.page_no AS page, "
+            "c.verbatim_quote AS verbatim_quote, "
+            "substring(toString(c.valid_from),0,10) AS valid_from, "
+            "substring(toString(c.valid_until),0,10) AS valid_until, "
+            "substring(toString(c.invalidated_at),0,10) AS invalidated_at, "
+            "c.lifecycle_status_current AS lifecycle_status",
             ids=claim_ids,
         )
         return {
-            r["id"]: {"doc_id": r["doc_id"], "page": r["page"]}
+            r["id"]: {
+                "doc_id": r["doc_id"], "page": r["page"],
+                "verbatim_quote": r["verbatim_quote"],
+                "valid_from": r["valid_from"], "valid_until": r["valid_until"],
+                "invalidated_at": r["invalidated_at"],
+                "lifecycle_status": r["lifecycle_status"],
+            }
             for r in rows
         }
     except Exception:
@@ -351,6 +373,12 @@ def _build_response(
             section_id=cc.section_id,
             page=cc.page if cc.page is not None else (int(page) if page is not None else None),
             source_doc_id=doc_id,
+            # Phase C — best-effort, dégradation silencieuse si absent.
+            source_verbatim_quote=src.get("verbatim_quote"),
+            valid_from=src.get("valid_from"),
+            valid_until=src.get("valid_until"),
+            invalidated_at=src.get("invalidated_at"),
+            lifecycle_status=src.get("lifecycle_status"),
         ))
 
     trace_payload: Optional[List[IterationTraceDict]] = None
