@@ -46,6 +46,11 @@ const T = {
 // Cible vision sur la précision des références (exact_id_recall — 0.75-0.80)
 const EIR_TARGET = 0.75
 
+// Seuil d'échantillon fiable pour « Précision réf. » (exact_id) par type : en-dessous,
+// la mesure ne porte que sur une poignée de questions à identifiant (ex comparaisons :
+// 6/41) → on grise + ⚠ pour éviter de la lire à tort sur le total du type.
+const EIR_MIN_N = 10
+
 // ── Types (miroir du backend /api/benchmarks/a38) ──────────────────────
 interface PerTypeStat { n: number; mean: number; n_judge_failed?: number }
 interface A38Run {
@@ -547,17 +552,32 @@ export function RuntimeV6Tab() {
             </Thead>
             <Tbody>
               {sortTypes(Object.keys(ref.per_type ?? {})).filter(t => ANSWER_TYPES.includes(t)).map(t => {
-                const oEir = osm?.exact_id_recall_per_type?.[t]?.mean
-                const rEir = rag?.exact_id_recall_per_type?.[t]?.mean
+                // « Précision réf. » (exact_id) n'est calculée QUE sur les questions du
+                // type qui portent un identifiant attendu — souvent un sous-ensemble
+                // bien plus petit que le total du type (ex comparaisons : 6 / 41). On
+                // affiche donc le VRAI n de la mesure et on grise/⚠ sous le seuil
+                // d'échantillon fiable, sinon le chiffre se lit à tort sur le total.
+                const oStat = osm?.exact_id_recall_per_type?.[t]
+                const rStat = rag?.exact_id_recall_per_type?.[t]
                 const oC1 = osm?.per_type?.[t]?.mean
                 const rC1 = rag?.per_type?.[t]?.mean
                 const n = ref.per_type?.[t]?.n ?? 0
+                // Cellule précision : valeur + ·n réel ; gris + ⚠ si échantillon réduit.
+                const precCell = (stat?: PerTypeStat) => {
+                  if (!stat || stat.mean == null) return <Text fontSize="12px" fontFamily="'Fira Code', monospace" color={T.textMuted}>—</Text>
+                  const small = stat.n < EIR_MIN_N
+                  return (
+                    <Text fontSize="12px" fontWeight={small ? 400 : 700} fontFamily="'Fira Code', monospace" color={small ? T.textMuted : scoreColor(stat.mean)}>
+                      {pct(stat.mean)}<Text as="span" fontSize="10px" opacity={0.65}> ·{stat.n}{small ? ' ⚠' : ''}</Text>
+                    </Text>
+                  )
+                }
                 return (
                   <Tr key={t} borderBottom="1px solid" borderColor={T.borderSubtle} _hover={{ bg: T.bgElevated }}>
                     <Td py={2}><InfoLabel text={typeLabel(t)} help={typeHelp(t)} fontSize="12px" fontWeight="600" color={T.textSecondary} /></Td>
                     <Td py={2} isNumeric><Text fontSize="11px" color={T.textMuted} fontFamily="'Fira Code', monospace">{n}</Text></Td>
-                    <Td py={2} isNumeric><Text fontSize="12px" fontWeight="700" fontFamily="'Fira Code', monospace" color={oEir != null ? scoreColor(oEir) : T.textMuted}>{oEir != null ? pct(oEir) : '—'}</Text></Td>
-                    {rag && <Td py={2} isNumeric><Text fontSize="12px" fontFamily="'Fira Code', monospace" color={rEir != null ? scoreColor(rEir) : T.textMuted}>{rEir != null ? pct(rEir) : '—'}</Text></Td>}
+                    <Td py={2} isNumeric>{precCell(oStat)}</Td>
+                    {rag && <Td py={2} isNumeric>{precCell(rStat)}</Td>}
                     <Td py={2} isNumeric><Text fontSize="12px" fontFamily="'Fira Code', monospace" color={oC1 != null ? scoreColor(oC1) : T.textMuted}>{oC1 != null ? pct(oC1) : '—'}</Text></Td>
                     {rag && <Td py={2} isNumeric><Text fontSize="12px" fontFamily="'Fira Code', monospace" color={rC1 != null ? scoreColor(rC1) : T.textMuted}>{rC1 != null ? pct(rC1) : '—'}</Text></Td>}
                   </Tr>
@@ -567,8 +587,11 @@ export function RuntimeV6Tab() {
           </Table>
         </Box>
         <Text fontSize="10px" color={T.textMuted} mt={2}>
-          « Précision réf. » = mesure exacte (sans IA). « Qualité IA » = jugée par une IA, indicative. Un « — » = ce type
-          n’attend pas d’identifiant précis.
+          « Précision réf. » = mesure exacte (sans IA), suivie de <b>·n</b> = le nombre de questions à identifiant sur
+          lesquelles elle est réellement calculée (souvent ≪ au « Nb » du type). <b>⚠</b> = échantillon réduit (&lt;{EIR_MIN_N} q),
+          à lire avec prudence : sur ces familles, l’exact_id est trompeur (le moteur classique recopie les identifiants des
+          extraits sans pour autant répondre) — la « Qualité IA », jugée par une IA (indicative), reflète mieux la vraie réponse.
+          Un « — » = ce type n’attend pas d’identifiant précis.
         </Text>
       </Card>
 
