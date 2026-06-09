@@ -144,6 +144,20 @@ function weightedRate(
   return { rate: den > 0 ? num / den : null, n: den }
 }
 
+// « Bon comportement » par type : la mesure DÉCISIVE sur les familles
+// différenciantes (où l'exact_id est trompeur). Pour une question avec réponse
+// attendue, bien faire = répondre (1 − taux d'abstention). Pour une question
+// piège/hors-périmètre, bien faire = gérer (corriger ou s'abstenir) = handled_rate.
+function correctBehaviorByType(run: A38Run | null, t: string): { rate: number; n: number } | null {
+  if (!run) return null
+  if (NOANSWER_TYPES.includes(t)) {
+    const h = run.handled_rate_per_type?.[t]
+    return h ? { rate: h.rate, n: h.n } : null
+  }
+  const a = run.abstention_rate_per_type?.[t]
+  return a ? { rate: 1 - a.rate, n: a.n } : null
+}
+
 // ── Petit libellé + infobulle « ? » ────────────────────────────────────
 function InfoLabel({ text, help, ...rest }: { text: string; help: string; [k: string]: any }) {
   return (
@@ -444,6 +458,67 @@ export function RuntimeV6Tab() {
           </Text>
         </Card>
       )}
+
+      {/* ── Apport du KG par TYPE de question : bon comportement (OSMOSIS vs RAG) ──
+           La mesure décisive sur les familles différenciantes. L'exact_id (table
+           suivante) est trompeur ici : sur une contradiction, citer une seule
+           valeur peut « scorer » alors que le bon comportement est d'exposer les
+           DEUX côtés. Ici on mesure : a-t-il fait ce qu'il fallait ? */}
+      {cmpIsRag && (() => {
+        const types = sortTypes(Array.from(new Set([
+          ...Object.keys(osm?.abstention_rate_per_type ?? {}),
+          ...Object.keys(osm?.handled_rate_per_type ?? {}),
+        ])))
+        const rows = types.map(t => ({
+          t,
+          o: correctBehaviorByType(osm, t),
+          r: correctBehaviorByType(rag, t),
+          isTrap: NOANSWER_TYPES.includes(t),
+        })).filter(x => x.o && x.r)
+        if (!rows.length) return null
+        return (
+          <Card accent={T.accentOsm}>
+            <HStack spacing={2} mb={1}>
+              <FiZap size={15} color={T.accentOsm} />
+              <Text fontSize="sm" fontWeight="800" color={T.textPrimary}>L’apport du KG, par type de question</Text>
+            </HStack>
+            <Text fontSize="12px" color={T.textSecondary} mb={3} lineHeight="1.6">
+              « Bon comportement » = a-t-il fait ce qu’il fallait : <b>répondre</b> quand la réponse existe,
+              <b> exposer la contradiction / corriger le faux présupposé / connaître la version en vigueur</b> quand c’est le cas.
+              C’est ici que se voit la valeur du graphe — l’exact_id du tableau suivant est trompeur sur ces familles.
+            </Text>
+            <Box overflowX="auto">
+              <Table size="sm" variant="unstyled">
+                <Thead>
+                  <Tr borderBottom="1px solid" borderColor={T.borderSubtle}>
+                    <Th color={T.textMuted} fontSize="10px" py={2} textTransform="none">Type de question</Th>
+                    <Th color={T.textMuted} fontSize="10px" py={2} isNumeric>n</Th>
+                    <Th color={T.accentOsm} fontSize="10px" py={2} isNumeric>OSMOSIS (KG)</Th>
+                    <Th color={T.textMuted} fontSize="10px" py={2} isNumeric textTransform="none">RAG classique</Th>
+                    <Th color={T.textMuted} fontSize="10px" py={2} isNumeric>Écart</Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {rows.map(({ t, o, r, isTrap }) => {
+                    const d = (o!.rate - r!.rate)
+                    return (
+                      <Tr key={t} borderBottom="1px solid" borderColor={T.borderSubtle}>
+                        <Td py={2}>
+                          <InfoLabel text={typeLabel(t)} help={(isTrap ? 'Question piège/hors-périmètre — bien faire = corriger ou s’abstenir. ' : 'Question à réponse attendue — bien faire = répondre. ') + typeHelp(t)} fontSize="12px" fontWeight="600" color={T.textSecondary} />
+                        </Td>
+                        <Td py={2} isNumeric><Text fontSize="11px" color={T.textMuted}>{o!.n}</Text></Td>
+                        <Td py={2} isNumeric><Text fontSize="13px" fontWeight="700" fontFamily="'Fira Code', monospace" color={scoreColor(o!.rate)}>{pct(o!.rate)}</Text></Td>
+                        <Td py={2} isNumeric><Text fontSize="13px" fontFamily="'Fira Code', monospace" color={scoreColor(r!.rate)}>{pct(r!.rate)}</Text></Td>
+                        <Td py={2} isNumeric><Text fontSize="12px" fontWeight="700" fontFamily="'Fira Code', monospace" color={deltaColor(d)}>{fmtDeltaPp(d)}</Text></Td>
+                      </Tr>
+                    )
+                  })}
+                </Tbody>
+              </Table>
+            </Box>
+          </Card>
+        )
+      })()}
 
       {/* ── Famille 1 : questions avec une réponse attendue ── */}
       <Card>
