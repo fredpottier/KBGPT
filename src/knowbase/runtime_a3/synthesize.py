@@ -147,6 +147,15 @@ RULES (NON-NEGOTIABLE):
 - Quote claims verbatim in `cited_claims[].claim_verbatim`. Do NOT paraphrase
   the source text. Paraphrasing for fluidity is OK in `answer_text`, but the
   verbatim field must be the exact source.
+- COMPLETENESS: produce a THOROUGH answer that USES EVERY relevant cited claim,
+  not only the single most direct one. When several claims bear on the question,
+  synthesize them all — cover each distinct aspect, value, condition, qualifier,
+  scope-limit, exception and cross-reference that the claims state. When ≥3 claims
+  are provided, prefer a structured answer (a one-line lead, then grouped
+  paragraphs or bullet points by aspect) rather than a single terse sentence.
+  This rule adds COVERAGE of the provided claims only — it NEVER licenses invented
+  content: every added detail must still trace to a cited claim (the grounding
+  rules above remain absolute).
 - Inline citation format: `[claim_id=<id>]` after each factual statement.
   Group multiple citations: `[claim_id=c_001][claim_id=c_002]`.
 - If sub_goals are uncovered (per input warning), surface them in
@@ -627,11 +636,18 @@ class Synthesizer:
         # P3.2 (29/05/2026) — top_k élargi pour les questions-liste : une réponse
         # multi-items (codes, objets, outils) était tronquée à 5 → on garde plus de
         # candidats pour couvrir tous les items. N'affecte PAS le factual atomique.
+        # Levier A complétude (09/06/2026) — le top_k non-liste à 5 rendait les
+        # réponses laconiques vs RAG (12 chunks). V6_SYNTH_TOP_K (défaut 10) élargit
+        # la matière VALIDÉE envoyée à la synthèse → couverture sans perte d'ancrage.
+        # Mettre "5" pour revenir au comportement historique.
         import os as _os
         is_list = any(
             sg.kind == "list_enumeration" for sg in inp.parse_output.sub_goals
         )
-        eff_top_k = int(_os.getenv("V6_LIST_TOP_K", "12")) if is_list else 5
+        eff_top_k = (
+            int(_os.getenv("V6_LIST_TOP_K", "12")) if is_list
+            else int(_os.getenv("V6_SYNTH_TOP_K", "10"))
+        )
         if top_k_override is not None:
             eff_top_k = top_k_override
 
