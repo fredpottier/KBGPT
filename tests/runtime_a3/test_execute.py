@@ -26,6 +26,8 @@ from knowbase.runtime_a3.execute import (
     CYPHER_CONFLICT_PENDING,
     Executor,
     execute,
+    _escape_lucene_query,
+    _extract_query_identifiers,
 )
 from knowbase.runtime_a3.plan import plan
 from knowbase.runtime_a3.schemas import (
@@ -716,3 +718,46 @@ class TestDomainAgnostic:
                      "gdpr", "eu 2021"]
         for token in forbidden:
             assert token not in src, f"Corpus-specific token '{token}' found in execute.py"
+
+
+# ============================================================================
+# #435 / #436 — préservation des identifiants pour BM25 (escaping + extraction)
+# ============================================================================
+
+
+def test_extract_query_identifiers_keeps_codes_drops_common_words():
+    ids = _extract_query_identifiers(
+        "Quelle valeur HIC impose AC 25.562-1C pour le test 16g et ETSO-C127c ?")
+    low = {i.lower() for i in ids}
+    assert "25.562-1c" in low          # code avec point/tiret
+    assert "16g" in low                # valeur+unité
+    assert "etso-c127c" in low         # ref normative
+    assert "hic" in low                # all-caps ≥3
+    assert "ac" not in low             # all-caps <3 → ignoré
+    assert "quelle" not in low and "test" not in low  # mots banals ignorés
+
+
+def test_escape_lucene_query_neutralizes_special_chars():
+    esc = _escape_lucene_query("ref 25.853(b) and /SAPAPO/OM03 (2021/821)")
+    # parenthèses et slashes — qui cassent le parser Lucene — sont échappés
+    assert r"\(" in esc and r"\)" in esc
+    assert r"\/" in esc
+    # le contenu littéral reste présent (juste précédé de backslash)
+    assert "25.853" in esc and "SAPAPO" in esc and "2021" in esc
+
+
+def test_ensure_question_identifiers_restores_lost_ids():
+    # query reconstruite (aspect-emphasis) ayant perdu le code de la question
+    restored = Executor._ensure_question_identifiers(
+        "head injury criterion threshold", "What HIC does AC 25.562-1C set?")
+    assert "25.562-1C" in restored      # identifiant ré-injecté
+    # no-op si déjà présent
+    same = Executor._ensure_question_identifiers(
+        "limit for 25.562-1C", "value of 25.562-1C")
+    assert same.count("25.562-1C") == 1
+
+
+def test_ensure_question_identifiers_flag_off(monkeypatch):
+    monkeypatch.setenv("V6_QUERY_PRESERVE_IDS", "0")
+    q = Executor._ensure_question_identifiers("rebuilt query", "about 25.562-1C")
+    assert q == "rebuilt query"         # flag off → inchangé
