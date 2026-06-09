@@ -74,6 +74,10 @@ Critical checks before answering CONFIRMED:
    rule? (If yes → COMPLEMENTARY.)
 2. Do the statements share the same applicability conditions (same test case, same object,
    same configuration, same timeframe)? (If no → DIFFERENT_SCOPE.)
+   In particular, check the "effective from" dates and any "effective <date>" wording inside
+   the statements: if one statement is a HISTORICAL/superseded version (much earlier effective
+   date, or quoting an older amendment) and the other is the current rule, they describe the
+   SAME requirement at DIFFERENT times → DIFFERENT_SCOPE, not a contradiction.
 3. Would an expert following document A actually DO something different than following
    document B in the same situation? (If no → not CONFIRMED.)
 
@@ -82,9 +86,12 @@ Return STRICT JSON: {"verdict": "<one of the five>", "reason": "<2-3 sentences, 
 
 def _build_user_prompt(pair: Dict[str, Any], max_passage: int = 2200) -> str:
     def _block(side: str) -> str:
+        vf = pair.get(f"valid_from_{side.lower()}")
+        vf_line = f"effective from: {vf}\n" if vf else ""
         return (
             f"STATEMENT {side} (document: {pair[f'doc_{side.lower()}']}, "
             f"page {pair.get(f'page_{side.lower()}')}):\n"
+            f"{vf_line}"
             f"\"{pair[f'text_{side.lower()}']}\"\n\n"
             f"FULL SOURCE PASSAGE {side}:\n"
             f"{(pair.get(f'passage_{side.lower()}') or '(passage unavailable)')[:max_passage]}\n"
@@ -124,8 +131,10 @@ MATCH (a:Claim {tenant_id: $tenant_id})-[r:CONTRADICTS]->(b:Claim {tenant_id: $t
 WHERE $force OR r.adjudication IS NULL
 RETURN a.claim_id AS a_id, a.text AS text_a, a.passage_text AS passage_a,
        a.doc_id AS doc_a, a.page_no AS page_a,
+       substring(toString(a.valid_from), 0, 10) AS valid_from_a,
        b.claim_id AS b_id, b.text AS text_b, b.passage_text AS passage_b,
-       b.doc_id AS doc_b, b.page_no AS page_b
+       b.doc_id AS doc_b, b.page_no AS page_b,
+       substring(toString(b.valid_from), 0, 10) AS valid_from_b
 """
 
 _WRITE_CYPHER = """
