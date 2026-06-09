@@ -19,7 +19,14 @@ neo4j>=5.14.0
 # === Embeddings et Reranking (GPU CUDA 12.0) ===
 # PyTorch avec support CUDA 12.0 pour RTX 5070 Ti
 # Installation via index PyTorch officiel
-torch --index-url https://download.pytorch.org/whl/cu120
+# ⚠️ torch ÉPINGLÉ à 2.11.0 (09/06/2026). Non épinglé, le rebuild a tiré torch 2.12.0
+# qui exige Python 3.12 (torch._dynamo utilise sys.get_int_max_str_digits, absent en
+# 3.11) → AttributeError au chargement de transformers.modeling_utils → l'import
+# `from transformers import PreTrainedModel` casse au boot du worker/app. 2.11.0 est la
+# dernière compatible Python 3.11 (= version de la dernière image qui tournait, avril).
+# transformers reste NON épinglé : docling-ibm-models interdit 5.0-5.3, et 5.10.x marche
+# une fois torch correct. Faible fan-in de torch → pas de resolution-too-deep.
+torch==2.11.0 --index-url https://download.pytorch.org/whl/cu120
 torchvision --index-url https://download.pytorch.org/whl/cu120
 sentence-transformers
 transformers
