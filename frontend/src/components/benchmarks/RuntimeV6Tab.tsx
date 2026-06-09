@@ -58,6 +58,8 @@ interface A38Run {
   total_duration_s?: number | null
   exact_id_recall_mean?: number | null
   n_with_expected_ids?: number | null
+  key_term_recall_mean?: number | null
+  n_with_key_terms?: number | null
   abstention_correct_rate?: number | null
   exact_id_recall_per_type?: Record<string, PerTypeStat>
   abstention_rate_per_type?: Record<string, { n: number; rate: number }>
@@ -421,6 +423,7 @@ export function RuntimeV6Tab() {
               <Tbody>
                 {([
                   ['Précision des références', 'Donne-t-il les bons codes / identifiants ?', osm.exact_id_recall_mean, cmpRun.exact_id_recall_mean],
+                  ['Phrases-clés citées', 'Part des phrases-clés attendues présentes dans la réponse (mesure exacte). Sur une contradiction, exige de citer LES DEUX valeurs en conflit — un système qui n’en ramène qu’une marque la moitié.', osm.key_term_recall_mean, cmpRun.key_term_recall_mean],
                   ['Honnêteté', 'Répond s’il sait, s’abstient sinon', osm.abstention_correct_rate, cmpRun.abstention_correct_rate],
                   ['Qualité globale (IA)', 'Jugée par une IA — indicatif', osm.C1_mean, cmpRun.C1_mean],
                 ] as [string, string, number | null | undefined, number | null | undefined][]).map(([label, help, o, r]) => {
