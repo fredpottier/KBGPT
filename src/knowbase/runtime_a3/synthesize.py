@@ -721,7 +721,11 @@ class Synthesizer:
                         # stable). Reproductibilité = condition de confiance.
                         temperature=0.0,
                         seed=1234,
-                        max_tokens=1500,
+                        # Budget élargi (09/06) : avec la complétude (top_k=10 → 10
+                        # verbatims dans cited_claims + réponse structurée plus longue),
+                        # 1500 tronquait le JSON en plein milieu → "Unterminated string"
+                        # → parse KO → fallback gabarit. V6_SYNTH_MAX_TOKENS (défaut 3000).
+                        max_tokens=int(os.getenv("V6_SYNTH_MAX_TOKENS", "3000")),
                     )
             self._llm_client = _RouterClient()
         return self._llm_client
