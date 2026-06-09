@@ -159,6 +159,66 @@ def test_parse_json_with_markdown_fence():
     assert _parse_json('```json\n{"status": "OK"}\n```') == {"status": "OK"}
 
 
+# ---------------------------------------------------------------------------
+# #428 — pré-gate cheap (défaut OFF)
+# ---------------------------------------------------------------------------
+
+class _CountingLLM:
+    """Compte les appels LLM ; renvoie un OK trivial."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def complete(self, system: str, user: str) -> str:
+        self.calls += 1
+        if "extract the PRESUPPOSITIONS" in system:
+            return json.dumps({"presuppositions": ["x exists"], "focal_entity": "x"})
+        return json.dumps({"status": "OK"})
+
+
+def test_gate_recall_keeps_false_premise_shaped_questions():
+    """Le gate HAUT-RECALL ne doit JAMAIS sauter une question à présupposé vérifiable."""
+    keep = [
+        "Comment activer le module Quantum Cache de ProductX ?",
+        "Why does AC 25.562-1C mandate an 18g downward test?",
+        "Quelle est la valeur HIC dans le test 18g latéral ?",
+        "Quelle transaction permet de lancer le Labeling Workbench ?",
+        "Pourquoi le harnais 5 points est-il obligatoire ?",
+        "Explique le rôle de la norme ETSO-C127a.",
+    ]
+    for q in keep:
+        assert PremiseVerifier._has_checkable_presupposition(q) is True, q
+
+
+def test_gate_skips_pure_open_questions():
+    for q in ["quelles sont les exigences générales ?", "explique l'approche de test",
+              "what is the testing process?", "résume les principes"]:
+        assert PremiseVerifier._has_checkable_presupposition(q) is False, q
+
+
+def test_gate_off_by_default_runs_llm(monkeypatch):
+    monkeypatch.delenv("V6_PREMISE_GATE", raising=False)
+    llm = _CountingLLM()
+    _make(llm).verify("explique l'approche de test")  # gatable, mais gate OFF
+    assert llm.calls >= 1  # le verifier tourne quand même
+
+
+def test_gate_on_skips_llm_for_open_question(monkeypatch):
+    monkeypatch.setenv("V6_PREMISE_GATE", "1")
+    llm = _CountingLLM()
+    r = _make(llm).verify("explique l'approche de test")
+    assert llm.calls == 0  # AUCUN appel LLM
+    assert r.status == "OK"
+    assert r.reasoning == "gated_no_checkable_presupposition"
+
+
+def test_gate_on_still_runs_llm_for_checkable_question(monkeypatch):
+    monkeypatch.setenv("V6_PREMISE_GATE", "1")
+    llm = _CountingLLM()
+    _make(llm).verify("Pourquoi le harnais 5 points est-il obligatoire ?")
+    assert llm.calls >= 1  # présupposé vérifiable → on ne saute pas
+
+
 def test_parse_json_embedded_object():
     assert _parse_json('blah {"status": "OK"} trailing')["status"] == "OK"
 

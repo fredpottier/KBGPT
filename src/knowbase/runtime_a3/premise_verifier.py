@@ -337,6 +337,58 @@ class PremiseVerifier:
         raw = self._get_llm().complete(_VERIFY_SYSTEM, user)
         return _parse_json(raw) or {}
 
+    # -- gating (#428) ---------------------------------------------------
+    @staticmethod
+    def _has_checkable_presupposition(question: str) -> bool:
+        """Pré-gate CHEAP (aucun appel LLM) — la question porte-t-elle un présupposé
+        vérifiable ?
+
+        #428 : le PremiseVerifier coûte 2 appels LLM/question. On peut sauter les 2
+        sur les questions qui ne portent AUCUN présupposé factuel spécifique (pures
+        questions de définition/ouverture : « quelles sont les exigences générales ? »,
+        « explique l'approche de test »). Un faux présupposé, lui, nomme TOUJOURS soit
+        une entité spécifique (identifiant, nom propre), soit une relation assertée
+        (cadrage causal/existentiel). Le gate est donc HAUT-RECALL : il ne saute que
+        l'absence de tout signal — jamais une question potentiellement faux-présupposée.
+
+        Domain-agnostic strict : aucun token corpus-spécifique.
+        """
+        q = (question or "").strip()
+        if not q:
+            return False
+        # 1) identifiant : token avec un chiffre, ou tout-majuscules ≥3, ou §/réf
+        for tok in re.findall(r"[A-Za-z0-9][\w.§/-]*", q):
+            if any(ch.isdigit() for ch in tok):
+                return True
+            core = tok.strip(".-/§")
+            if len(core) >= 3 and core.isupper():
+                return True
+        if "§" in q:
+            return True
+        # 2) cadrage existentiel / causal / contrastif (FR + EN) → relation assertée
+        ql = q.lower()
+        _FRAMING = (
+            "why", "pourquoi", "warum",
+            "exist", "existe", "existi",  # exists/existe/existing/existait
+            "mandate", "mandator", "require", "requis", "oblig", "impos",
+            "must ", "doit ", "doive", "shall ",
+            "instead of", "au lieu de", "rather than", "plutôt que",
+        )
+        if any(k in ql for k in _FRAMING):
+            return True
+        # 3) nom propre (majuscule hors début de phrase / après ponctuation) → entité nommée
+        words = re.split(r"\s+", q)
+        for i, w in enumerate(words):
+            if i == 0:
+                continue
+            prev = words[i - 1]
+            if prev and prev[-1] in ".!?:":
+                continue
+            wc = w.strip("\"'(),.;:?!")
+            if len(wc) >= 2 and wc[0].isupper() and not wc.isupper():
+                return True
+        return False
+
     # -- public ----------------------------------------------------------
     def verify(self, question: str, pipeline_evidence: Optional[List[str]] = None) -> PremiseResult:
         """Retourne un PremiseResult. Fail-open OK sur toute erreur.
@@ -349,6 +401,12 @@ class PremiseVerifier:
         t0 = time.perf_counter()
         if not question or not question.strip():
             return PremiseResult("OK", duration_s=time.perf_counter() - t0)
+
+        # #428 — gate CHEAP optionnel (défaut OFF). N'agit qu'une fois prouvé non
+        # régressif sur le sous-ensemble false_premise (point faible connu à ~60%).
+        if _gate_enabled() and not self._has_checkable_presupposition(question):
+            return PremiseResult("OK", reasoning="gated_no_checkable_presupposition",
+                                 duration_s=time.perf_counter() - t0)
 
         try:
             presuppositions, focal_entity = self._extract_presuppositions(question)
@@ -449,3 +507,12 @@ def is_enabled() -> bool:
     """Toggle env. Défaut ON (activé 30/05/2026 après bench full 50q : false_premise
     +40pp, exact_id_recall flat). Mettre "0" pour désactiver."""
     return os.getenv("V6_PREMISE_VERIFIER_ENABLED", "1") == "1"
+
+
+def _gate_enabled() -> bool:
+    """Toggle du pré-gate cheap #428. Défaut OFF : tant que l'A/B sur le sous-ensemble
+    false_premise (point faible ~60%) n'a pas prouvé l'absence de régression, on
+    n'économise pas les 2 appels LLM au risque de rater une détection. Mettre "1" pour
+    activer le gate (saute le PremiseVerifier sur les questions sans présupposé
+    vérifiable : pures définitions/ouvertures)."""
+    return os.getenv("V6_PREMISE_GATE", "0") == "1"
