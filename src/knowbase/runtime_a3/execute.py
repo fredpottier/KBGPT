@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -64,6 +65,28 @@ def _escape_lucene_query(text: str) -> str:
         else:
             out_chars.append(ch)
     return "".join(out_chars).strip()
+
+
+_ID_TOKEN_RE = re.compile(r"[A-Za-z0-9][\w.§/-]*")
+
+
+def _extract_query_identifiers(text: str) -> List[str]:
+    """Tokens « code-like » d'une question (ex 25.562, 16g, ETSO-C127c, 0.08,
+    AS6316, TSO-C127) pour le boost exact-substring du RRF (#435). Conservateur :
+    on ne retient que les tokens contenant un chiffre OU all-caps ≥3 (évite de
+    booster sur des mots banals)."""
+    out: List[str] = []
+    seen = set()
+    for tok in _ID_TOKEN_RE.findall(text or ""):
+        t = tok.strip(".,;:")
+        if len(t) < 2:
+            continue
+        has_digit = any(c.isdigit() for c in t)
+        is_caps = t.isupper() and len(t) >= 3
+        if (has_digit or is_caps) and t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t)
+    return out
 
 
 # ============================================================================
@@ -118,7 +141,7 @@ WHERE c.tenant_id = $tenant_id
         c.invalidated_at IS NULL
         AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
         AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))))
-RETURN c.claim_id AS claim_id, bm25_score AS score
+RETURN c.claim_id AS claim_id, bm25_score AS score, c.text AS text
 ORDER BY bm25_score DESC
 LIMIT 50
 """
@@ -131,7 +154,7 @@ WHERE c.tenant_id = $tenant_id
         c.invalidated_at IS NULL
         AND (c.valid_from IS NULL OR date(c.valid_from) <= date($as_of))
         AND (c.valid_until IS NULL OR date(c.valid_until) >= date($as_of))))
-RETURN c.claim_id AS claim_id, vec_score AS score
+RETURN c.claim_id AS claim_id, vec_score AS score, c.text AS text
 ORDER BY vec_score DESC
 """
 
@@ -392,6 +415,21 @@ class Executor:
         if not parts:
             return question
         return " ".join(parts).strip()
+
+    @staticmethod
+    def _ensure_question_identifiers(query_text: str, question: str) -> str:
+        """#436 — garantit que les identifiants verbatim de la question (codes,
+        refs §, versions, valeurs+unité) figurent dans la requête BM25, même
+        quand celle-ci est reconstruite depuis les champs parsés (sub_goal /
+        aspect-emphasis) et a pu les perdre. Append les identifiants manquants.
+        No-op en mode `question` (déjà présents). Flag V6_QUERY_PRESERVE_IDS (on)."""
+        if os.getenv("V6_QUERY_PRESERVE_IDS", "1") != "1":
+            return query_text
+        q = query_text or ""
+        ql = q.lower()
+        missing = [t for t in _extract_query_identifiers(question or "")
+                   if t.lower() not in ql]
+        return (q + " " + " ".join(missing)).strip() if missing else q
 
     def _aspect_emphasized_query(self, tc: "ToolCall") -> Optional[str]:
         """Requête EMPHASÉE sur l'aspect pour les questions multi-aspect.
@@ -672,9 +710,10 @@ class Executor:
                 # on construit query Lucene depuis ces champs → recherche plus ciblée
                 # qu'avec la question complète. Fallback question si sub_goal vide.
                 # Multi-aspect → requête emphasée sur l'aspect ; sinon subject+aspect habituel.
-                resolved_params["query_text"] = (
+                resolved_params["query_text"] = self._ensure_question_identifiers(
                     self._aspect_emphasized_query(tc)
-                    or self._build_query_text_for_call(tc, parse_input)
+                    or self._build_query_text_for_call(tc, parse_input),
+                    parse_input.question,
                 )
                 resolved_params["include_history"] = self._include_history_for_call(tc)
                 claims, sections = self._call_kg_claims(resolved_params)
@@ -689,9 +728,10 @@ class Executor:
                 # EXCEPTION multi-aspect : si ≥2 sous-buts partagent le subject, la question
                 # entière est subject-dominée et tous les aspects récupèrent les mêmes claims
                 # génériques → on emphase l'aspect du sous-but (cf _aspect_emphasized_query).
-                resolved_params["query_text"] = (
+                resolved_params["query_text"] = self._ensure_question_identifiers(
                     self._aspect_emphasized_query(tc)
-                    or (parse_input.question or "").strip()
+                    or (parse_input.question or "").strip(),
+                    parse_input.question,
                 )
                 resolved_params["include_history"] = self._include_history_for_call(tc)
                 claims, sections = self._call_kg_claims_list(resolved_params)
@@ -959,14 +999,34 @@ class Executor:
             vec_rows = []
 
         # 3. RRF fusion k=60 (paramètre standard littérature)
+        # #435 — pondération BM25/vector + boost exact-substring d'identifiants,
+        # tous deux derrière flags (défaut = comportement historique strict :
+        # poids 1.0/1.0, boost 0.0 → aucune régression tant que non tuné).
         rrf_k = 60
+        w_bm25 = float(os.getenv("V6_RRF_W_BM25", "1.0"))
+        w_vec = float(os.getenv("V6_RRF_W_VEC", "1.0"))
+        exact_boost = float(os.getenv("V6_RRF_EXACT_BOOST", "0.0"))
+        id_tokens = _extract_query_identifiers(query_text) if exact_boost > 0 else []
+
         scores: Dict[str, float] = {}
+        texts: Dict[str, str] = {}
         for rank_i, r in enumerate(bm25_rows):
             cid = r["claim_id"]
-            scores[cid] = scores.get(cid, 0.0) + 1.0 / (rrf_k + rank_i + 1)
+            scores[cid] = scores.get(cid, 0.0) + w_bm25 / (rrf_k + rank_i + 1)
+            if r.get("text"):
+                texts[cid] = r["text"]
         for rank_i, r in enumerate(vec_rows):
             cid = r["claim_id"]
-            scores[cid] = scores.get(cid, 0.0) + 1.0 / (rrf_k + rank_i + 1)
+            scores[cid] = scores.get(cid, 0.0) + w_vec / (rrf_k + rank_i + 1)
+            if r.get("text"):
+                texts.setdefault(cid, r["text"])
+        # Boost les candidats dont le texte contient un identifiant de la question
+        # (exact substring) → remonte les claims porteurs du code exact attendu.
+        if exact_boost > 0 and id_tokens:
+            for cid, txt in texts.items():
+                tl = (txt or "").lower()
+                if any(tok.lower() in tl for tok in id_tokens):
+                    scores[cid] = scores.get(cid, 0.0) + exact_boost
         # Top-50 par score RRF descendant
         sorted_ids = [cid for cid, _ in sorted(scores.items(), key=lambda x: -x[1])[:50]]
         if not sorted_ids:
