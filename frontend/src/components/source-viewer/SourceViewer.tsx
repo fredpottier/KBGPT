@@ -56,17 +56,12 @@ async function loadPdfjs(): Promise<any> {
 }
 
 function normalize(s: string): string {
-  return (s || '').toLowerCase().replace(/\s+/g, ' ').trim()
-}
-
-// Tokens significatifs de la citation (≥4 chars OU contient un chiffre) pour matcher
-// les fragments du text-layer (qui ne s'alignent pas sur les bornes de la citation).
-function quoteTokens(quote: string): Set<string> {
-  const norm = normalize(quote)
-  const toks = norm.split(/[^a-z0-9§.\-/]+/i).filter(
-    (t) => t.length >= 4 || /\d/.test(t),
-  )
-  return new Set(toks)
+  return (s || '')
+    .toLowerCase()
+    .replace(/[‘’ʼ`´]/g, "'") // apostrophes typographiques → '
+    .replace(/[“”]/g, '"')                   // guillemets courbes → "
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 export default function SourceViewer({
@@ -159,33 +154,53 @@ export default function SourceViewer({
         await page.render({ canvasContext: ctx, viewport }).promise
         if (cancelled) return
 
-        // Surlignage : fragments du text-layer matchant les tokens de la citation.
+        // Surlignage : on retrouve la citation comme SOUS-CHAÎNE CONTIGUË du text-layer
+        // (et non par tokens épars, qui surlignaient les mots fréquents partout sur la
+        // page). On reconstruit la chaîne de la page + une map des offsets par fragment,
+        // on localise la citation, et on ne surligne que les fragments chevauchant le span.
         overlay.innerHTML = ''
         let hits = 0
         const quote = target?.quote || ''
         if (quote) {
-          const tokens = quoteTokens(quote)
-          const normQuote = normalize(quote)
           const tc = await page.getTextContent()
+          let concat = ''
+          const ranges: { start: number; end: number; item: any }[] = []
           for (const item of tc.items as any[]) {
-            const str = normalize(item.str || '')
-            if (str.length < 2) continue
-            // match si le fragment est dans la citation, ou partage un token significatif
-            const inQuote = normQuote.includes(str) && str.length >= 3
-            const sharesTok = !inQuote && str.split(' ').some((w) => tokens.has(w))
-            if (!inQuote && !sharesTok) continue
-            const tx = pdfjs.Util.transform(viewport.transform, item.transform)
-            const fontH = Math.hypot(tx[2], tx[3]) || 10
-            const w = (item.width || 0) * scale
-            const left = tx[4]
-            const top = tx[5] - fontH
-            const mark = document.createElement('div')
-            mark.style.cssText =
-              `position:absolute;left:${left}px;top:${top}px;width:${w}px;` +
-              `height:${fontH * 1.15}px;background:rgba(255,213,0,0.38);` +
-              `border-radius:2px;pointer-events:none;mix-blend-mode:multiply;`
-            overlay.appendChild(mark)
-            hits++
+            const ns = normalize(item.str || '')
+            if (!ns) continue
+            const start = concat.length
+            concat += ns
+            ranges.push({ start, end: concat.length, item })
+            concat += ' ' // séparateur inter-fragments
+          }
+          let nq = normalize(quote)
+          let mStart = concat.indexOf(nq)
+          if (mStart < 0) {
+            // tolérance : retire la ponctuation de tête/queue de la citation
+            const stripped = nq.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')
+            if (stripped && stripped !== nq) {
+              mStart = concat.indexOf(stripped)
+              if (mStart >= 0) nq = stripped
+            }
+          }
+          if (mStart >= 0) {
+            const mEnd = mStart + nq.length
+            for (const r of ranges) {
+              if (r.end <= mStart || r.start >= mEnd) continue // hors du span
+              const item = r.item
+              const tx = pdfjs.Util.transform(viewport.transform, item.transform)
+              const fontH = Math.hypot(tx[2], tx[3]) || 10
+              const w = (item.width || 0) * scale
+              const left = tx[4]
+              const top = tx[5] - fontH
+              const mark = document.createElement('div')
+              mark.style.cssText =
+                `position:absolute;left:${left}px;top:${top}px;width:${w}px;` +
+                `height:${fontH * 1.15}px;background:rgba(255,213,0,0.42);` +
+                `border-radius:2px;pointer-events:none;mix-blend-mode:multiply;`
+              overlay.appendChild(mark)
+              hits++
+            }
           }
         }
         if (!cancelled) setNHighlights(hits)
@@ -217,7 +232,9 @@ export default function SourceViewer({
           </Flex>
           {target?.quote ? (
             <Text fontSize="11px" color="text.secondary" fontWeight="normal" mt={1} noOfLines={2}>
-              Span recherché : « {target.quote} » {nHighlights > 0 ? `· ${nHighlights} fragment(s) surligné(s)` : ''}
+              Span recherché : « {target.quote} » {nHighlights > 0
+                ? '· span surligné'
+                : '· non localisé exactement sur cette page'}
             </Text>
           ) : null}
         </ModalHeader>
