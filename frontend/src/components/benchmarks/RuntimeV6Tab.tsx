@@ -493,9 +493,11 @@ export function RuntimeV6Tab() {
               <Text fontSize="sm" fontWeight="800" color={T.textPrimary}>L’apport du KG, par type de question</Text>
             </HStack>
             <Text fontSize="12px" color={T.textSecondary} mb={3} lineHeight="1.6">
-              Questions <b>ayant une vraie réponse</b> : « bien faire » = <b>répondre</b> correctement (exposer la
-              contradiction, raisonner sur plusieurs sources, connaître la version en vigueur) plutôt que s’abstenir.
-              C’est ici que se voit la valeur du graphe — l’exact_id du tableau suivant est trompeur sur ces familles.
+              Questions <b>ayant une vraie réponse</b>. Ce qu’on mesure ici : le système <b>ose-t-il répondre</b> (au lieu
+              de s’abstenir à tort) ? — <b>pas</b> si la réponse est juste : ça, c’est la « Qualité IA » du tableau
+              suivant. C’est le différenciateur du graphe : le RAG s’abstient quand aucun extrait ne contient toute la
+              réponse (comparer deux sources, suivre une évolution), là où le graphe a déjà relié les pièces et peut
+              répondre. Un écart positif = OSMOSIS répond là où le RAG renonce.
               <Text as="span" color={T.textMuted}> (Les questions pièges / hors-périmètre, qui s’interprètent à l’inverse,
               sont traitées dans la carte « Équilibre » ci-dessous.)</Text>
             </Text>
@@ -505,8 +507,8 @@ export function RuntimeV6Tab() {
                   <Tr borderBottom="1px solid" borderColor={T.borderSubtle}>
                     <Th color={T.textMuted} fontSize="10px" py={2} textTransform="none">Type de question</Th>
                     <Th color={T.textMuted} fontSize="10px" py={2} isNumeric>n</Th>
-                    <Th color={T.accentOsm} fontSize="10px" py={2} isNumeric>OSMOSIS (KG)</Th>
-                    <Th color={T.textMuted} fontSize="10px" py={2} isNumeric textTransform="none">RAG classique</Th>
+                    <Th color={T.accentOsm} fontSize="10px" py={2} isNumeric textTransform="none">Ose répondre (OSMOSIS)</Th>
+                    <Th color={T.textMuted} fontSize="10px" py={2} isNumeric textTransform="none">(RAG classique)</Th>
                     <Th color={T.textMuted} fontSize="10px" py={2} isNumeric>Écart</Th>
                   </Tr>
                 </Thead>
@@ -516,7 +518,7 @@ export function RuntimeV6Tab() {
                     return (
                       <Tr key={t} borderBottom="1px solid" borderColor={T.borderSubtle}>
                         <Td py={2}>
-                          <InfoLabel text={typeLabel(t)} help={(isTrap ? 'Question piège/hors-périmètre — bien faire = corriger ou s’abstenir. ' : 'Question à réponse attendue — bien faire = répondre. ') + typeHelp(t)} fontSize="12px" fontWeight="600" color={T.textSecondary} />
+                          <InfoLabel text={typeLabel(t)} help={(isTrap ? 'Question piège/hors-périmètre — bien faire = corriger ou s’abstenir. ' : 'Question à réponse attendue — ici on mesure « ose répondre » (1 − abstention), pas la justesse (voir Qualité IA). ') + typeHelp(t)} fontSize="12px" fontWeight="600" color={T.textSecondary} />
                         </Td>
                         <Td py={2} isNumeric><Text fontSize="11px" color={T.textMuted}>{o!.n}</Text></Td>
                         <Td py={2} isNumeric><Text fontSize="13px" fontWeight="700" fontFamily="'Fira Code', monospace" color={scoreColor(o!.rate)}>{pct(o!.rate)}</Text></Td>
