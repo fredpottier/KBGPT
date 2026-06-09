@@ -465,15 +465,17 @@ export function RuntimeV6Tab() {
            valeur peut « scorer » alors que le bon comportement est d'exposer les
            DEUX côtés. Ici on mesure : a-t-il fait ce qu'il fallait ? */}
       {cmpIsRag && (() => {
-        const types = sortTypes(Array.from(new Set([
-          ...Object.keys(osm?.abstention_rate_per_type ?? {}),
-          ...Object.keys(osm?.handled_rate_per_type ?? {}),
-        ])))
+        // UNIQUEMENT les questions à réponse attendue : « bien faire = répondre ».
+        // Les pièges (false_premise/unanswerable) s'interprètent à l'inverse
+        // (un système qui refuse tout les « réussit ») → ils fausseraient cette
+        // lecture ; ils sont traités dans la carte « Équilibre » ci-dessous.
+        const types = sortTypes(Object.keys(osm?.abstention_rate_per_type ?? {}))
+          .filter(t => ANSWER_TYPES.includes(t))
         const rows = types.map(t => ({
           t,
           o: correctBehaviorByType(osm, t),
           r: correctBehaviorByType(rag, t),
-          isTrap: NOANSWER_TYPES.includes(t),
+          isTrap: false,
         })).filter(x => x.o && x.r)
         if (!rows.length) return null
         return (
@@ -483,9 +485,11 @@ export function RuntimeV6Tab() {
               <Text fontSize="sm" fontWeight="800" color={T.textPrimary}>L’apport du KG, par type de question</Text>
             </HStack>
             <Text fontSize="12px" color={T.textSecondary} mb={3} lineHeight="1.6">
-              « Bon comportement » = a-t-il fait ce qu’il fallait : <b>répondre</b> quand la réponse existe,
-              <b> exposer la contradiction / corriger le faux présupposé / connaître la version en vigueur</b> quand c’est le cas.
+              Questions <b>ayant une vraie réponse</b> : « bien faire » = <b>répondre</b> correctement (exposer la
+              contradiction, raisonner sur plusieurs sources, connaître la version en vigueur) plutôt que s’abstenir.
               C’est ici que se voit la valeur du graphe — l’exact_id du tableau suivant est trompeur sur ces familles.
+              <Text as="span" color={T.textMuted}> (Les questions pièges / hors-périmètre, qui s’interprètent à l’inverse,
+              sont traitées dans la carte « Équilibre » ci-dessous.)</Text>
             </Text>
             <Box overflowX="auto">
               <Table size="sm" variant="unstyled">
