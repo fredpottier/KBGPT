@@ -38,10 +38,15 @@ export interface SourceViewerTarget {
 }
 
 // Cache du module pdf.js (chargé une seule fois pour toute la session).
+// Import masqué via `new Function` : garantit que le bundler (webpack/Next) ne
+// tente PAS de résoudre l'URL CDN au build — l'import est purement runtime navigateur.
+const _dynamicImport: (url: string) => Promise<any> = new Function(
+  'url', 'return import(url)',
+) as any
 let _pdfjsPromise: Promise<any> | null = null
 async function loadPdfjs(): Promise<any> {
   if (!_pdfjsPromise) {
-    _pdfjsPromise = import(/* webpackIgnore: true */ PDFJS_ESM).then((m: any) => {
+    _pdfjsPromise = _dynamicImport(PDFJS_ESM).then((m: any) => {
       const lib = m.default ?? m
       lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER
       return lib
