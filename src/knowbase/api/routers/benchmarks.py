@@ -886,6 +886,11 @@ def _a38_summary(filepath: Path) -> dict[str, Any] | None:
         "n_with_expected_ids": agg.get("n_with_expected_ids"),
         "abstention_correct_rate": agg.get("abstention_correct_rate"),
         "exact_id_recall_per_type": agg.get("exact_id_recall_per_type", {}),
+        # key_term_recall (#442) — recall des phrases-clés, ancre déterministe
+        # pour les types sans identifiant + signal « cite les deux côtés ».
+        "key_term_recall_mean": agg.get("key_term_recall_mean"),
+        "n_with_key_terms": agg.get("n_with_key_terms"),
+        "key_term_recall_per_type": agg.get("key_term_recall_per_type", {}),
         "abstention_rate_per_type": abstention_rate_per_type,
         "handled_rate_per_type": handled_rate_per_type,
         # Juge LLM (bruité, secondaire)

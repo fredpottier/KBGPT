@@ -129,6 +129,8 @@ def run_bench_rag(rag: ClassicRAG, gold_path: Path, limit: Optional[int],
             "judge_used_fallback": judge.get("used_fallback", False),
             "exact_id_recall": det["exact_id_recall"],
             "n_expected_ids": det["n_expected_ids"],
+            "key_term_recall": det.get("key_term_recall"),
+            "n_key_terms": det.get("n_key_terms", 0),
             "abstention_correct": det["abstention_correct"],
         })
     return results

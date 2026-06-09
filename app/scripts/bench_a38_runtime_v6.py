@@ -312,6 +312,20 @@ def deterministic_metrics(q: Dict[str, Any], run: Dict[str, Any]) -> Dict[str, A
     else:
         exact_id_recall = None
 
+    # key_term_recall (#442) : recall des PHRASES-clés attendues par substring
+    # COMPLET (pas seulement les codes). Ancre déterministe pour les types sans
+    # identifiant (contextual/list) ET signal « a-t-il cité les deux côtés ? » sur
+    # comparison/contradiction (ex: « 3 inches » ET « 6 inches »). Préfère
+    # expected_key_terms, repli sur exact_identifiers (phrase entière).
+    key_terms = [str(k).strip() for k in
+                 (gt.get("expected_key_terms") or gt.get("exact_identifiers") or [])
+                 if str(k).strip()]
+    if key_terms:
+        kfound = [k for k in key_terms if k.lower() in answer]
+        key_term_recall = len(kfound) / len(key_terms)
+    else:
+        key_term_recall = None
+
     # abstention_correct : abstention OK ssi unanswerable ; sinon abstention = échec
     answerability = gt.get("answerability", "answerable")
     is_abstention = (run.get("mode") == "ABSTENTION")
@@ -323,6 +337,8 @@ def deterministic_metrics(q: Dict[str, Any], run: Dict[str, Any]) -> Dict[str, A
     return {
         "exact_id_recall": exact_id_recall,
         "n_expected_ids": len(codes),
+        "key_term_recall": key_term_recall,
+        "n_key_terms": len(key_terms),
         "abstention_correct": abstention_correct,
     }
 
@@ -417,6 +433,8 @@ def run_bench_50q(orch, gold_path: Path, limit: Optional[int], tenant_id: str = 
             # A1 — métriques déterministes (décisionnelles, anti-bruit juge)
             "exact_id_recall": det["exact_id_recall"],
             "n_expected_ids": det["n_expected_ids"],
+            "key_term_recall": det["key_term_recall"],
+            "n_key_terms": det["n_key_terms"],
             "abstention_correct": det["abstention_correct"],
         })
     return results
@@ -511,6 +529,19 @@ def aggregate_50q(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         t: {"n": len(v), "mean": statistics.mean(v)} for t, v in det_by_type.items()
     }
 
+    # key_term_recall (#442) — ancre déterministe sur phrases-clés (types sans
+    # identifiant + signal « cite-t-il les deux côtés » sur comparison/contradiction)
+    kt_recalls = [r["key_term_recall"] for r in results
+                  if r.get("key_term_recall") is not None]
+    key_term_recall_mean = statistics.mean(kt_recalls) if kt_recalls else None
+    kt_by_type: Dict[str, List[float]] = {}
+    for r in results:
+        if r.get("key_term_recall") is not None:
+            kt_by_type.setdefault(r.get("primary_type", "unknown"), []).append(r["key_term_recall"])
+    key_term_recall_per_type = {
+        t: {"n": len(v), "mean": statistics.mean(v)} for t, v in kt_by_type.items()
+    }
+
     return {
         "n_total": n,
         "n_judge_valid": len(valid_scores),
@@ -521,6 +552,9 @@ def aggregate_50q(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         "exact_id_recall_mean": exact_id_recall_mean,
         "n_with_expected_ids": len(id_recalls),
         "exact_id_recall_per_type": exact_id_recall_per_type,
+        "key_term_recall_mean": key_term_recall_mean,
+        "n_with_key_terms": len(kt_recalls),
+        "key_term_recall_per_type": key_term_recall_per_type,
         "abstention_correct_rate": abstention_correct_rate,
         # Juge LLM (diagnostic secondaire — bruité)
         "C1_mean": statistics.mean(valid_scores) if valid_scores else 0.0,
@@ -670,6 +704,12 @@ def main():
         if agg_50q.get('exact_id_recall_per_type'):
             parts = [f"{t}={d['mean']:.2f}(n{d['n']})" for t, d in sorted(agg_50q['exact_id_recall_per_type'].items())]
             print(f"    exact_id_recall/type : {', '.join(parts)}")
+        ktr = agg_50q.get('key_term_recall_mean')
+        if ktr is not None:
+            print(f"  ★ key_term_recall : {ktr:.3f}  (n={agg_50q['n_with_key_terms']} q avec phrases-clés) [DÉTERMINISTE #442]")
+            if agg_50q.get('key_term_recall_per_type'):
+                parts = [f"{t}={d['mean']:.2f}(n{d['n']})" for t, d in sorted(agg_50q['key_term_recall_per_type'].items())]
+                print(f"    key_term_recall/type : {', '.join(parts)}")
         # JUGE LLM (diagnostic secondaire, bruité)
         print(f"  C1 (LLM-judge, bruité) : {agg_50q['C1_mean']:.3f}  [valid={agg_50q['n_judge_valid']}/{agg_50q['n_total']}, judge_failed={agg_50q['n_judge_failed']} ({agg_50q['judge_failure_rate']:.1%}), fallback_used={agg_50q['n_judge_fallback_used']}]")
         if agg_50q['C3_lifecycle_mean'] is not None:
