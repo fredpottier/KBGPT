@@ -43,6 +43,22 @@ from knowbase.runtime_a3.schemas import (
 
 
 # ============================================================================
+# Hermétisme : ces tests modèlent le chemin de retrieval LEGACY (une requête
+# CYPHER_KG_CLAIMS → rows {c, sections}, un appel Neo4j par sous-but). Le
+# conteneur de prod fixe V6_HYBRID_RETRIEVAL=rrf (3 requêtes, rows {claim_id}) →
+# sans forçage, les mocks ne correspondent plus au chemin actif (KeyError
+# 'claim_id'). On épingle donc le mode legacy pour que les tests soient
+# indépendants de l'environnement (cf test_plan.py qui fait de même). La fusion
+# RRF a sa propre logique, hors périmètre de ces tests d'assemblage.
+# ============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _force_legacy_retrieval(monkeypatch):
+    monkeypatch.setenv("V6_HYBRID_RETRIEVAL", "0")
+
+
+# ============================================================================
 # Helpers
 # ============================================================================
 
