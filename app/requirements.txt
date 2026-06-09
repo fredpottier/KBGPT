@@ -3,10 +3,10 @@ fastapi==0.116.1
 uvicorn==0.30.3
 
 # === Authentication & Security (Phase 0) ===
-PyJWT[crypto]==2.9.0
+PyJWT[crypto]==2.12.0  # Dependabot GHSA-752w-5fwx-jx9f (high) : <=2.11.0 vulnérable
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1  # Version compatible avec passlib 1.7.4 (pas 5.x)
-python-jose[cryptography]==3.3.0
+python-jose[cryptography]==3.4.0  # Dependabot GHSA-6c5p-j8vq-pqhj (critical) + GHSA-cjwg-qfpm-7377 : <3.4.0 vulnérable
 slowapi==0.1.9  # Rate limiting
 email-validator>=2.0.0  # Pour Pydantic EmailStr
 
@@ -71,7 +71,7 @@ langchain-anthropic>=0.1.23
 langchain_openai>=0.1.21
 
 # Unstructured MINIMAL (pas [all-docs] qui est énorme !)
-unstructured==0.15.0
+unstructured==0.18.18  # Dependabot GHSA-gm8q-m8mv-jj5m (critical) : <=0.18.17 vulnérable. Non importé directement (transitif langchain).
 
 # OCR simple — onnxruntime requis par rapidocr >= 3.x
 onnxruntime>=1.24.0
