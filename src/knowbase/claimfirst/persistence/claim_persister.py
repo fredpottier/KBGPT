@@ -352,13 +352,13 @@ class ClaimPersister:
         self.stats["entities_created"] += 1
 
     def _persist_facet(self, session, facet: Facet) -> None:
-        """Persiste une Facet."""
+        """Persiste une Facet (clé multi-tenant : facet_id + tenant_id, #459)."""
         props = facet.to_neo4j_properties()
         query = """
-        MERGE (f:Facet {facet_id: $facet_id})
+        MERGE (f:Facet {facet_id: $facet_id, tenant_id: $tenant_id})
         SET f += $props
         """
-        session.run(query, facet_id=facet.facet_id, props=props)
+        session.run(query, facet_id=facet.facet_id, tenant_id=facet.tenant_id, props=props)
         self.stats["facets_created"] += 1
 
     def _persist_cluster(self, session, cluster: ClaimCluster) -> None:
@@ -983,10 +983,15 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
         claim_id: str,
         facet_id: str,
     ) -> None:
-        """Crée la relation Claim -[:BELONGS_TO_FACET]-> Facet."""
+        """Crée la relation Claim -[:BELONGS_TO_FACET]-> Facet.
+
+        Facet scopée sur le tenant DU CLAIM (#459) : les facet_id étant
+        désormais uniques par (tenant_id, facet_id), on rattache au facet du
+        même tenant pour éviter tout lien cross-tenant.
+        """
         query = """
         MATCH (c:Claim {claim_id: $claim_id})
-        MATCH (f:Facet {facet_id: $facet_id})
+        MATCH (f:Facet {facet_id: $facet_id, tenant_id: c.tenant_id})
         MERGE (c)-[:BELONGS_TO_FACET]->(f)
         """
         session.run(query, claim_id=claim_id, facet_id=facet_id)
@@ -1333,7 +1338,7 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
             batch.append(props)
         session.run("""
             UNWIND $batch AS item
-            MERGE (f:Facet {facet_id: item.facet_id})
+            MERGE (f:Facet {facet_id: item.facet_id, tenant_id: item.tenant_id})
             SET f += item
         """, batch=batch)
         self.stats["facets_created"] += len(facets)
@@ -1464,7 +1469,7 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
         session.run("""
             UNWIND $batch AS item
             MATCH (c:Claim {claim_id: item.claim_id})
-            MATCH (f:Facet {facet_id: item.facet_id})
+            MATCH (f:Facet {facet_id: item.facet_id, tenant_id: c.tenant_id})
             MERGE (c)-[r:BELONGS_TO_FACET]->(f)
             SET r.assigned_at = item.assigned_at
         """, batch=batch)

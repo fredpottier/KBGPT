@@ -163,11 +163,16 @@ class ClaimFirstSchema:
             constraint_type="UNIQUE"
         ),
 
-        # Facet: unique par facet_id
+        # Facet: unique par (tenant_id, facet_id) — multi-tenant (#459).
+        # Corrigé 09/06/2026 : la contrainte sur facet_id SEUL (les facet_id sont
+        # déterministes par domaine, ex 'facet_certification_processes') faisait
+        # collisionner les facets entre tenants → un tenant importé ensuite ne
+        # créait aucun facet (MERGE matchait le facet d'un autre tenant). Le
+        # persister MERGE désormais sur (facet_id, tenant_id).
         SchemaConstraint(
-            name="facet_unique",
+            name="facet_tenant_unique",
             label="Facet",
-            property_key="facet_id",
+            property_key="tenant_id, facet_id",
             constraint_type="UNIQUE"
         ),
 
