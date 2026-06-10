@@ -53,35 +53,48 @@ VERDICTS = ("CONFIRMED", "DIFFERENT_SCOPE", "COMPLEMENTARY", "EQUIVALENT", "UNCL
 _SYSTEM_PROMPT = """You are an adjudicator of POTENTIAL contradictions in a knowledge base.
 You receive two statements extracted from documents, EACH WITH ITS FULL SOURCE PASSAGE.
 An automatic detector flagged them as contradictory because they look similar and opposed —
-but detectors compare sentences out of context and are often wrong.
+but detectors compare sentences out of context and are USUALLY wrong. Your DEFAULT is to NOT
+confirm: only return CONFIRMED when the passages give POSITIVE PROOF of a real conflict.
 
 Your job: decide, FROM THE PASSAGES, whether the two statements give INCOMPATIBLE answers
-to the SAME question under the SAME conditions.
+to the SAME question under the SAME scope — same named test/procedure, same object, same
+conditions, same time frame.
 
 Classify as exactly ONE of:
-- CONFIRMED: in their contexts, the statements answer the SAME question for the SAME
-  scope/conditions with INCOMPATIBLE content. A reader following one would violate the other.
+- CONFIRMED: the passages PROVE the two statements govern the SAME requirement and cannot both
+  be satisfied. A reader following one would violate the other.
 - DIFFERENT_SCOPE: the statements apply to DIFFERENT conditions, test cases, object types,
-  configurations, or answer DIFFERENT questions (e.g. one defines what evidence is valid,
-  the other defines where a limit applies). Not a contradiction.
-- COMPLEMENTARY: the statements are compatible parts of the same framework (rule + exception,
-  general principle + specific procedure), possibly both present in each document's context.
-- EQUIVALENT: the statements say the same thing (paraphrase, unit conversion, rounding).
+  configurations, methods, or answer DIFFERENT questions; OR the passages do not establish that
+  they govern the same requirement. (This is the default when same-scope is not PROVEN.)
+- COMPLEMENTARY: compatible parts of the same framework (rule + exception, general principle +
+  specific procedure), or both documents state both rules.
+- EQUIVALENT: the statements say the same thing (paraphrase, unit conversion, rounding, or the
+  SAME physical quantity expressed under a different sign/reference convention).
 - UNCLEAR: the passages do not allow a confident decision.
 
-Critical checks before answering CONFIRMED:
-1. Do the surrounding passages show that each document ALSO contains the other statement's
-   rule? (If yes → COMPLEMENTARY.)
-2. Do the statements share the same applicability conditions (same test case, same object,
-   same configuration, same timeframe)? (If no → DIFFERENT_SCOPE.)
-   In particular, check the "effective from" dates and any "effective <date>" wording inside
-   the statements: if one statement is a HISTORICAL/superseded version (much earlier effective
-   date, or quoting an older amendment) and the other is the current rule, they describe the
-   SAME requirement at DIFFERENT times → DIFFERENT_SCOPE, not a contradiction.
-3. Would an expert following document A actually DO something different than following
-   document B in the same situation? (If no → not CONFIRMED.)
+CONFIRMED requires ALL of the following to be PROVABLE from the passages. If ANY is not
+explicitly supported, do NOT confirm — prefer DIFFERENT_SCOPE:
+  A. SAME named test / procedure / clause / requirement governs BOTH statements (the same test
+     name, section number, or method must be identifiable in BOTH passages). Two DIFFERENT
+     numeric values for a setup parameter (a distance, a temperature, a dimension, a duration,
+     a position) are NOT a contradiction when the passages do not prove both describe the SAME
+     named test/procedure — differing setup values usually mean DIFFERENT test configurations
+     or DIFFERENT methods → DIFFERENT_SCOPE.
+  B. SAME object / population / condition / configuration.
+  C. SAME time frame: neither statement is a historical/superseded version of the other. Check
+     "effective from" dates and any "effective <date>"/amendment wording: an older effective
+     date or an older amendment quoted vs the current rule → DIFFERENT_SCOPE.
+  D. The two contents genuinely cannot both hold at once for that shared requirement.
 
-Return STRICT JSON: {"verdict": "<one of the five>", "reason": "<2-3 sentences, specific>"}"""
+NOT contradictions (never CONFIRMED):
+  - The SAME physical phenomenon described under different reference frames or sign conventions
+    (e.g. described as a deceleration in one and an acceleration in the other; opposite-sign
+    values for the same quantity) → EQUIVALENT or COMPLEMENTARY.
+  - Each document also contains the other statement's rule → COMPLEMENTARY.
+  - One statement is a historical/superseded version of the other → DIFFERENT_SCOPE.
+
+Return STRICT JSON: {"verdict": "<one of the five>", "reason": "<2-3 sentences citing the
+passage evidence (or its absence) for same vs different scope>"}"""
 
 
 def _build_user_prompt(pair: Dict[str, Any], max_passage: int = 2200) -> str:
