@@ -28,6 +28,7 @@ import CopyButton from '@/components/ui/CopyButton'
 import AutoResizeTextarea from '@/components/ui/AutoResizeTextarea'
 import SearchResultDisplay from '@/components/ui/SearchResultDisplay'
 import RuntimeA3Panel from '@/components/chat/RuntimeA3Panel'
+import ActiveCorpusBadge from '@/components/chat/ActiveCorpusBadge'
 import SessionSelector from '@/components/chat/SessionSelector'
 import SessionSummary from '@/components/chat/SessionSummary'
 import { ConceptCardPanel } from '@/components/concept'
@@ -844,6 +845,7 @@ export default function ChatPage() {
               onNewSession={handleNewSession}
             />
             <HStack spacing={3}>
+              <ActiveCorpusBadge />
               {currentSessionId && (
                 <>
                   <Text fontSize="xs" color="text.muted">

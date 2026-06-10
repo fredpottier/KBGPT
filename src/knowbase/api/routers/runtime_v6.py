@@ -253,6 +253,13 @@ async def answer(request: RuntimeV6Request) -> RuntimeV6Response:
     le flag du frontend était ignoré depuis le branchement du chat sur
     runtime_a3 (31/05) — le KG était utilisé même toggle éteint.
     """
+    # Corpus actif global : le frontend envoie la valeur sentinelle "default" ;
+    # on la substitue par le corpus choisi en admin (cf CH_CORPUS_SWITCH.md). Un
+    # tenant explicite (bench, appel ciblé) est respecté tel quel.
+    if request.tenant_id == "default":
+        from knowbase.common.active_corpus import get_active_corpus
+        request.tenant_id = get_active_corpus()
+
     if not request.use_kg:
         return _answer_classic_rag(request)
     try:

@@ -117,7 +117,10 @@ def _get_driver():
 
 
 def _get_tenant():
-    return "default"
+    # Corpus actif global (CH_CORPUS_SWITCH) : l'Atlas suit le corpus sélectionné
+    # en admin. Fail-soft → "default" si Redis indisponible.
+    from knowbase.common.active_corpus import get_active_corpus
+    return get_active_corpus()
 
 
 # ── P5.2 — POC Atlas narratif from Perspectives ──────────────────────────────

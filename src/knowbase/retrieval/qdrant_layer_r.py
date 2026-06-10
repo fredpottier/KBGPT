@@ -62,7 +62,9 @@ def ensure_axis_indexes() -> None:
     from qdrant_client.models import PayloadSchemaType, TextIndexParams, TokenizerType
 
     client = get_qdrant_client()
-    for field_name in ("axis_release_id", "axis_version"):
+    # `tenant_id` : index payload KEYWORD pour le filtrage multi-corpus efficace à
+    # l'échelle (collection partagée + filtre tenant_id, cf CH_CORPUS_SWITCH.md).
+    for field_name in ("tenant_id", "axis_release_id", "axis_version"):
         try:
             client.create_payload_index(
                 collection_name=COLLECTION_NAME,

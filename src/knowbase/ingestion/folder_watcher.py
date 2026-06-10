@@ -124,22 +124,30 @@ def enqueue_file(file_path: Path) -> bool:
     except Exception as hist_error:
         logger.warning(f"Erreur enregistrement historique (non bloquant): {hist_error}")
 
+    # Corpus actif global : estampillé sur le job AU MOMENT DE L'ENQUEUE → un doc
+    # déposé dans docs_in part dans le corpus actuellement sélectionné en admin, et
+    # les jobs en vol gardent leur tenant même si l'on bascule (cf CH_CORPUS_SWITCH.md).
+    from knowbase.common.active_corpus import get_active_corpus
+    tenant_id = get_active_corpus()
+
     try:
         if file_type == "pdf":
             enqueue_pdf_ingestion(
                 job_id=job_id,
                 file_path=file_str,
                 use_vision=False,  # Text extraction is sufficient for most PDFs
+                tenant_id=tenant_id,
             )
-            logger.info(f"PDF ajouté à la queue: {file_path.name} (job_id={job_id})")
+            logger.info(f"PDF ajouté à la queue: {file_path.name} (job_id={job_id}, corpus={tenant_id})")
 
         elif file_type == "pptx":
             enqueue_pptx_ingestion(
                 job_id=job_id,
                 file_path=file_str,
                 use_vision=False,  # Disabled for cost savings - can enable per-doc if needed
+                tenant_id=tenant_id,
             )
-            logger.info(f"PPTX ajouté à la queue: {file_path.name} (job_id={job_id})")
+            logger.info(f"PPTX ajouté à la queue: {file_path.name} (job_id={job_id}, corpus={tenant_id})")
 
         elif file_type == "excel":
             enqueue_excel_ingestion(
@@ -152,8 +160,9 @@ def enqueue_file(file_path: Path) -> bool:
             enqueue_document_v2(
                 job_id=job_id,
                 file_path=file_str,
+                tenant_id=tenant_id,
             )
-            logger.info(f"{file_type.upper()} ajouté à la queue: {file_path.name} (job_id={job_id})")
+            logger.info(f"{file_type.upper()} ajouté à la queue: {file_path.name} (job_id={job_id}, corpus={tenant_id})")
 
         return True
 

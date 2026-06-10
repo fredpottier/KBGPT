@@ -26,7 +26,7 @@ from knowbase.api.services.concept_diff_service import (
     DiffMode,
     get_concept_diff_service,
 )
-from knowbase.api.dependencies import get_tenant_id
+from knowbase.api.dependencies import get_tenant_id, get_consumer_tenant
 from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
 
@@ -132,7 +132,7 @@ def explain_concept(
         le=50,
         description="Nombre max de relations à retourner"
     ),
-    tenant_id: str = Depends(get_tenant_id)
+    tenant_id: str = Depends(get_consumer_tenant)
 ) -> ConceptExplanation:
     """
     Explique un concept avec sources et relations.
@@ -285,7 +285,7 @@ class ConceptListResponse(BaseModel):
 )
 async def diff_concepts(
     request: DiffRequest,
-    tenant_id: str = Depends(get_tenant_id)
+    tenant_id: str = Depends(get_consumer_tenant)
 ) -> DiffResponse:
     """
     Calcule le diff entre deux markers.
@@ -343,7 +343,7 @@ async def diff_concepts_get(
     marker_b: str = Query(..., description="Deuxieme marker"),
     mode: str = Query(default="concepts", description="Mode de diff"),
     min_confidence: float = Query(default=0.5, ge=0.0, le=1.0),
-    tenant_id: str = Depends(get_tenant_id)
+    tenant_id: str = Depends(get_consumer_tenant)
 ) -> DiffResponse:
     """Version GET du diff."""
     request = DiffRequest(
@@ -375,7 +375,7 @@ async def diff_concepts_get(
 )
 async def get_concept_assertions(
     concept_id: str,
-    tenant_id: str = Depends(get_tenant_id)
+    tenant_id: str = Depends(get_consumer_tenant)
 ) -> AssertionsResponse:
     """
     Recupere les assertions pour un concept.
@@ -440,7 +440,7 @@ async def get_concepts_by_polarity(
     polarity: str,
     marker: Optional[str] = Query(None, description="Filtrer par marker"),
     limit: int = Query(default=100, ge=1, le=500),
-    tenant_id: str = Depends(get_tenant_id)
+    tenant_id: str = Depends(get_consumer_tenant)
 ) -> ConceptListResponse:
     """
     Recupere les concepts par polarity.
@@ -510,7 +510,7 @@ async def get_concepts_by_scope(
     scope: str,
     marker: Optional[str] = Query(None, description="Filtrer par marker"),
     limit: int = Query(default=100, ge=1, le=500),
-    tenant_id: str = Depends(get_tenant_id)
+    tenant_id: str = Depends(get_consumer_tenant)
 ) -> ConceptListResponse:
     """
     Recupere les concepts par scope.

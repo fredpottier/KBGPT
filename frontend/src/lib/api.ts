@@ -662,8 +662,8 @@ export const api = {
       apiClient.get('/admin/post-import/status', {
         params: tenantId ? { tenant_id: tenantId } : undefined,
       }),
-    run: (steps: string[], tenantId: string = 'default') =>
-      apiClient.post('/admin/post-import/run', { steps, tenant_id: tenantId }, {
+    run: (steps: string[], tenantId: string = 'default', forceAdjudication: boolean = false) =>
+      apiClient.post('/admin/post-import/run', { steps, tenant_id: tenantId, force_adjudication: forceAdjudication }, {
         timeout: 1800000,  // 30 min max
       }),
   },
@@ -671,6 +671,12 @@ export const api = {
   // Liste des tenants présents dans le KG (sélecteur cockpit multi-tenant)
   tenants: {
     list: () => apiClient.get('/admin/tenants'),
+  },
+
+  // Corpus actif global (chat + ingestion tournent dessus) — CH_CORPUS_SWITCH
+  activeCorpus: {
+    get: () => apiClient.get('/admin/active-corpus'),
+    set: (tenant_id: string) => apiClient.put('/admin/active-corpus', { tenant_id }),
   },
 
   // Atlas — Narrative knowledge atlas (dual-axis: product + theme)

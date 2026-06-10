@@ -80,17 +80,26 @@ export default function PostImportPage() {
   const [tenants, setTenants] = useState<TenantInfo[]>([])
   const [selectedTenant, setSelectedTenant] = useState<string>('')
   const [ownTenant, setOwnTenant] = useState<string>('')
+  // Forcer la ré-adjudication des contradictions déjà jugées (re-juge tout +
+  // double-check). À utiliser après une ré-ingestion (1er passage sans double-check).
+  const [forceAdjudication, setForceAdjudication] = useState<boolean>(false)
   const toast = useToast()
 
-  // Charger la liste des tenants (sélecteur)
+  // Charger la liste des tenants + le corpus actif global.
+  // Défaut du sélecteur = CORPUS ACTIF (cohérent avec « je travaille sur aero » →
+  // le post-import vise aero) ; repli sur le tenant du compte si indisponible.
   useEffect(() => {
-    api.tenants.list()
-      .then((res) => {
+    Promise.all([
+      api.tenants.list(),
+      api.activeCorpus.get().catch(() => null),
+    ])
+      .then(([res, ac]) => {
         const list: TenantInfo[] = res.data?.tenants || []
         setTenants(list)
         const own = res.data?.own_tenant || list.find((t) => t.is_own)?.tenant_id || ''
         setOwnTenant(own)
-        setSelectedTenant((cur) => cur || own)
+        const active = (ac as any)?.data?.active_corpus
+        setSelectedTenant((cur) => cur || active || own)
       })
       .catch(() => { /* sélecteur masqué si indisponible */ })
   }, [])
@@ -195,7 +204,7 @@ export default function PostImportPage() {
     setCompletedSteps([])
 
     try {
-      const res = await api.postImport.run(Array.from(selectedSteps), selectedTenant || ownTenant)
+      const res = await api.postImport.run(Array.from(selectedSteps), selectedTenant || ownTenant, forceAdjudication)
       if (res.data?.success) {
         toast({
           title: `Pipeline lancé (${res.data.steps_queued?.length} étapes)`,
@@ -254,6 +263,19 @@ export default function PostImportPage() {
             >
               {selectedSteps.size === steps.length ? 'Tout désélectionner' : 'Tout sélectionner'}
             </Button>
+            {selectedSteps.has('adjudicate_contradictions') && (
+              <Checkbox
+                size="sm"
+                isChecked={forceAdjudication}
+                onChange={(e) => setForceAdjudication(e.target.checked)}
+                isDisabled={running}
+                colorScheme="orange"
+              >
+                <Text fontSize="xs" color="text.secondary">
+                  Forcer la ré-adjudication (re-juge tout + double-check)
+                </Text>
+              </Checkbox>
+            )}
             <Button
               size="sm"
               colorScheme="green"

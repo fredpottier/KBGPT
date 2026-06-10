@@ -35,7 +35,7 @@ from knowbase.consolidation.normalization import (
     get_normalization_engine,
     get_normalization_store,
 )
-from knowbase.api.dependencies import get_tenant_id
+from knowbase.api.dependencies import get_tenant_id, get_consumer_tenant
 from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
 
@@ -98,7 +98,7 @@ class MarkerConceptsResponse(BaseModel):
 async def list_markers(
     kind: Optional[str] = Query(None, description="Filtrer par type de marker"),
     limit: int = Query(default=50, ge=1, le=200),
-    tenant_id: str = Depends(get_tenant_id),
+    tenant_id: str = Depends(get_consumer_tenant),
 ) -> MarkerListResponse:
     """
     Liste tous les markers disponibles.
@@ -162,7 +162,7 @@ async def list_markers(
 )
 async def get_marker(
     marker_value: str,
-    tenant_id: str = Depends(get_tenant_id),
+    tenant_id: str = Depends(get_consumer_tenant),
 ) -> MarkerInfo:
     """
     Récupère les détails d'un marker.
@@ -219,7 +219,7 @@ async def get_marker_concepts(
     marker_value: str,
     min_confidence: float = Query(default=0.0, ge=0.0, le=1.0),
     limit: int = Query(default=100, ge=1, le=500),
-    tenant_id: str = Depends(get_tenant_id),
+    tenant_id: str = Depends(get_consumer_tenant),
 ) -> MarkerConceptsResponse:
     """
     Récupère les concepts associés à un marker.
@@ -387,7 +387,7 @@ class ClusterSuggestionsResponse(BaseModel):
 async def get_normalization_suggestions(
     doc_id: Optional[str] = Query(None, description="Filtrer par document"),
     limit: int = Query(default=50, ge=1, le=200),
-    tenant_id: str = Depends(get_tenant_id),
+    tenant_id: str = Depends(get_consumer_tenant),
 ) -> SuggestionsResponse:
     """
     Récupère les suggestions de normalisation.
@@ -464,7 +464,7 @@ async def get_normalization_suggestions(
 )
 async def apply_normalization(
     request: ApplyNormalizationRequest,
-    tenant_id: str = Depends(get_tenant_id),
+    tenant_id: str = Depends(get_consumer_tenant),
 ) -> ApplyNormalizationResponse:
     """
     Applique une normalisation manuelle.
@@ -543,7 +543,7 @@ async def apply_normalization(
     description="Récupère la liste des aliases configurés pour le tenant.",
 )
 async def list_aliases(
-    tenant_id: str = Depends(get_tenant_id),
+    tenant_id: str = Depends(get_consumer_tenant),
 ) -> AliasListResponse:
     """
     Liste tous les aliases configurés.
@@ -587,7 +587,7 @@ async def list_aliases(
 )
 async def add_alias(
     request: AddAliasRequest,
-    tenant_id: str = Depends(get_tenant_id),
+    tenant_id: str = Depends(get_consumer_tenant),
 ) -> AliasInfo:
     """
     Ajoute un nouvel alias.
@@ -641,7 +641,7 @@ async def add_alias(
 )
 async def delete_alias(
     raw_marker: str,
-    tenant_id: str = Depends(get_tenant_id),
+    tenant_id: str = Depends(get_consumer_tenant),
 ) -> Dict[str, Any]:
     """
     Supprime un alias.
@@ -687,7 +687,7 @@ async def delete_alias(
 )
 async def add_to_blacklist(
     request: BlacklistRequest,
-    tenant_id: str = Depends(get_tenant_id),
+    tenant_id: str = Depends(get_consumer_tenant),
 ) -> Dict[str, Any]:
     """
     Ajoute un marker à la blacklist.
@@ -737,7 +737,7 @@ async def add_to_blacklist(
     """,
 )
 async def get_normalization_stats(
-    tenant_id: str = Depends(get_tenant_id),
+    tenant_id: str = Depends(get_consumer_tenant),
 ) -> NormalizationStats:
     """
     Récupère les statistiques de normalisation.
@@ -795,7 +795,7 @@ async def get_normalization_stats(
 async def get_cluster_suggestions(
     min_documents: int = Query(default=2, ge=1, description="Documents min pour cluster"),
     limit: int = Query(default=20, ge=1, le=100),
-    tenant_id: str = Depends(get_tenant_id),
+    tenant_id: str = Depends(get_consumer_tenant),
 ) -> ClusterSuggestionsResponse:
     """
     Récupère les suggestions de clustering.

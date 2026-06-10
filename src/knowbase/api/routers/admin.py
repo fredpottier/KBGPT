@@ -130,6 +130,38 @@ async def list_tenants(
     return {"tenants": tenants, "own_tenant": own}
 
 
+class ActiveCorpusRequest(BaseModel):
+    """Requête de bascule du corpus actif global."""
+    tenant_id: str = Field(..., description="tenant_id du corpus à activer")
+
+
+@router.get("/active-corpus")
+async def get_active_corpus_endpoint(
+    admin: dict = Depends(require_admin),
+) -> Dict:
+    """Renvoie le corpus actif global (chat + ingestion tournent dessus).
+
+    Cf. `doc/ongoing/CH_CORPUS_SWITCH.md`. Source de vérité : Redis.
+    """
+    from knowbase.common.active_corpus import get_active_corpus
+    return {"active_corpus": get_active_corpus()}
+
+
+@router.put("/active-corpus")
+async def set_active_corpus_endpoint(
+    request: ActiveCorpusRequest,
+    admin: dict = Depends(require_admin),
+) -> Dict:
+    """Bascule le corpus actif global. Tout le système (chat + nouveaux imports)
+    tourne ensuite sur ce tenant. Les imports en vol gardent leur tenant (estampillé
+    à l'enqueue). Réservé aux admins.
+    """
+    from knowbase.common.active_corpus import set_active_corpus
+    set_active_corpus(request.tenant_id)
+    logger.info(f"[ADMIN] Corpus actif basculé sur '{request.tenant_id}'")
+    return {"success": True, "active_corpus": request.tenant_id}
+
+
 @router.get("/health")
 async def admin_health(
     admin: dict = Depends(require_admin),

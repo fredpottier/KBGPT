@@ -55,6 +55,11 @@ class StepInfo(BaseModel):
 class PipelineRequest(BaseModel):
     steps: List[str] = Field(..., description="IDs des étapes à exécuter")
     tenant_id: str = "default"
+    force_adjudication: bool = Field(
+        default=False,
+        description="Force la ré-adjudication des contradictions DÉJÀ jugées (re-juge "
+                    "tout + double-check des CONFIRMED). Sinon le step est idempotent.",
+    )
 
 
 class StepResult(BaseModel):
@@ -314,6 +319,7 @@ async def run_pipeline(
             run_pipeline_job,
             ordered_steps,
             tenant_id,
+            request.force_adjudication,
             job_timeout="3h",  # 8561 paires contradictions = ~1h, + C4/C6/perspectives
         )
 
@@ -445,7 +451,7 @@ def _ensure_vllm_for_full_local() -> bool:
         return False
 
 
-def run_pipeline_job(steps: List[str], tenant_id: str) -> dict:
+def run_pipeline_job(steps: List[str], tenant_id: str, force_adjudication: bool = False) -> dict:
     """Job RQ — exécute les étapes séquentiellement.
 
     En mode full_local, lance automatiquement vLLM local pour le parallelisme.
@@ -529,7 +535,7 @@ def run_pipeline_job(steps: List[str], tenant_id: str) -> dict:
         _hb_thread = threading.Thread(target=_heartbeat, daemon=True)
         _hb_thread.start()
         try:
-            details = _execute_step(step_id, tenant_id, on_step_progress)
+            details = _execute_step(step_id, tenant_id, on_step_progress, force_adjudication=force_adjudication)
             duration = round(time.time() - step_start, 1)
             results.append({
                 "step_id": step_id,
@@ -604,7 +610,7 @@ def run_pipeline_job(steps: List[str], tenant_id: str) -> dict:
 # ============================================================================
 
 
-def _execute_step(step_id: str, tenant_id: str, on_progress=None) -> dict:
+def _execute_step(step_id: str, tenant_id: str, on_progress=None, force_adjudication: bool = False) -> dict:
     noop = lambda pct, detail="": None
     progress = on_progress or noop
     if step_id == "canonicalize":
@@ -640,20 +646,21 @@ def _execute_step(step_id: str, tenant_id: str, on_progress=None) -> dict:
     elif step_id == "lineage_resolution":
         return _run_lineage_resolution(tenant_id, progress)
     elif step_id == "adjudicate_contradictions":
-        return _run_adjudicate_contradictions(tenant_id, progress)
+        return _run_adjudicate_contradictions(tenant_id, progress, force=force_adjudication)
     elif step_id == "build_perspectives":
         return _run_build_perspectives(tenant_id, progress)
     else:
         raise ValueError(f"Étape inconnue: {step_id}")
 
 
-def _run_adjudicate_contradictions(tenant_id: str, progress=None) -> dict:
+def _run_adjudicate_contradictions(tenant_id: str, progress=None, force: bool = False) -> dict:
     """#446 — adjudication EN CONTEXTE des paires CONTRADICTS (cf
-    relations/contradiction_adjudicator.py). Idempotent : ne re-juge que les
-    arêtes sans verdict (relancer après chaque detect_contradictions)."""
+    relations/contradiction_adjudicator.py). Idempotent par défaut : ne re-juge que
+    les arêtes sans verdict. `force=True` re-juge TOUT + double-check des CONFIRMED
+    (utile après une ré-ingestion qui a posé un 1er passage sans double-check)."""
     from knowbase.relations.contradiction_adjudicator import ContradictionAdjudicator
 
-    summary = ContradictionAdjudicator().run(tenant_id=tenant_id)
+    summary = ContradictionAdjudicator().run(tenant_id=tenant_id, force=force)
     return {
         "n_adjudicated": summary.n_total,
         "n_skipped_already": summary.n_skipped_already,

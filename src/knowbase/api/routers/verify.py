@@ -22,6 +22,16 @@ from knowbase.api.services.verification_service import get_verification_service
 
 logger = logging.getLogger(__name__)
 
+
+def _resolve_tenant(tenant_id: str) -> str:
+    """Corpus actif global (CH_CORPUS_SWITCH) : substitue le corpus admin quand le
+    tenant vaut la sentinelle "default" ; un tenant explicite est respecté."""
+    if tenant_id and tenant_id != "default":
+        return tenant_id
+    from knowbase.common.active_corpus import get_active_corpus
+    return get_active_corpus()
+
+
 router = APIRouter(
     prefix="/api/verify",
     tags=["verification"],
@@ -63,7 +73,7 @@ async def analyze_text(request: VerifyRequest) -> VerifyResponse:
         Texte original avec assertions annotées et résumé
     """
     try:
-        service = get_verification_service(tenant_id=request.tenant_id)
+        service = get_verification_service(tenant_id=_resolve_tenant(request.tenant_id))
         result = await service.analyze(request.text)
         logger.info(
             f"[VERIFY_API] Analyzed text: {result.summary['total']} assertions, "
@@ -107,7 +117,7 @@ async def correct_text(request: CorrectRequest) -> CorrectResponse:
         Texte corrigé avec liste des changements
     """
     try:
-        service = get_verification_service(tenant_id=request.tenant_id)
+        service = get_verification_service(tenant_id=_resolve_tenant(request.tenant_id))
         result = await service.correct(request.text, request.assertions)
         logger.info(
             f"[VERIFY_API] Generated corrections: {len(result.changes)} changes"
@@ -177,7 +187,7 @@ async def upload_and_verify_docx(
             raise HTTPException(status_code=400, detail="Document vide ou sans texte exploitable")
 
         # 3. Verifier par chunks
-        service = get_verification_service(tenant_id=tenant_id)
+        service = get_verification_service(tenant_id=_resolve_tenant(tenant_id))
         all_verdicts: list[AssertionVerdict] = []
 
         chunks = chunk_paragraphs(paragraphs)

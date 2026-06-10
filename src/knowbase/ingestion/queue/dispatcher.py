@@ -82,6 +82,7 @@ def enqueue_pptx_ingestion(
     meta_path: Optional[str] = None,
     use_vision: bool = True,
     queue_name: Optional[str] = None,
+    tenant_id: str = "default",
 ) -> Job:
     """Route PPTX vers pipeline V2 unifie."""
     logger.info(f"[Dispatcher] Routing PPTX to V2 pipeline: {Path(file_path).name}")
@@ -90,6 +91,7 @@ def enqueue_pptx_ingestion(
         file_path=file_path,
         document_type_id=document_type_id,
         queue_name=queue_name,
+        tenant_id=tenant_id,
     )
 
 
@@ -100,6 +102,7 @@ def enqueue_pdf_ingestion(
     document_type_id: Optional[str] = None,
     use_vision: bool = True,
     queue_name: Optional[str] = None,
+    tenant_id: str = "default",
 ) -> Job:
     """Route PDF vers pipeline V2 unifie."""
     logger.info(f"[Dispatcher] Routing PDF to V2 pipeline: {Path(file_path).name}")
@@ -108,6 +111,7 @@ def enqueue_pdf_ingestion(
         file_path=file_path,
         document_type_id=document_type_id,
         queue_name=queue_name,
+        tenant_id=tenant_id,
     )
 
 

@@ -191,6 +191,20 @@ def get_tenant_id(current_user: dict = Depends(get_current_user)) -> str:
     return tenant_id
 
 
+def get_consumer_tenant(jwt_tenant: str = Depends(get_tenant_id)) -> str:
+    """Tenant des surfaces de CONSULTATION grand-public (chat, compare, verify…).
+
+    Applique la règle du corpus actif global (CH_CORPUS_SWITCH) : si le tenant JWT
+    vaut la sentinelle ``"default"``, on substitue le **corpus actif** choisi en admin
+    ; un tenant JWT explicite (non-default) est respecté tel quel. Préserve l'auth de
+    ``get_tenant_id``. Distinct de ``get_cockpit_tenant`` (supervision admin ciblée).
+    """
+    if jwt_tenant == "default":
+        from knowbase.common.active_corpus import get_active_corpus
+        return get_active_corpus()
+    return jwt_tenant
+
+
 def get_cockpit_tenant(
     tenant_id: Optional[str] = Query(
         None,

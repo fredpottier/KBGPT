@@ -215,6 +215,8 @@ RETURN doc_a, doc_b, collect({{rel: rel, n: n}}) AS rels
 _CY_TENSION_COUNTS = """
 MATCH (a:Claim {tenant_id: $tenant_id})-[r:CONTRADICTS]-(b:Claim {tenant_id: $tenant_id})
 WHERE a.doc_id < b.doc_id
+  AND a.invalidated_at IS NULL AND b.invalidated_at IS NULL
+  AND r.invalidated_relation_at IS NULL
 WITH a.doc_id AS doc_a, b.doc_id AS doc_b,
      count(r) AS examined,
      sum(CASE WHEN r.adjudication = 'CONFIRMED' THEN 1 ELSE 0 END) AS confirmed
@@ -224,6 +226,8 @@ RETURN doc_a, doc_b, examined, confirmed
 _CY_TENSIONS = """
 MATCH (a:Claim {tenant_id: $tenant_id})-[r:CONTRADICTS]->(b:Claim {tenant_id: $tenant_id})
 WHERE ($verdict IS NULL OR r.adjudication = $verdict)
+  AND a.invalidated_at IS NULL AND b.invalidated_at IS NULL
+  AND r.invalidated_relation_at IS NULL
 RETURN a.doc_id AS doc_a, b.doc_id AS doc_b,
        a.text AS text_a, b.text AS text_b,
        a.page_no AS page_a, b.page_no AS page_b,
@@ -234,7 +238,9 @@ LIMIT $limit
 """
 
 _CY_VERDICT_COUNTS = """
-MATCH (:Claim {tenant_id: $tenant_id})-[r:CONTRADICTS]->(:Claim {tenant_id: $tenant_id})
+MATCH (a:Claim {tenant_id: $tenant_id})-[r:CONTRADICTS]->(b:Claim {tenant_id: $tenant_id})
+WHERE a.invalidated_at IS NULL AND b.invalidated_at IS NULL
+  AND r.invalidated_relation_at IS NULL
 RETURN coalesce(r.adjudication, 'NON_ADJUGÉ') AS verdict, count(r) AS n
 """
 
@@ -258,6 +264,15 @@ def _get_driver():
     return get_neo4j_client().driver
 
 
+def _active(tenant_id: str) -> str:
+    """Corpus actif global (CH_CORPUS_SWITCH) : la carte suit le corpus admin quand
+    aucun tenant explicite n'est fourni (sentinelle "default")."""
+    if tenant_id and tenant_id != "default":
+        return tenant_id
+    from knowbase.common.active_corpus import get_active_corpus
+    return get_active_corpus()
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/map", response_model=RefMap)
@@ -265,6 +280,7 @@ async def get_map(tenant_id: str = Query(default="default")) -> RefMap:
     """Anatomie complète : documents, lignées (avec preuves), paires agrégées."""
     from knowbase.relations.explicit_lineage_detector import regulatory_authority
 
+    tenant_id = _active(tenant_id)
     driver = _get_driver()
     with driver.session() as s:
         doc_rows = [dict(r) for r in s.run(_CY_DOCS, tenant_id=tenant_id)]
@@ -372,6 +388,7 @@ async def get_pair_examples(
     if rel not in _ALLOWED_REL_TYPES:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=f"Type de relation inconnu : {relation}")
+    tenant_id = _active(tenant_id)
     driver = _get_driver()
     with driver.session() as s:
         rows = [dict(r) for r in s.run(
@@ -394,6 +411,7 @@ async def get_tensions(
     limit: int = Query(default=100, le=500),
 ) -> RefTensions:
     """Registre des tensions : paires CONTRADICTS avec verdicts d'adjudication."""
+    tenant_id = _active(tenant_id)
     driver = _get_driver()
     with driver.session() as s:
         counts = {r["verdict"]: r["n"] for r in s.run(_CY_VERDICT_COUNTS, tenant_id=tenant_id)}

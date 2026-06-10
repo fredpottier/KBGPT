@@ -52,6 +52,7 @@ import {
   FiSquare,
   FiLoader,
 } from 'react-icons/fi'
+import CorpusSwitcher from '@/components/admin/CorpusSwitcher'
 
 const MotionBox = motion(Box)
 
@@ -625,6 +626,9 @@ export default function AdminSettingsPage() {
       </MotionBox>
 
       <VStack spacing={6} align="stretch">
+        {/* Corpus actif — bascule multi-corpus (CH_CORPUS_SWITCH) */}
+        <CorpusSwitcher />
+
         {/* LLM Configuration V2 */}
         <SectionCard
           title="Configuration LLM"
