@@ -1,6 +1,14 @@
 # Chantier — En-tête de nature documentaire (pré-filtrage des sources)
 
-> **Statut** : spécifié, non démarré.
+> **Statut** : **B1+B2 + surface codés** (10/06). Reste B3 (peuplement) = ré-ingestion.
+>   - B1+B2 (ingestion) : `claimfirst/document_profile.py` + orchestrateur Phase 7.7
+>     (commit `e187039`). Worker à rebuilder pour charger le module.
+>   - Surface (runtime+UI) : `runtime_v6.py` (`_hydrate_citation_sources` + `CitedClaimRef`
+>     `source_role`/`source_summary`) + `RuntimeA3Panel.tsx` (citations groupées par doc,
+>     en-tête `[tag rôle] + titre + résumé`). App monte `./src` → live au restart `app`
+>     (pas de rebuild) ; dégrade en simple titre tant que les profils ne sont pas peuplés.
+>   - B3 (peuplement) : à la ré-ingestion PURPOSE/lifecycle (les profils `role`/`summary`
+>     restent vides d'ici là — l'UI dégrade proprement).
 > **Date** : 2026-06-10 — Branche : feat/phase-b-augmentee.
 > **Origine** : session produit du 10/06. Fred, en utilisant le chat sur le corpus
 > aéro (sièges 9g), constate qu'il ouvre les documents un par un pour découvrir *de

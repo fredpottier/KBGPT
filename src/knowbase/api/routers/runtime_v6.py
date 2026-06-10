@@ -120,6 +120,17 @@ class CitedClaimRef(BaseModel):
     valid_until: Optional[str] = None
     invalidated_at: Optional[str] = None
     lifecycle_status: Optional[str] = None
+    # --- Profilage documentaire (chantier en-tête de nature, 10/06/2026) --------
+    # Nature/rôle + résumé du document source, pour grouper les citations par doc
+    # et afficher un en-tête de pré-filtrage. Additifs, best-effort, dégradables.
+    source_role: Optional[str] = Field(
+        default=None,
+        description="Rôle/nature du document source (ex. « Regulation », « Standard ») — tag de pré-filtrage.",
+    )
+    source_summary: Optional[str] = Field(
+        default=None,
+        description="Résumé court du document source (en-tête du groupe de citations).",
+    )
 
 
 class IterationTraceDict(BaseModel):
@@ -325,12 +336,14 @@ def _hydrate_citation_sources(claim_ids: List[str]) -> Dict[str, Dict[str, Any]]
         from knowbase.common.clients.neo4j_client import get_neo4j_client
         rows = get_neo4j_client().execute_query(
             "MATCH (c:Claim) WHERE c.claim_id IN $ids "
+            "OPTIONAL MATCH (d:Document {doc_id: c.doc_id, tenant_id: c.tenant_id}) "
             "RETURN c.claim_id AS id, c.doc_id AS doc_id, c.page_no AS page, "
             "c.verbatim_quote AS verbatim_quote, "
             "substring(toString(c.valid_from),0,10) AS valid_from, "
             "substring(toString(c.valid_until),0,10) AS valid_until, "
             "substring(toString(c.invalidated_at),0,10) AS invalidated_at, "
-            "c.lifecycle_status_current AS lifecycle_status",
+            "c.lifecycle_status_current AS lifecycle_status, "
+            "d.role AS doc_role, d.summary AS doc_summary, d.title AS doc_title",
             ids=claim_ids,
         )
         return {
@@ -340,6 +353,9 @@ def _hydrate_citation_sources(claim_ids: List[str]) -> Dict[str, Dict[str, Any]]
                 "valid_from": r["valid_from"], "valid_until": r["valid_until"],
                 "invalidated_at": r["invalidated_at"],
                 "lifecycle_status": r["lifecycle_status"],
+                # Profilage documentaire (best-effort, None si non encore peuplé)
+                "doc_role": r["doc_role"], "doc_summary": r["doc_summary"],
+                "doc_title": r["doc_title"],
             }
             for r in rows
         }
@@ -367,7 +383,7 @@ def _build_response(
         cited_refs.append(CitedClaimRef(
             claim_id=cc.claim_id,
             claim_verbatim=cc.claim_verbatim,
-            doc_title=cc.doc_title or (
+            doc_title=cc.doc_title or src.get("doc_title") or (
                 _DOC_HASH_SUFFIX_RE.sub("", doc_id).replace("_", " ") if doc_id else None
             ),
             section_id=cc.section_id,
@@ -379,6 +395,9 @@ def _build_response(
             valid_until=src.get("valid_until"),
             invalidated_at=src.get("invalidated_at"),
             lifecycle_status=src.get("lifecycle_status"),
+            # Profilage documentaire (chantier en-tête de nature) — best-effort.
+            source_role=src.get("doc_role"),
+            source_summary=src.get("doc_summary"),
         ))
 
     trace_payload: Optional[List[IterationTraceDict]] = None

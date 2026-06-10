@@ -44,6 +44,9 @@ interface CitedClaim {
   valid_until?: string | null
   invalidated_at?: string | null
   lifecycle_status?: string | null
+  // Profilage documentaire (en-tête de nature, 10/06) — optionnels, best-effort.
+  source_role?: string | null
+  source_summary?: string | null
 }
 
 // Phase C — badge bitemporel calculé depuis les dates/lifecycle du claim cité.
@@ -103,6 +106,51 @@ export default function RuntimeA3Panel({
   const isAbstained =
     runtimeA3.mode === 'abstained' || !!runtimeA3.abstention
   const coverage = runtimeA3.citation_coverage_rate
+
+  // Groupement des citations PAR DOCUMENT (chantier en-tête de nature, 10/06).
+  // En-tête de groupe = [tag rôle] + titre + résumé → pré-filtrage des sources
+  // sans ouvrir les fichiers. Ordre de 1ère apparition préservé ; chaque claim
+  // garde sa position globale `_pos` pour la numérotation [n] et son click-to-source.
+  type CitedClaimPos = CitedClaim & { _pos: number }
+  const citationGroups: {
+    docId: string | null
+    title?: string | null
+    role?: string | null
+    summary?: string | null
+    items: CitedClaimPos[]
+  }[] = []
+  const _groupIndexByKey = new Map<string, number>()
+  citations.forEach((c, idx) => {
+    const key = c.source_doc_id || `__nodoc_${idx}`
+    if (!_groupIndexByKey.has(key)) {
+      _groupIndexByKey.set(key, citationGroups.length)
+      citationGroups.push({
+        docId: c.source_doc_id ?? null,
+        title: c.doc_title,
+        role: c.source_role,
+        summary: c.source_summary,
+        items: [],
+      })
+    }
+    citationGroups[_groupIndexByKey.get(key)!].items.push({ ...c, _pos: idx })
+  })
+
+  const openClaimSource = async (c: CitedClaim) => {
+    // [SOURCE_VIEWER] branche in-app si actif, sinon onglet natif.
+    if (c.source_doc_id && SOURCE_VIEWER_ENABLED) {
+      setViewerTarget({
+        docId: c.source_doc_id,
+        page: c.page ?? undefined,
+        quote: c.source_verbatim_quote || c.claim_verbatim,
+        docTitle: c.doc_title || c.source_doc_id,
+      })
+      return
+    }
+    if (c.source_doc_id) {
+      const { openSourceFile } = await import('@/lib/openSourceFile')
+      await openSourceFile(c.source_doc_id, c.page ?? undefined)
+    }
+  }
 
   // Narration en langage clair, CALCULÉE depuis les données du run (pas figée) :
   // raconte le mécanisme de fiabilité sans jargon interne, lisible par un
@@ -300,72 +348,87 @@ export default function RuntimeA3Panel({
         )}
       </HStack>
 
-      {/* Citations claim-level */}
+      {/* Citations claim-level, GROUPÉES PAR DOCUMENT (en-tête de nature).
+          Chaque groupe est coiffé d'un en-tête [tag rôle] + titre + résumé qui
+          permet de pré-filtrer les sources sans ouvrir les fichiers. Le rôle/résumé
+          sont best-effort : s'ils ne sont pas encore peuplés (avant ré-ingestion),
+          l'en-tête dégrade en simple titre, sans erreur. */}
       <Collapse in={showCitations} animateOpacity>
         <VStack
-          spacing={2}
+          spacing={3}
           align="stretch"
           pl={3}
           borderLeft="2px solid"
           borderColor="border.active"
         >
-          {citations.map((c, i) => {
-            const badge = lifecycleBadge(c)
-            return (
-            <Box key={c.claim_id || i} fontSize="xs">
-              <Text color="text.primary">
-                <Text as="span" color="text.secondary" fontWeight="semibold">
-                  [{c.n ?? i + 1}]{' '}
-                </Text>
-                “{c.claim_verbatim}”
-                {/* Phase C — badge bitemporel (en vigueur / obsolète) */}
-                {badge ? (
-                  <Badge ml={2} colorScheme={badge.color} fontSize="9px" verticalAlign="middle" textTransform="none">
-                    {badge.color === 'green' ? '✓ ' : '⚠ '}{badge.label}
+          {citationGroups.map((g, gi) => (
+            <Box key={g.docId || `nodoc-${gi}`} fontSize="xs">
+              {/* En-tête de document */}
+              <HStack spacing={2} align="baseline" flexWrap="wrap">
+                {g.role ? (
+                  <Badge
+                    colorScheme="cyan"
+                    variant="subtle"
+                    fontSize="9px"
+                    textTransform="none"
+                  >
+                    {g.role}
                   </Badge>
                 ) : null}
-              </Text>
-              {/* Click-to-source. [SOURCE_VIEWER] : si le module est actif, ouvre le
-                  PDF IN-APP avec surlignage du span ; sinon onglet natif (openSourceFile
-                  + #page=N, RFC 3778). */}
-              {c.source_doc_id ? (
-                <Text
-                  as="button"
-                  color="brand.300"
-                  mt="2px"
-                  pl={4}
-                  display="block"
-                  textAlign="left"
-                  textDecoration="underline"
-                  _hover={{ color: 'brand.200' }}
-                  onClick={async () => {
-                    // [SOURCE_VIEWER] branche in-app
-                    if (SOURCE_VIEWER_ENABLED) {
-                      setViewerTarget({
-                        docId: c.source_doc_id!,
-                        page: c.page ?? undefined,
-                        quote: c.source_verbatim_quote || c.claim_verbatim,
-                        docTitle: c.doc_title || c.source_doc_id,
-                      })
-                      return
-                    }
-                    const { openSourceFile } = await import('@/lib/openSourceFile')
-                    await openSourceFile(c.source_doc_id!, c.page ?? undefined)
-                  }}
-                >
-                  {c.doc_title || c.source_doc_id}
-                  {c.page != null ? ` · p.${c.page}` : ''}
-                  {SOURCE_VIEWER_ENABLED ? ' ⊕' : ' ↗'}
+                <Text fontWeight="semibold" color="text.primary">
+                  {g.title || g.docId || 'Document'}
                 </Text>
-              ) : (
-                <Text color="text.secondary" mt="2px" pl={4}>
-                  {c.doc_title || 'Document'}
-                  {c.page != null ? ` · p.${c.page}` : ''}
+              </HStack>
+              {g.summary ? (
+                <Text color="text.secondary" mt="2px" noOfLines={2}>
+                  {g.summary}
                 </Text>
-              )}
+              ) : null}
+
+              {/* Claims cités de ce document */}
+              <VStack spacing={1} align="stretch" mt={1} pl={2}>
+                {g.items.map((c) => {
+                  const badge = lifecycleBadge(c)
+                  return (
+                    <Box key={c.claim_id || c._pos}>
+                      <Text color="text.primary">
+                        <Text as="span" color="text.secondary" fontWeight="semibold">
+                          [{c.n ?? c._pos + 1}]{' '}
+                        </Text>
+                        “{c.claim_verbatim}”
+                        {/* Phase C — badge bitemporel (en vigueur / obsolète) */}
+                        {badge ? (
+                          <Badge ml={2} colorScheme={badge.color} fontSize="9px" verticalAlign="middle" textTransform="none">
+                            {badge.color === 'green' ? '✓ ' : '⚠ '}{badge.label}
+                          </Badge>
+                        ) : null}
+                      </Text>
+                      {/* Click-to-source. [SOURCE_VIEWER] : in-app si actif, sinon onglet. */}
+                      {c.source_doc_id ? (
+                        <Text
+                          as="button"
+                          color="brand.300"
+                          mt="2px"
+                          display="block"
+                          textAlign="left"
+                          textDecoration="underline"
+                          _hover={{ color: 'brand.200' }}
+                          onClick={() => openClaimSource(c)}
+                        >
+                          {c.page != null ? `p.${c.page}` : 'ouvrir la source'}
+                          {SOURCE_VIEWER_ENABLED ? ' ⊕' : ' ↗'}
+                        </Text>
+                      ) : (
+                        <Text color="text.secondary" mt="2px">
+                          {c.page != null ? `p.${c.page}` : 'source non localisée'}
+                        </Text>
+                      )}
+                    </Box>
+                  )
+                })}
+              </VStack>
             </Box>
-            )
-          })}
+          ))}
         </VStack>
       </Collapse>
 
