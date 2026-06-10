@@ -261,6 +261,8 @@ class ContradictionAdjudicator:
         report_path: Optional[str] = None,
         max_workers: int = 4,
         confirm_double_check: bool = True,
+        confirm_votes: int = 5,
+        confirm_threshold: float = 0.6,
     ) -> AdjudicationSummary:
         from concurrent.futures import ThreadPoolExecutor
         from knowbase.common.clients.neo4j_client import get_neo4j_client
@@ -296,7 +298,19 @@ class ContradictionAdjudicator:
         # jugées différemment). On re-juge chaque CONFIRMED une 2e fois ; il ne
         # reste CONFIRMED que s'il l'est 2/2, sinon il prend le verdict du
         # 2e passage (method='llm_doublecheck_demoted'). Coût : n_confirmed appels.
-        if confirm_double_check:
+        # GATE ANTI-VARIANCE des CONFIRMED (constat 10/06) : même avec le prompt durci
+        # ET un contexte large (passage_text médian ~460 car., contient déjà les deux
+        # règles), le juge FLIP-FLOP sur les cas limites — ex. strap tension : 0/5
+        # CONFIRMED au re-test, mais tiré CONFIRMED en ré-adjudication. Un vrai conflit
+        # est CONFIRMED de façon STABLE ; un faux positif ne décroche CONFIRMED que par
+        # tirage rare. On ne GARDE donc CONFIRMED que s'il l'est sur une MAJORITÉ FORTE
+        # de N votes (sinon : verdict modal des votes non-CONFIRMED). Le double-check
+        # 2/2 d'avant laissait passer les tirages rares → généralisé en N votes.
+        # Coût : (confirm_votes-1) appels par candidat CONFIRMED (la minorité).
+        if confirm_double_check and confirm_votes > 1:
+            import dataclasses
+            from collections import Counter
+            need = max(1, int(round(confirm_votes * confirm_threshold)))
             pair_by_key = {(p["a_id"], p["b_id"]): p for p in pairs}
             for idx, rec in enumerate(records):
                 if rec.verdict != "CONFIRMED" or rec.method != "llm":
@@ -304,14 +318,23 @@ class ContradictionAdjudicator:
                 pair = pair_by_key.get((rec.a_id, rec.b_id))
                 if pair is None:
                     continue
-                second = self.adjudicate_pair(pair)
-                if second.verdict != "CONFIRMED":
-                    logger.info(
-                        "[ADJUDICATION] double-check démote %s↔%s : CONFIRMED → %s",
-                        rec.a_id, rec.b_id, second.verdict,
-                    )
-                    second.method = "llm_doublecheck_demoted"
-                    records[idx] = second
+                votes = [rec.verdict] + [
+                    self.adjudicate_pair(pair).verdict for _ in range(confirm_votes - 1)
+                ]
+                n_conf = sum(1 for v in votes if v == "CONFIRMED")
+                if n_conf >= need:
+                    continue  # CONFIRMED robuste → gardé
+                non_conf = [v for v in votes if v != "CONFIRMED"] or ["DIFFERENT_SCOPE"]
+                new_verdict = Counter(non_conf).most_common(1)[0][0]
+                logger.info(
+                    "[ADJUDICATION] vote %d/%d CONFIRMED < %d → démote %s↔%s : CONFIRMED → %s",
+                    n_conf, confirm_votes, need, rec.a_id, rec.b_id, new_verdict,
+                )
+                records[idx] = dataclasses.replace(
+                    rec, verdict=new_verdict, method="llm_multivote_demoted",
+                    reason=(f"Vote anti-variance : {n_conf}/{confirm_votes} CONFIRMED "
+                            f"< {need} requis → {new_verdict}. " + rec.reason)[:600],
+                )
 
         # Écriture des verdicts sur les arêtes
         with driver.session() as s:
