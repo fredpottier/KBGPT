@@ -178,6 +178,9 @@ class ClaimFirstOrchestrator:
         self.facet_matcher = FacetMatcher()
         self.facet_extractor = FacetCandidateExtractor()
         self.facet_registry = facet_registry or FacetRegistry(tenant_id)
+        # Chantier « en-tête de nature documentaire » (B1+B2) — registre de rôles
+        # partagé sur tout le batch, init paresseuse en Phase 7.7. Autonome/flag-gé.
+        self._doc_role_registry = None
         self.claim_clusterer = ClaimClusterer()
         self.relation_detector = RelationDetector()
         self.chain_detector = ChainDetector(
@@ -970,6 +973,48 @@ class ClaimFirstOrchestrator:
             except Exception as e:
                 logger.warning(
                     f"[OSMOSE:ClaimFirst] Phase 7.6 procedure persist failed "
+                    f"(non-blocking): {e}"
+                )
+
+        # Phase 7.7: Profilage documentaire (rôle + résumé + titre) — B1+B2.
+        # Chantier « en-tête de nature documentaire » (doc/ongoing/CH_ENTETE_NATURE_DOC.md).
+        # 1 appel LLM → {summary, role, confidence, rationale} ; rôle normalisé via un
+        # registre :DocRole par tenant ; persistance idempotente sur le nœud :Document.
+        # Autonome, flag-gé (V6_DOC_PROFILE défaut ON), non-bloquant.
+        if self.persist_enabled and self.neo4j_driver:
+            try:
+                from knowbase.claimfirst.document_profile import (
+                    DocumentRoleRegistry,
+                    doc_profile_enabled,
+                    run_document_profiling,
+                )
+
+                if doc_profile_enabled():
+                    if self._doc_role_registry is None:
+                        self._doc_role_registry = DocumentRoleRegistry(result.tenant_id)
+                        self._doc_role_registry.load(self.neo4j_driver)
+
+                    from knowbase.relations.explicit_lineage_detector import (
+                        regulatory_authority,
+                    )
+
+                    prof_title = getattr(cache_result, "doc_title", None) or doc_id
+                    prof_text = getattr(cache_result, "full_text", None) or ""
+
+                    logger.info("[OSMOSE:ClaimFirst] Phase 7.7: Profiling document...")
+                    role = run_document_profiling(
+                        neo4j_driver=self.neo4j_driver,
+                        registry=self._doc_role_registry,
+                        doc_id=doc_id,
+                        tenant_id=result.tenant_id,
+                        title=prof_title,
+                        full_text=prof_text,
+                        authority=regulatory_authority(doc_id),
+                    )
+                    logger.info(f"  -> document role='{role}'")
+            except Exception as e:
+                logger.warning(
+                    f"[OSMOSE:ClaimFirst] Phase 7.7 document profiling failed "
                     f"(non-blocking): {e}"
                 )
 
