@@ -84,6 +84,17 @@ def determine_resume_strategy(job: JobState) -> str:
         return "restart_full"
 
 
+def _resolve_recovery_tenant(job) -> str:
+    """Tenant d'origine pour ré-enquêter un job interrompu.
+
+    Lu depuis la metadata du job (persistée à la création par le ClaimFirst
+    orchestrator). Fallback 'default' UNIQUEMENT pour les jobs legacy créés avant
+    que la metadata tenant ne soit persistée. Ne JAMAIS hardcoder 'default' ici :
+    c'était la cause de la fuite cross-tenant du 11/06 (reprise → tout vers default).
+    """
+    return (getattr(job, "metadata", None) or {}).get("tenant_id") or "default"
+
+
 def recover_all(
     job_manager: Optional[JobManager] = None,
     dry_run: bool = False,
@@ -138,13 +149,23 @@ def recover_all(
             # Pour l'instant, requeue full ClaimFirst (l'orchestrator gère ses propres
             # checkpoints idempotents via MERGE Cypher). Strategy fine sera implémentée
             # en P4 fermeture si besoin.
+            #
+            # CRITIQUE : on relit le tenant d'origine depuis la metadata du job. Avant
+            # (11/06) c'était "default" en dur → toute reprise post-crash misroutait les
+            # claims vers le tenant default (fuite cross-tenant).
+            recovered_tenant = _resolve_recovery_tenant(job)
+            if recovered_tenant == "default" and (job.metadata or {}).get("tenant_id") is None:
+                logger.warning(
+                    f"[Recovery] {job.doc_id} sans tenant en metadata → fallback 'default' "
+                    f"(job legacy ?). Vérifier le corpus cible."
+                )
             cf_job = enqueue_claimfirst_process(
                 doc_ids=[job.doc_id],
-                tenant_id="default",
+                tenant_id=recovered_tenant,
             )
             logger.info(
                 f"[Recovery] Re-enqueued {job.doc_id} as RQ job {cf_job.id} "
-                f"(retry {job.retries})"
+                f"(retry {job.retries}, tenant={recovered_tenant})"
             )
             stats["n_requeued"] += 1
         except Exception as exc:

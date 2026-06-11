@@ -12,6 +12,7 @@ from knowbase.ingestion.resilience import (
     JobStateEnum,
 )
 from knowbase.ingestion.resilience.recovery import (
+    _resolve_recovery_tenant,
     determine_resume_strategy,
     list_recoverable_jobs,
 )
@@ -91,3 +92,29 @@ def test_list_recoverable_includes_active(mgr):
 
     candidates = [j for j in list_recoverable_jobs(mgr) if j.doc_id == doc_id]
     assert len(candidates) == 1
+
+
+# --- Non-régression fuite cross-tenant (11/06) : la reprise doit ré-enquêter
+#     sous le tenant d'origine, jamais "default" en dur. ---
+
+def test_resolve_recovery_tenant_from_metadata():
+    job = JobState(
+        doc_id="x", file_path="/x", state=JobStateEnum.PROCESSING,
+        metadata={"tenant_id": "alcohol_health"},
+    )
+    assert _resolve_recovery_tenant(job) == "alcohol_health"
+
+
+def test_resolve_recovery_tenant_legacy_fallback_default():
+    # Job legacy sans tenant en metadata → fallback explicite "default"
+    job = JobState(doc_id="x", file_path="/x", state=JobStateEnum.PROCESSING)
+    assert _resolve_recovery_tenant(job) == "default"
+
+
+def test_recovery_tenant_roundtrips_through_jobmanager(mgr):
+    # Le tenant persisté au create_job doit être relu intact après get_state
+    doc_id = _new_doc_id()
+    mgr.create_job(doc_id=doc_id, file_path="/x", metadata={"tenant_id": "alcohol_health"})
+    mgr.update_state(doc_id, JobStateEnum.PROCESSING)
+    reloaded = mgr.get_state(doc_id)
+    assert _resolve_recovery_tenant(reloaded) == "alcohol_health"

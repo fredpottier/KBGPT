@@ -873,7 +873,15 @@ class ClaimFirstOrchestrator:
                 from knowbase.ingestion.resilience import JobCheckpoint, JobStateEnum
                 existing = job_manager.get_state(doc_id)
                 if existing is None:
-                    job_manager.create_job(doc_id=doc_id, file_path=cache_result.source_path or "unknown")
+                    # On PERSISTE le tenant_id dans la metadata du job : la reprise
+                    # (recovery.recover_all) doit pouvoir le relire pour ré-enquêter
+                    # sous le BON corpus. Sans ça, la reprise retombait sur "default"
+                    # et misroutait les claims (fuite cross-tenant constatée 11/06).
+                    job_manager.create_job(
+                        doc_id=doc_id,
+                        file_path=cache_result.source_path or "unknown",
+                        metadata={"tenant_id": tenant_id},
+                    )
                 job_manager.update_state(doc_id, JobStateEnum.PROCESSING, checkpoint=JobCheckpoint(phase="extract", progress=0.0))
             except Exception as exc:
                 logger.warning(f"[OSMOSE:ClaimFirst] JobManager init failed: {exc}")
