@@ -252,13 +252,11 @@ Resources:
               VolumeSize: 200
               VolumeType: gp3
               DeleteOnTermination: true
-        NetworkInterfaces:
-          - DeviceIndex: 0
-            SubnetId: subnet-3320d458
-            Groups:
-              - !GetAtt SecurityGroup.GroupId
-            AssociatePublicIpAddress: true
-            DeleteOnTermination: true
+        # Pas de NetworkInterfaces ici : le subnet est choisi par le SpotFleet
+        # (Overrides multi-AZ ci-dessous). L'IP publique vient de l'auto-assign
+        # des subnets (MapPublicIpOnLaunch=True sur les 3). SG au niveau racine.
+        SecurityGroupIds:
+          - !GetAtt SecurityGroup.GroupId
         IamInstanceProfile:
           Arn: !GetAtt InstanceProfile.Arn
         TagSpecifications:
@@ -501,11 +499,19 @@ Resources:
           - LaunchTemplateSpecification:
               LaunchTemplateId: !Ref BurstLaunchTemplate
               Version: !GetAtt BurstLaunchTemplate.LatestVersionNumber
+            # SubnetId multi-AZ (comma-separated) : le fleet diversifie sur les 3
+            # AZ. eu-central-1c (az1) + eu-central-1b (az3) d'abord (capacité 9/9),
+            # eu-central-1a (az2, capacité 1) en dernier. priceCapacityOptimized
+            # choisit le meilleur pool dispo → débloque la pénurie mono-AZ.
             Overrides:
               - InstanceType: g6.2xlarge
+                SubnetId: "subnet-b1a85dfc,subnet-1bae9a61,subnet-3320d458"
               - InstanceType: g6.xlarge
+                SubnetId: "subnet-b1a85dfc,subnet-1bae9a61,subnet-3320d458"
               - InstanceType: g5.2xlarge
+                SubnetId: "subnet-b1a85dfc,subnet-1bae9a61,subnet-3320d458"
               - InstanceType: g5.xlarge
+                SubnetId: "subnet-b1a85dfc,subnet-1bae9a61,subnet-3320d458"
 
 
 Outputs:
