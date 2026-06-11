@@ -268,8 +268,12 @@ class BurstState:
 # tiennent pas ensemble sur 48GB → on sort les embeddings du GPU burst).
 BURST_PROFILES: Dict[str, Dict[str, Any]] = {
     "profile_a": {
-        "label": "Qwen 14B + TEI embarqué (g6 · L4 24GB)",
-        "spot_instance_types": ["g6.2xlarge", "g6.xlarge"],
+        "label": "Qwen 14B + TEI embarqué (g6 · L4 / g5 · A10G — 24GB)",
+        # g5 (A10G 24GB) ajouté en fallback : le spot g6/L4 est régulièrement en
+        # pénurie (score AWS 3/10) → g5 remonte le fulfillment à 7-9/10 pour ~30-45%
+        # de plus en spot, capacité équivalente. Le template burst-spot.yaml déclare
+        # ces 4 types en LaunchSpecifications (profil A ne passe pas InstanceType).
+        "spot_instance_types": ["g6.2xlarge", "g6.xlarge", "g5.2xlarge", "g5.xlarge"],
         "vllm_model": "Qwen/Qwen2.5-14B-Instruct-AWQ",
         "embeddings_on_ec2": True,
         "vllm_gpu_memory_utilization": 0.85,
