@@ -146,6 +146,47 @@ def build_keypoints_no_apoc(drv, tenant):
     return len(groups)
 
 
+def flag_debates(drv, tenant):
+    """Marque is_debate=true les KeyPoints multi-doc dont les positions divergent
+    (stances opposées OU réponses « equals » distinctes sur ≥2 docs) + stocke les
+    positions pour la surface runtime/Atlas."""
+    import json
+    with drv.session() as s:
+        rows = [dict(r) for r in s.run(
+            """MATCH (k:KeyPoint {tenant_id:$tid})<-[:ANSWERS_KEYPOINT]-(c:Claim)
+               RETURN k.kp_id AS kp, k.doc_count AS dc,
+                      collect({doc:split(c.doc_id,'_')[0], stance:c.kp_stance, answer:c.kp_answer}) AS m""",
+            tid=tenant)]
+    n_debate = 0
+    with drv.session() as s:
+        for r in rows:
+            if (r["dc"] or 0) < 2:
+                continue
+            stances = {x["stance"] for x in r["m"] if x.get("stance") and x["stance"] != "none"}
+            ans_by_doc = {}
+            for x in r["m"]:
+                if x.get("answer"):
+                    ans_by_doc.setdefault(x["doc"], set()).add(x["answer"].strip().lower()[:40])
+            distinct_ans = {a for v in ans_by_doc.values() for a in v}
+            divergent = (len(distinct_ans) >= 2 and len(ans_by_doc) >= 2)
+            is_debate = ({"increases", "decreases"} <= stances) or ({"affirms", "denies"} <= stances) or divergent
+            if not is_debate:
+                continue
+            n_debate += 1
+            pos, seen = [], set()
+            for x in r["m"]:
+                k2 = (x["doc"], (x.get("answer") or "")[:50])
+                if x.get("answer") and k2 not in seen:
+                    seen.add(k2)
+                    pos.append({"doc": x["doc"], "stance": x.get("stance"), "answer": x["answer"][:120]})
+                if len(pos) >= 8:
+                    break
+            s.run("MATCH (k:KeyPoint {kp_id:$kp}) SET k.is_debate=true, k.positions_json=$p",
+                  kp=r["kp"], p=json.dumps(pos, ensure_ascii=False))
+    print(f"[KeyPoint] {n_debate} KeyPoint marqués 'débat' (positions divergentes cross-doc)", flush=True)
+    return n_debate
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tenant", default="alcohol_health")
@@ -194,6 +235,7 @@ def main():
         print(f"[KeyPoint] APOC indispo ({e}) → fallback Python", flush=True)
         n = build_keypoints_no_apoc(drv, args.tenant)
         print(f"[KeyPoint] {n} KeyPoint créés (fallback)", flush=True)
+    flag_debates(drv, args.tenant)
     drv.close()
 
 

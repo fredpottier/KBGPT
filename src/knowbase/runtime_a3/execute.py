@@ -662,6 +662,14 @@ class Executor:
         if os.getenv("V6_AUTHORITY_CONFLICT", "1") == "1":
             self._attach_authority_conflicts(results, parse_input.tenant_id)
 
+        # 6) Side-effect DÉBAT KeyPoint (12/06/2026) : si un claim récupéré relève
+        # d'un KeyPoint « débat » (positions divergentes cross-doc sur la même
+        # question), injecter les claims des positions OPPOSÉES dans le contexte —
+        # sinon la synthèse ne voit que la position dominante. C'est l'avantage KG :
+        # présenter le spectre du débat là où le RAG donne une réponse plate.
+        if os.getenv("V6_KEYPOINT_DEBATES", "1") == "1":
+            self._attach_keypoint_debates(results, parse_input.tenant_id)
+
         return ExecuteOutput(
             results=results,
             total_duration_s=time.perf_counter() - t0,
@@ -1409,6 +1417,65 @@ class Executor:
                         continue
                     seen.add(k)
                     r.authority_conflicts.append(summ)
+
+    def _attach_keypoint_debates(self, results: List[ToolResult], tenant_id: str) -> None:
+        """Injecte les positions DIVERGENTES d'un KeyPoint « débat » quand un claim
+        récupéré en relève. Couvre des (stance, réponse) distincts cross-doc (max 5),
+        non déjà présents → la synthèse présente le débat, pas que la position dominante.
+        """
+        present = {c.claim_id for r in results for c in r.claims if c.claim_id}
+        if not present:
+            return
+        cypher = """
+        MATCH (c:Claim {tenant_id:$tenant_id})-[:ANSWERS_KEYPOINT]->(k:KeyPoint {is_debate:true})
+        WHERE c.claim_id IN $claim_ids
+        WITH DISTINCT k
+        MATCH (k)<-[:ANSWERS_KEYPOINT]-(m:Claim)
+        WHERE m.invalidated_at IS NULL
+        RETURN k.question AS question,
+               collect({id:m.claim_id, doc:split(m.doc_id,'_')[0],
+                        stance:m.kp_stance, answer:m.kp_answer})[0..80] AS members
+        """
+        try:
+            rows = self._get_neo4j().execute_query(
+                cypher, tenant_id=tenant_id, claim_ids=list(present),
+            )
+        except Exception:
+            logger.exception("execute: keypoint debate lookup failed (non-fatal)")
+            return
+
+        add_ids: List[str] = []
+        for row in rows:
+            seen_pos: set = set()
+            picked = 0
+            for m in row.get("members") or []:
+                mid = m.get("id")
+                if not mid or mid in present or mid in add_ids:
+                    continue
+                pos_key = (m.get("stance"), (m.get("answer") or "").strip().lower()[:30])
+                if pos_key in seen_pos:
+                    continue
+                seen_pos.add(pos_key)
+                add_ids.append(mid)
+                picked += 1
+                if picked >= 5:
+                    break
+        if not add_ids:
+            return
+        try:
+            load_rows = self._get_neo4j().execute_query(
+                CYPHER_LOAD_CLAIMS_BY_IDS, claim_ids=add_ids, tenant_id=tenant_id,
+            )
+            debate_claims, _ = self._parse_claim_rows(load_rows)
+        except Exception:
+            logger.exception("execute: keypoint debate claim load failed (non-fatal)")
+            return
+        if debate_claims and results:
+            existing = {c.claim_id for c in results[0].claims}
+            for dc in debate_claims:
+                if dc.claim_id not in existing:
+                    results[0].claims.append(dc)
+            logger.info("[KEYPOINT_DEBATE] %d positions divergentes injectées", len(debate_claims))
 
     # ------------------------------------------------------------------
     # Parsing utilities

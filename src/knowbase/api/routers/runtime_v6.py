@@ -17,6 +17,7 @@ Domain-agnostic.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -371,6 +372,58 @@ def _hydrate_citation_sources(claim_ids: List[str]) -> Dict[str, Dict[str, Any]]
         return {}
 
 
+def _build_debate_appendix(claim_ids: List[str]) -> str:
+    """Si un claim cité relève d'un KeyPoint « débat » (positions divergentes
+    cross-doc sur la même question), produit un appendice markdown présentant le
+    spectre des positions. Déterministe → bypass ClaimFilter + synthèse (qui ne
+    voient qu'un côté). C'est l'avantage KG : surfacer le débat là où le RAG donne
+    une réponse plate. Fail-soft : toute erreur → chaîne vide.
+    """
+    if not claim_ids:
+        return ""
+    try:
+        from knowbase.common.clients.neo4j_client import get_neo4j_client
+        rows = get_neo4j_client().execute_query(
+            "MATCH (c:Claim) WHERE c.claim_id IN $ids "
+            "MATCH (c)-[:ANSWERS_KEYPOINT]->(k:KeyPoint {is_debate: true}) "
+            "RETURN DISTINCT k.question AS question, k.positions_json AS positions, "
+            "k.doc_count AS docs ORDER BY docs DESC LIMIT 3",
+            ids=claim_ids,
+        )
+    except Exception:
+        logger.warning("runtime_v6: debate appendix lookup failed", exc_info=True)
+        return ""
+    if not rows:
+        return ""
+    import json as _json
+    blocks: List[str] = []
+    for r in rows:
+        q = r.get("question")
+        try:
+            positions = _json.loads(r.get("positions") or "[]")
+        except Exception:
+            positions = []
+        if not q or len(positions) < 2:
+            continue
+        lines = [
+            f"- **{p.get('doc')}** ({p.get('stance')}) : {p.get('answer')}"
+            for p in positions[:6] if p.get("answer")
+        ]
+        if len(lines) < 2:
+            continue
+        blocks.append(
+            f"**⚠️ Question débattue dans le corpus — _{q}_**\n"
+            f"Les sources divergent ({r.get('docs')} documents) :\n" + "\n".join(lines)
+        )
+    if not blocks:
+        return ""
+    return (
+        "\n\n---\n\n_Le graphe de connaissances a détecté un débat documentaire "
+        "sur cette question (positions précalculées, non visibles d'une recherche "
+        "vectorielle classique) :_\n\n" + "\n\n".join(blocks)
+    )
+
+
 # Suffixe hash hex des doc_ids (ex: "AC_25.562-1B_e14eda4f") → titre lisible.
 _DOC_HASH_SUFFIX_RE = re.compile(r"_[a-f0-9]{6,}$", re.IGNORECASE)
 
@@ -413,8 +466,17 @@ def _build_response(
             IterationTraceDict(**it.to_dict()) for it in result.iterations
         ]
 
+    # Appendice « débat » (KeyPoint is_debate) — déterministe, surface le spectre
+    # des positions divergentes que le ClaimFilter top-5 + la synthèse ont écrasé.
+    answer_text = synth.answer_text
+    if os.getenv("V6_KEYPOINT_DEBATES", "1") == "1":
+        try:
+            answer_text += _build_debate_appendix([cc.claim_id for cc in synth.cited_claims])
+        except Exception:
+            logger.warning("runtime_v6: debate appendix failed (non-fatal)", exc_info=True)
+
     return RuntimeV6Response(
-        answer_text=synth.answer_text,
+        answer_text=answer_text,
         cited_claims=cited_refs,
         mode=synth.mode,
         uncovered_sub_goals_warning=synth.uncovered_sub_goals_warning,
