@@ -237,7 +237,254 @@ Resources:
         - !Ref InstanceRole
 
   # ============================================================================
-  # Spot Fleet - g6/g6e pour Qwen 14B AWQ
+  # Launch Template - config commune (g6 L4 / g5 A10G, 24GB). UN seul UserData.
+  # ============================================================================
+  BurstLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "knowwhere-burst-lt-${BatchId}"
+      LaunchTemplateData:
+        ImageId: !Ref AmiId
+        KeyName: !Ref KeyName
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              VolumeSize: 200
+              VolumeType: gp3
+              DeleteOnTermination: true
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            SubnetId: subnet-3320d458
+            Groups:
+              - !GetAtt SecurityGroup.GroupId
+            AssociatePublicIpAddress: true
+            DeleteOnTermination: true
+        IamInstanceProfile:
+          Arn: !GetAtt InstanceProfile.Arn
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub "knowwhere-burst-${BatchId}"
+              - Key: Project
+                Value: KnowWhere
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -ex
+            exec > >(tee /var/log/user-data.log) 2>&1
+            echo "=== OSMOSE Burst Bootstrap ($(curl -s http://169.254.169.254/latest/meta-data/instance-type)) ==="
+
+            VLLM_MODEL="${VllmModel}"
+            EMBEDDINGS_MODEL="${EmbeddingsModel}"
+            VLLM_PORT="${VllmPort}"
+            EMB_PORT="${EmbeddingsPort}"
+            VLLM_QUANTIZATION="${VllmQuantization}"
+            VLLM_DTYPE="${VllmDtype}"
+            VLLM_GPU_MEM="${VllmGpuMemoryUtilization}"
+            VLLM_MAX_MODEL_LEN="${VllmMaxModelLen}"
+            VLLM_MAX_NUM_SEQS="${VllmMaxNumSeqs}"
+            VLLM_ENABLE_PREFIX_CACHING="${VllmEnablePrefixCaching}"
+            VLLM_ENABLE_CHUNKED_PREFILL="${VllmEnableChunkedPrefill}"
+            VLLM_MAX_NUM_BATCHED_TOKENS="${VllmMaxNumBatchedTokens}"
+            TEI_PAYLOAD_LIMIT="${TeiPayloadLimit}"
+            TEI_MAX_CLIENT_BATCH_SIZE="${TeiMaxClientBatchSize}"
+            TEI_MAX_BATCH_TOKENS="${TeiMaxBatchTokens}"
+
+            # Docker setup
+            if ! command -v docker &> /dev/null; then
+                apt-get update && apt-get install -y docker.io
+            fi
+            systemctl start docker && systemctl enable docker
+
+            # NVIDIA toolkit
+            if ! command -v nvidia-container-toolkit &> /dev/null; then
+                distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+                curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
+                curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
+                    tee /etc/apt/sources.list.d/nvidia-docker.list
+                apt-get update && apt-get install -y nvidia-container-toolkit
+                nvidia-ctk runtime configure --runtime=docker
+                systemctl restart docker
+            fi
+
+            nvidia-smi
+
+            # Désactiver les services systemd de l'AMI Golden
+            echo "Disabling AMI Golden systemd services..."
+            for svc in burst-vllm burst-embeddings burst-healthcheck; do
+                systemctl stop $svc.service 2>/dev/null || true
+                systemctl disable $svc.service 2>/dev/null || true
+            done
+            docker rm -f vllm embeddings 2>/dev/null || true
+
+            # ============================================
+            # Nettoyage disque — supprimer modèles/caches inutiles
+            # ============================================
+            echo "[BURST] Disk cleanup — removing unused models..."
+            python3 << CLEANUP
+            import os, shutil
+            keep_model = "$VLLM_MODEL".replace("/", "--")
+            keep = {keep_model, "intfloat--multilingual-e5-large", "modules"}
+            for d in os.listdir("/models"):
+                if d in keep:
+                    print(f"[BURST]   KEEP: /models/{d}")
+                elif os.path.isdir(f"/models/{d}"):
+                    shutil.rmtree(f"/models/{d}")
+                    print(f"[BURST]   DELETE: /models/{d}")
+            CLEANUP
+            docker image prune -af 2>/dev/null || true
+            echo "[BURST] Disk after cleanup:"
+            df -h / | tail -1
+
+            # ============================================
+            # Créer container vLLM (cache local AMI ou download HuggingFace)
+            # ============================================
+            VLLM_MODEL_PATH="/models/$(echo $VLLM_MODEL | sed 's|/|--|g')"
+
+            # Vérifier si le modèle est en cache local sur l'AMI
+            if [ -f "$VLLM_MODEL_PATH/config.json" ]; then
+                echo "[BURST] Local model cache found at $VLLM_MODEL_PATH"
+                VLLM_MODEL_ARG="/model"
+                VLLM_MODEL_MOUNT="-v $VLLM_MODEL_PATH:/model:ro"
+            else
+                echo "[BURST] No local cache at $VLLM_MODEL_PATH"
+                echo "[BURST] vLLM will download from HuggingFace: $VLLM_MODEL"
+                VLLM_MODEL_ARG="$VLLM_MODEL"
+                VLLM_MODEL_MOUNT=""
+            fi
+
+            # Construire les arguments optionnels
+            VLLM_EXTRA_ARGS=""
+            if [ "$VLLM_ENABLE_PREFIX_CACHING" = "true" ]; then
+                VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-prefix-caching"
+            fi
+            if [ "$VLLM_ENABLE_CHUNKED_PREFILL" = "true" ]; then
+                VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-chunked-prefill --max-num-batched-tokens $VLLM_MAX_NUM_BATCHED_TOKENS"
+            fi
+
+            # Tool calling activé pour runtime V5.1 agent (tool_choice=auto).
+            # Inerte pour les appels sans tools (extraction claims) — safe.
+            TOOL_CALL_PARSER="${!VLLM_TOOL_CALL_PARSER:-hermes}"
+            VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-auto-tool-choice --tool-call-parser $TOOL_CALL_PARSER"
+            echo "  Auto tool choice: ENABLED (parser=$TOOL_CALL_PARSER)"
+
+            # Attendre que la GPU soit libérée après arrêt des containers AMI
+            echo "Waiting for GPU memory cleanup..."
+            sleep 5
+
+            # Patch AWQ Marlin pour vLLM v0.6.6 (8.5x speedup)
+            AWQ_PATCH_DIR="/opt/burst/patches"
+            mkdir -p $AWQ_PATCH_DIR
+            VLLM_IMAGE="vllm/vllm-openai:v0.6.6.post1"
+            # Chemin Python dans vLLM v0.6.6.post1 (Python 3.12)
+            AWQ_MARLIN_PATH="/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py"
+
+            docker create --name vllm-patch-temp $VLLM_IMAGE 2>/dev/null
+            docker cp vllm-patch-temp:$AWQ_MARLIN_PATH $AWQ_PATCH_DIR/awq_marlin.py
+            docker rm vllm-patch-temp
+
+            python3 << 'AWQ_PATCH'
+            path = "/opt/burst/patches/awq_marlin.py"
+            with open(path) as f:
+                code = f.read()
+            old = 'or user_quant == "awq_marlin")'
+            new = 'or user_quant == "awq_marlin"\n                            or user_quant == "awq")'
+            if old in code and 'or user_quant == "awq")' not in code:
+                with open(path, 'w') as f:
+                    f.write(code.replace(old, new))
+                print("[BURST] Patched awq_marlin.py for Marlin kernel activation")
+            else:
+                print("[BURST] awq_marlin.py already patched or not needed")
+            AWQ_PATCH
+
+            docker run -d --gpus all --restart unless-stopped \
+                -p $VLLM_PORT:8000 --name vllm \
+                $VLLM_MODEL_MOUNT \
+                -v $AWQ_PATCH_DIR/awq_marlin.py:$AWQ_MARLIN_PATH:ro \
+                $VLLM_IMAGE \
+                --model $VLLM_MODEL_ARG \
+                --quantization $VLLM_QUANTIZATION \
+                --dtype $VLLM_DTYPE \
+                --gpu-memory-utilization $VLLM_GPU_MEM \
+                --max-model-len $VLLM_MAX_MODEL_LEN \
+                --max-num-seqs $VLLM_MAX_NUM_SEQS \
+                --trust-remote-code \
+                $VLLM_EXTRA_ARGS
+
+            # Recréer container TEI
+            TEI_MODEL_PATH="/models/$(echo $EMBEDDINGS_MODEL | sed 's|/|--|g')"
+            docker rm -f embeddings 2>/dev/null || true
+
+            # Vérifier si le modèle TEI est en cache local
+            if [ -d "$TEI_MODEL_PATH" ] && [ -f "$TEI_MODEL_PATH/config.json" ]; then
+                echo "[BURST] TEI local cache found at $TEI_MODEL_PATH"
+                TEI_MODEL_ARG="/data"
+                TEI_MODEL_MOUNT="-v $TEI_MODEL_PATH:/data"
+            else
+                echo "[BURST] TEI no local cache — will download: $EMBEDDINGS_MODEL"
+                TEI_MODEL_ARG="$EMBEDDINGS_MODEL"
+                TEI_MODEL_MOUNT=""
+            fi
+
+            echo "Creating TEI container (1.5)..."
+
+            docker run -d --restart unless-stopped --gpus all \
+                -p $EMB_PORT:80 --name embeddings \
+                $TEI_MODEL_MOUNT \
+                ghcr.io/huggingface/text-embeddings-inference:1.5 \
+                --model-id $TEI_MODEL_ARG \
+                --max-client-batch-size $TEI_MAX_CLIENT_BATCH_SIZE \
+                --max-batch-tokens $TEI_MAX_BATCH_TOKENS \
+                --payload-limit $TEI_PAYLOAD_LIMIT \
+                --dtype float16 \
+                --port 80
+
+            sleep 10
+            docker ps
+
+            # Health endpoint (with Spot interruption detection)
+            cat > /opt/health.py << 'EOF'
+            #!/usr/bin/env python3
+            from http.server import HTTPServer, BaseHTTPRequestHandler
+            import json, urllib.request, urllib.error, os
+            VLLM_PORT = int(os.environ.get("VLLM_PORT", 8000))
+            EMB_PORT = int(os.environ.get("EMB_PORT", 8001))
+            SPOT_URL = "http://169.254.169.254/latest/meta-data/spot/instance-action"
+            class H(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    v = e = False
+                    spot = None
+                    try: v = urllib.request.urlopen(f"http://localhost:{VLLM_PORT}/health", timeout=10).status == 200
+                    except: pass
+                    try: e = urllib.request.urlopen(f"http://localhost:{EMB_PORT}/health", timeout=10).status == 200
+                    except: pass
+                    try:
+                        r = urllib.request.urlopen(SPOT_URL, timeout=2)
+                        if r.status == 200: spot = json.loads(r.read().decode())
+                    except urllib.error.HTTPError: pass
+                    except: pass
+                    self.send_response(200 if v and e else 503)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"vllm": {"healthy": v}, "embeddings": {"healthy": e}, "healthy": v and e, "spot_interruption": spot}).encode())
+                def log_message(self, *a): pass
+            HTTPServer(("", 8080), H).serve_forever()
+            EOF
+            chmod +x /opt/health.py
+            VLLM_PORT=$VLLM_PORT EMB_PORT=$EMB_PORT nohup python3 /opt/health.py > /var/log/health.log 2>&1 &
+
+            echo "Bootstrap complete (Health endpoint includes Spot interruption status)"
+
+
+            # ================================================================
+            # g5.2xlarge - NVIDIA A10G 24GB (fallback si g6/L4 en penurie spot)
+            # Meme 24GB VRAM que L4, bande passante superieure - ideal vLLM/TEI
+            # ================================================================
+
+  # ============================================================================
+  # Spot Fleet - 4 pools de capacité (g6.2xlarge, g6.xlarge, g5.2xlarge, g5.xlarge)
+  # priceCapacityOptimized : meilleur compromis prix/dispo entre les pools.
   # ============================================================================
   SpotFleet:
     Type: AWS::EC2::SpotFleet
@@ -245,1142 +492,21 @@ Resources:
       SpotFleetRequestConfigData:
         IamFleetRole: !GetAtt SpotFleetRole.Arn
         TargetCapacity: 1
-        AllocationStrategy: priceCapacityOptimized  # Priorise prix avec capacité acceptable
+        AllocationStrategy: priceCapacityOptimized
         Type: maintain
         TerminateInstancesWithExpiration: true
         SpotPrice: !Ref SpotMaxPrice
         ReplaceUnhealthyInstances: true
+        LaunchTemplateConfigs:
+          - LaunchTemplateSpecification:
+              LaunchTemplateId: !Ref BurstLaunchTemplate
+              Version: !GetAtt BurstLaunchTemplate.LatestVersionNumber
+            Overrides:
+              - InstanceType: g6.2xlarge
+              - InstanceType: g6.xlarge
+              - InstanceType: g5.2xlarge
+              - InstanceType: g5.xlarge
 
-        LaunchSpecifications:
-          # ================================================================
-          # g6.2xlarge - NVIDIA L4 24GB (Préféré - moins cher, plus stable)
-          # Prix: ~$0.47-0.48/h vs g6e à ~$1.17-1.70/h
-          # GPU L4 24GB suffit pour Qwen 14B AWQ (~8GB) + TEI (~2GB)
-          # ================================================================
-          - InstanceType: g6.2xlarge
-            # AMI Golden OSMOSE v10 - Qwen2.5-14B-Instruct-AWQ + vLLM 0.9.2
-            ImageId: !Ref AmiId
-            KeyName: !Ref KeyName
-            # Override BlockDeviceMappings : AMI v10 a 120 GB mais saturé
-            # → 200 GB pour cloud-init logs + Docker layers + HF cache + marge
-            BlockDeviceMappings:
-              - DeviceName: /dev/sda1
-                Ebs:
-                  VolumeSize: 200
-                  VolumeType: gp3
-                  DeleteOnTermination: true
-            # NetworkInterfaces avec SubnetId explicite (requis pour SpotFleet)
-            NetworkInterfaces:
-              - DeviceIndex: 0
-                SubnetId: subnet-3320d458
-                Groups:
-                  - !GetAtt SecurityGroup.GroupId
-                AssociatePublicIpAddress: true
-                DeleteOnTermination: true
-            IamInstanceProfile:
-              Arn: !GetAtt InstanceProfile.Arn
-            TagSpecifications:
-              - ResourceType: instance
-                Tags:
-                  - Key: Name
-                    Value: !Sub "knowwhere-burst-${BatchId}"
-                  - Key: Project
-                    Value: KnowWhere
-                  - Key: Component
-                    Value: Burst
-                  - Key: BatchId
-                    Value: !Ref BatchId
-                  - Key: Model
-                    Value: !Ref VllmModel
-            UserData:
-              Fn::Base64: !Sub |
-                #!/bin/bash
-                set -ex
-
-                # ============================================
-                # OSMOSE Burst Instance Bootstrap
-                # Deep Learning AMI - Drivers déjà installés
-                # ============================================
-
-                exec > >(tee /var/log/user-data.log) 2>&1
-                echo "=== OSMOSE Burst Bootstrap ==="
-                echo "Starting at $(date)"
-                echo "Instance type: $(curl -s http://169.254.169.254/latest/meta-data/instance-type)"
-
-                # Variables
-                VLLM_MODEL="${VllmModel}"
-                EMBEDDINGS_MODEL="${EmbeddingsModel}"
-                VLLM_PORT="${VllmPort}"
-                EMB_PORT="${EmbeddingsPort}"
-                VLLM_QUANTIZATION="${VllmQuantization}"
-                VLLM_DTYPE="${VllmDtype}"
-                VLLM_GPU_MEM="${VllmGpuMemoryUtilization}"
-                VLLM_MAX_MODEL_LEN="${VllmMaxModelLen}"
-                VLLM_MAX_NUM_SEQS="${VllmMaxNumSeqs}"
-                VLLM_ENABLE_PREFIX_CACHING="${VllmEnablePrefixCaching}"
-                VLLM_ENABLE_CHUNKED_PREFILL="${VllmEnableChunkedPrefill}"
-                VLLM_MAX_NUM_BATCHED_TOKENS="${VllmMaxNumBatchedTokens}"
-                TEI_PAYLOAD_LIMIT="${TeiPayloadLimit}"
-                TEI_MAX_CLIENT_BATCH_SIZE="${TeiMaxClientBatchSize}"
-                TEI_MAX_BATCH_TOKENS="${TeiMaxBatchTokens}"
-
-                # ============================================
-                # Docker Setup (DLAMI a Docker préinstallé)
-                # ============================================
-                echo "Setting up Docker..."
-
-                # Sur Ubuntu DLAMI, Docker est déjà installé
-                if ! command -v docker &> /dev/null; then
-                    apt-get update && apt-get install -y docker.io
-                fi
-
-                systemctl start docker
-                systemctl enable docker
-
-                # NVIDIA Container Toolkit (devrait être présent sur DLAMI)
-                if ! command -v nvidia-container-toolkit &> /dev/null; then
-                    echo "Installing NVIDIA Container Toolkit..."
-                    distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-                    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
-                    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
-                        tee /etc/apt/sources.list.d/nvidia-docker.list
-                    apt-get update && apt-get install -y nvidia-container-toolkit
-                    nvidia-ctk runtime configure --runtime=docker
-                    systemctl restart docker
-                fi
-
-                # Vérifier GPU disponible
-                echo "Checking GPU..."
-                nvidia-smi
-
-                # ============================================
-                # Désactiver les services systemd de l'AMI Golden
-                # (ils démarrent avec des paramètres obsolètes)
-                # ============================================
-                echo "Disabling AMI Golden systemd services..."
-                for svc in burst-vllm burst-embeddings burst-healthcheck; do
-                    systemctl stop $svc.service 2>/dev/null || true
-                    systemctl disable $svc.service 2>/dev/null || true
-                done
-                docker rm -f vllm embeddings 2>/dev/null || true
-                echo "AMI services disabled, containers cleaned"
-
-                # ============================================
-                # Nettoyage disque — supprimer modèles/caches inutiles
-                # AMI v8 a Qwen3 + caches HF (~28GB) qu'on n'utilise plus
-                # ============================================
-                echo "[BURST] Disk cleanup — removing unused models..."
-                python3 << CLEANUP
-                import os, shutil
-                keep_model = "$VLLM_MODEL".replace("/", "--")
-                keep = {keep_model, "intfloat--multilingual-e5-large", "modules"}
-                for d in os.listdir("/models"):
-                    if d in keep:
-                        print(f"[BURST]   KEEP: /models/{d}")
-                    elif os.path.isdir(f"/models/{d}"):
-                        shutil.rmtree(f"/models/{d}")
-                        print(f"[BURST]   DELETE: /models/{d}")
-                CLEANUP
-                docker image prune -af 2>/dev/null || true
-                echo "[BURST] Disk after cleanup:"
-                df -h / | tail -1
-
-                # ============================================
-                # Start vLLM with AWQ quantization
-                # ============================================
-                echo "Starting vLLM server..."
-                echo "  Model: $VLLM_MODEL"
-                echo "  Quantization: $VLLM_QUANTIZATION"
-                echo "  GPU Memory: $VLLM_GPU_MEM"
-
-                # Construire les arguments vLLM
-                VLLM_ARGS="--model $VLLM_MODEL"
-                VLLM_ARGS="$VLLM_ARGS --max-model-len $VLLM_MAX_MODEL_LEN"
-                VLLM_ARGS="$VLLM_ARGS --gpu-memory-utilization $VLLM_GPU_MEM"
-                VLLM_ARGS="$VLLM_ARGS --max-num-seqs $VLLM_MAX_NUM_SEQS"
-                VLLM_ARGS="$VLLM_ARGS --trust-remote-code"
-
-                # Ajouter quantization si spécifiée (obligatoire pour AWQ)
-                if [ "$VLLM_QUANTIZATION" != "none" ]; then
-                    VLLM_ARGS="$VLLM_ARGS --quantization $VLLM_QUANTIZATION"
-                fi
-
-                # Ajouter dtype
-                VLLM_ARGS="$VLLM_ARGS --dtype $VLLM_DTYPE"
-
-                echo "vLLM args: $VLLM_ARGS"
-
-                # ============================================
-                # Créer container vLLM (cache local AMI ou download HuggingFace)
-                # ============================================
-                VLLM_MODEL_PATH="/models/$(echo $VLLM_MODEL | sed 's|/|--|g')"
-
-                # Vérifier si le modèle est en cache local sur l'AMI
-                if [ -f "$VLLM_MODEL_PATH/config.json" ]; then
-                    echo "[BURST] Local model cache found at $VLLM_MODEL_PATH"
-                    VLLM_MODEL_ARG="/model"
-                    VLLM_MODEL_MOUNT="-v $VLLM_MODEL_PATH:/model:ro"
-                else
-                    echo "[BURST] No local cache at $VLLM_MODEL_PATH"
-                    echo "[BURST] vLLM will download from HuggingFace: $VLLM_MODEL"
-                    VLLM_MODEL_ARG="$VLLM_MODEL"
-                    VLLM_MODEL_MOUNT=""
-                fi
-
-                # Supprimer ancien container si existant
-                docker rm -f vllm 2>/dev/null || true
-
-                # Construire les arguments optionnels
-                VLLM_EXTRA_ARGS=""
-                if [ "$VLLM_ENABLE_PREFIX_CACHING" = "true" ]; then
-                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-prefix-caching"
-                    echo "  Prefix caching: ENABLED"
-                fi
-                if [ "$VLLM_ENABLE_CHUNKED_PREFILL" = "true" ]; then
-                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-chunked-prefill --max-num-batched-tokens $VLLM_MAX_NUM_BATCHED_TOKENS"
-                    echo "  Chunked prefill: ENABLED (max_batched_tokens=$VLLM_MAX_NUM_BATCHED_TOKENS)"
-                fi
-
-                # Tool calling activé pour runtime V5.1 agent (tool_choice=auto).
-                # Inerte pour les appels sans tools (ex: extraction claims) — donc safe.
-                # Parser "hermes" = standard Qwen 2.5. Pour Qwen3, override via env :
-                # VLLM_TOOL_CALL_PARSER=qwen3 (et set --reasoning-parser à la place).
-                TOOL_CALL_PARSER="${!VLLM_TOOL_CALL_PARSER:-hermes}"
-                VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-auto-tool-choice --tool-call-parser $TOOL_CALL_PARSER"
-                echo "  Auto tool choice: ENABLED (parser=$TOOL_CALL_PARSER)"
-
-                # Attendre que la GPU soit libérée après arrêt des containers AMI
-                echo "Waiting for GPU memory cleanup..."
-                sleep 5
-
-                # ============================================
-                # Patch AWQ Marlin pour vLLM v0.6.6
-                # Le config.json de Qwen2.5 a quant_method="awq"
-                # mais vLLM v0.6.6 ne le reconnaît pas pour Marlin.
-                # Sans ce patch : 3.1 t/s. Avec : 26.3 t/s (8.5x)
-                # ============================================
-                AWQ_PATCH_DIR="/opt/burst/patches"
-                mkdir -p $AWQ_PATCH_DIR
-                VLLM_IMAGE="vllm/vllm-openai:v0.6.6.post1"
-                # Chemin Python dans vLLM v0.6.6.post1 (Python 3.12)
-                AWQ_MARLIN_PATH="/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py"
-
-                # Extraire, patcher, préparer le volume-mount
-                docker create --name vllm-patch-temp $VLLM_IMAGE 2>/dev/null
-                docker cp vllm-patch-temp:$AWQ_MARLIN_PATH $AWQ_PATCH_DIR/awq_marlin.py
-                docker rm vllm-patch-temp
-
-                python3 << 'AWQ_PATCH'
-                path = "/opt/burst/patches/awq_marlin.py"
-                with open(path) as f:
-                    code = f.read()
-                old = 'or user_quant == "awq_marlin")'
-                new = 'or user_quant == "awq_marlin"\n                            or user_quant == "awq")'
-                if old in code and 'or user_quant == "awq")' not in code:
-                    with open(path, 'w') as f:
-                        f.write(code.replace(old, new))
-                    print("[BURST] Patched awq_marlin.py for Marlin kernel activation")
-                else:
-                    print("[BURST] awq_marlin.py already patched or not needed")
-                AWQ_PATCH
-
-                # Créer container vLLM avec AWQ Marlin patch
-                docker run -d --gpus all --restart unless-stopped \
-                    -p $VLLM_PORT:8000 --name vllm \
-                    $VLLM_MODEL_MOUNT \
-                    -v $AWQ_PATCH_DIR/awq_marlin.py:$AWQ_MARLIN_PATH:ro \
-                    $VLLM_IMAGE \
-                    --model $VLLM_MODEL_ARG \
-                    --quantization $VLLM_QUANTIZATION \
-                    --dtype $VLLM_DTYPE \
-                    --gpu-memory-utilization $VLLM_GPU_MEM \
-                    --max-model-len $VLLM_MAX_MODEL_LEN \
-                    --max-num-seqs $VLLM_MAX_NUM_SEQS \
-                    --trust-remote-code \
-                    $VLLM_EXTRA_ARGS
-
-                # Recréer container TEI
-                TEI_MODEL_PATH="/models/$(echo $EMBEDDINGS_MODEL | sed 's|/|--|g')"
-                docker rm -f embeddings 2>/dev/null || true
-
-                # Vérifier si le modèle TEI est en cache local
-                if [ -d "$TEI_MODEL_PATH" ] && [ -f "$TEI_MODEL_PATH/config.json" ]; then
-                    echo "[BURST] TEI local cache found at $TEI_MODEL_PATH"
-                    TEI_MODEL_ARG="/data"
-                    TEI_MODEL_MOUNT="-v $TEI_MODEL_PATH:/data"
-                else
-                    echo "[BURST] TEI no local cache — will download: $EMBEDDINGS_MODEL"
-                    TEI_MODEL_ARG="$EMBEDDINGS_MODEL"
-                    TEI_MODEL_MOUNT=""
-                fi
-
-                echo "Creating TEI container (1.5)..."
-                echo "  payload-limit: $TEI_PAYLOAD_LIMIT"
-                echo "  max-client-batch-size: $TEI_MAX_CLIENT_BATCH_SIZE"
-                echo "  max-batch-tokens: $TEI_MAX_BATCH_TOKENS"
-
-                docker run -d --restart unless-stopped --gpus all \
-                    -p $EMB_PORT:80 --name embeddings \
-                    $TEI_MODEL_MOUNT \
-                    ghcr.io/huggingface/text-embeddings-inference:1.5 \
-                    --model-id $TEI_MODEL_ARG \
-                    --max-client-batch-size $TEI_MAX_CLIENT_BATCH_SIZE \
-                    --max-batch-tokens $TEI_MAX_BATCH_TOKENS \
-                    --payload-limit $TEI_PAYLOAD_LIMIT \
-                    --dtype float16 \
-                    --port 80
-
-                # Attendre que les containers soient prêts
-                echo "Waiting for containers to start..."
-                sleep 10
-                docker ps
-
-                # ============================================
-                # Health Check Endpoint
-                # ============================================
-                echo "Creating health check endpoint..."
-
-                cat > /opt/health.py << 'HEALTHEOF'
-                #!/usr/bin/env python3
-                """
-                Health endpoint pour OSMOSE Burst.
-                Vérifie que vLLM ET TEI sont prêts avant de retourner healthy.
-                Inclut aussi le statut d'interruption Spot (polling metadata AWS).
-                """
-                from http.server import HTTPServer, BaseHTTPRequestHandler
-                import json
-                import urllib.request
-                import urllib.error
-                import os
-
-                VLLM_PORT = int(os.environ.get("VLLM_PORT", 8000))
-                EMB_PORT = int(os.environ.get("EMB_PORT", 8001))
-                METADATA_URL = "http://169.254.169.254/latest/meta-data/spot/instance-action"
-
-                class HealthHandler(BaseHTTPRequestHandler):
-                    def do_GET(self):
-                        vllm_ok = False
-                        vllm_msg = "not checked"
-                        emb_ok = False
-                        emb_msg = "not checked"
-                        spot_interruption = None
-
-                        # Check vLLM - /health retourne 200 quand modèle chargé
-                        try:
-                            resp = urllib.request.urlopen(
-                                f"http://localhost:{VLLM_PORT}/health",
-                                timeout=10
-                            )
-                            vllm_ok = resp.status == 200
-                            vllm_msg = "ready" if vllm_ok else f"status {resp.status}"
-                        except urllib.error.URLError as e:
-                            vllm_msg = f"connection error: {e.reason}"
-                        except Exception as e:
-                            vllm_msg = f"error: {str(e)}"
-
-                        # Check TEI
-                        try:
-                            resp = urllib.request.urlopen(
-                                f"http://localhost:{EMB_PORT}/health",
-                                timeout=10
-                            )
-                            emb_ok = resp.status == 200
-                            emb_msg = "ready" if emb_ok else f"status {resp.status}"
-                        except urllib.error.URLError as e:
-                            emb_msg = f"connection error: {e.reason}"
-                        except Exception as e:
-                            emb_msg = f"error: {str(e)}"
-
-                        # Check Spot Interruption (AWS metadata)
-                        # Retourne 404 si pas d'interruption prévue, 200 avec JSON si interruption
-                        try:
-                            resp = urllib.request.urlopen(METADATA_URL, timeout=2)
-                            if resp.status == 200:
-                                spot_interruption = json.loads(resp.read().decode())
-                                print(f"⚠️ SPOT INTERRUPTION DETECTED: {spot_interruption}")
-                        except urllib.error.HTTPError as e:
-                            if e.code != 404:  # 404 = pas d'interruption (normal)
-                                print(f"Spot metadata error: {e.code}")
-                        except Exception:
-                            pass  # Pas d'interruption ou erreur réseau
-
-                        status = {
-                            "vllm": {"healthy": vllm_ok, "message": vllm_msg},
-                            "embeddings": {"healthy": emb_ok, "message": emb_msg},
-                            "healthy": vllm_ok and emb_ok,
-                            "spot_interruption": spot_interruption  # None ou {"action": "terminate", "time": "..."}
-                        }
-
-                        if status["healthy"]:
-                            self.send_response(200)
-                        else:
-                            self.send_response(503)
-
-                        self.send_header("Content-Type", "application/json")
-                        self.end_headers()
-                        self.wfile.write(json.dumps(status, indent=2).encode())
-
-                    def log_message(self, format, *args):
-                        # Log requests pour debug
-                        print(f"Health check: {args[0]}")
-
-                if __name__ == "__main__":
-                    print(f"Health endpoint starting on port 8080...")
-                    print(f"  vLLM port: {VLLM_PORT}")
-                    print(f"  Embeddings port: {EMB_PORT}")
-                    print(f"  Spot metadata: {METADATA_URL}")
-                    server = HTTPServer(("", 8080), HealthHandler)
-                    server.serve_forever()
-                HEALTHEOF
-
-                chmod +x /opt/health.py
-
-                # Lancer health endpoint avec les bons ports
-                VLLM_PORT=$VLLM_PORT EMB_PORT=$EMB_PORT nohup python3 /opt/health.py > /var/log/health.log 2>&1 &
-
-                # ============================================
-                # Monitor les containers au démarrage
-                # ============================================
-                echo "Waiting for containers to start..."
-                sleep 30
-
-                echo "Container status:"
-                docker ps -a
-
-                echo "vLLM logs (last 20 lines):"
-                docker logs vllm --tail 20 || true
-
-                echo "TEI logs (last 20 lines):"
-                docker logs embeddings --tail 20 || true
-
-                # ============================================
-                # Done
-                # ============================================
-                echo "=== Bootstrap complete at $(date) ==="
-                echo "vLLM: http://localhost:$VLLM_PORT"
-                echo "Embeddings: http://localhost:$EMB_PORT"
-                echo "Health: http://localhost:8080 (includes Spot interruption status)"
-
-          # ================================================================
-          # g6.xlarge - NVIDIA L4 24GB (Fallback si 2xlarge indispo)
-          # Moins de vCPU mais même GPU - suffisant pour notre usage
-          # ================================================================
-          - InstanceType: g6.xlarge
-            ImageId: !Ref AmiId
-            KeyName: !Ref KeyName
-            # Override BlockDeviceMappings : AMI v10 a 120 GB mais saturé
-            # → 200 GB pour cloud-init logs + Docker layers + HF cache + marge
-            BlockDeviceMappings:
-              - DeviceName: /dev/sda1
-                Ebs:
-                  VolumeSize: 200
-                  VolumeType: gp3
-                  DeleteOnTermination: true
-            NetworkInterfaces:
-              - DeviceIndex: 0
-                SubnetId: subnet-3320d458
-                Groups:
-                  - !GetAtt SecurityGroup.GroupId
-                AssociatePublicIpAddress: true
-                DeleteOnTermination: true
-            IamInstanceProfile:
-              Arn: !GetAtt InstanceProfile.Arn
-            TagSpecifications:
-              - ResourceType: instance
-                Tags:
-                  - Key: Name
-                    Value: !Sub "knowwhere-burst-${BatchId}"
-                  - Key: Project
-                    Value: KnowWhere
-            # Même UserData que g6.2xlarge (référence via Sub)
-            UserData:
-              Fn::Base64: !Sub |
-                #!/bin/bash
-                set -ex
-                exec > >(tee /var/log/user-data.log) 2>&1
-                echo "=== OSMOSE Burst Bootstrap (g6.xlarge) ==="
-
-                VLLM_MODEL="${VllmModel}"
-                EMBEDDINGS_MODEL="${EmbeddingsModel}"
-                VLLM_PORT="${VllmPort}"
-                EMB_PORT="${EmbeddingsPort}"
-                VLLM_QUANTIZATION="${VllmQuantization}"
-                VLLM_DTYPE="${VllmDtype}"
-                VLLM_GPU_MEM="${VllmGpuMemoryUtilization}"
-                VLLM_MAX_MODEL_LEN="${VllmMaxModelLen}"
-                VLLM_MAX_NUM_SEQS="${VllmMaxNumSeqs}"
-                VLLM_ENABLE_PREFIX_CACHING="${VllmEnablePrefixCaching}"
-                VLLM_ENABLE_CHUNKED_PREFILL="${VllmEnableChunkedPrefill}"
-                VLLM_MAX_NUM_BATCHED_TOKENS="${VllmMaxNumBatchedTokens}"
-                TEI_PAYLOAD_LIMIT="${TeiPayloadLimit}"
-                TEI_MAX_CLIENT_BATCH_SIZE="${TeiMaxClientBatchSize}"
-                TEI_MAX_BATCH_TOKENS="${TeiMaxBatchTokens}"
-
-                # Docker setup
-                if ! command -v docker &> /dev/null; then
-                    apt-get update && apt-get install -y docker.io
-                fi
-                systemctl start docker && systemctl enable docker
-
-                # NVIDIA toolkit
-                if ! command -v nvidia-container-toolkit &> /dev/null; then
-                    distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-                    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
-                    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
-                        tee /etc/apt/sources.list.d/nvidia-docker.list
-                    apt-get update && apt-get install -y nvidia-container-toolkit
-                    nvidia-ctk runtime configure --runtime=docker
-                    systemctl restart docker
-                fi
-
-                nvidia-smi
-
-                # Désactiver les services systemd de l'AMI Golden
-                echo "Disabling AMI Golden systemd services..."
-                for svc in burst-vllm burst-embeddings burst-healthcheck; do
-                    systemctl stop $svc.service 2>/dev/null || true
-                    systemctl disable $svc.service 2>/dev/null || true
-                done
-                docker rm -f vllm embeddings 2>/dev/null || true
-
-                # ============================================
-                # Nettoyage disque — supprimer modèles/caches inutiles
-                # ============================================
-                echo "[BURST] Disk cleanup — removing unused models..."
-                python3 << CLEANUP
-                import os, shutil
-                keep_model = "$VLLM_MODEL".replace("/", "--")
-                keep = {keep_model, "intfloat--multilingual-e5-large", "modules"}
-                for d in os.listdir("/models"):
-                    if d in keep:
-                        print(f"[BURST]   KEEP: /models/{d}")
-                    elif os.path.isdir(f"/models/{d}"):
-                        shutil.rmtree(f"/models/{d}")
-                        print(f"[BURST]   DELETE: /models/{d}")
-                CLEANUP
-                docker image prune -af 2>/dev/null || true
-                echo "[BURST] Disk after cleanup:"
-                df -h / | tail -1
-
-                # ============================================
-                # Créer container vLLM (cache local AMI ou download HuggingFace)
-                # ============================================
-                VLLM_MODEL_PATH="/models/$(echo $VLLM_MODEL | sed 's|/|--|g')"
-
-                # Vérifier si le modèle est en cache local sur l'AMI
-                if [ -f "$VLLM_MODEL_PATH/config.json" ]; then
-                    echo "[BURST] Local model cache found at $VLLM_MODEL_PATH"
-                    VLLM_MODEL_ARG="/model"
-                    VLLM_MODEL_MOUNT="-v $VLLM_MODEL_PATH:/model:ro"
-                else
-                    echo "[BURST] No local cache at $VLLM_MODEL_PATH"
-                    echo "[BURST] vLLM will download from HuggingFace: $VLLM_MODEL"
-                    VLLM_MODEL_ARG="$VLLM_MODEL"
-                    VLLM_MODEL_MOUNT=""
-                fi
-
-                # Construire les arguments optionnels
-                VLLM_EXTRA_ARGS=""
-                if [ "$VLLM_ENABLE_PREFIX_CACHING" = "true" ]; then
-                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-prefix-caching"
-                fi
-                if [ "$VLLM_ENABLE_CHUNKED_PREFILL" = "true" ]; then
-                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-chunked-prefill --max-num-batched-tokens $VLLM_MAX_NUM_BATCHED_TOKENS"
-                fi
-
-                # Tool calling activé pour runtime V5.1 agent (tool_choice=auto).
-                # Inerte pour les appels sans tools (extraction claims) — safe.
-                TOOL_CALL_PARSER="${!VLLM_TOOL_CALL_PARSER:-hermes}"
-                VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-auto-tool-choice --tool-call-parser $TOOL_CALL_PARSER"
-                echo "  Auto tool choice: ENABLED (parser=$TOOL_CALL_PARSER)"
-
-                # Attendre que la GPU soit libérée après arrêt des containers AMI
-                echo "Waiting for GPU memory cleanup..."
-                sleep 5
-
-                # Patch AWQ Marlin pour vLLM v0.6.6 (8.5x speedup)
-                AWQ_PATCH_DIR="/opt/burst/patches"
-                mkdir -p $AWQ_PATCH_DIR
-                VLLM_IMAGE="vllm/vllm-openai:v0.6.6.post1"
-                # Chemin Python dans vLLM v0.6.6.post1 (Python 3.12)
-                AWQ_MARLIN_PATH="/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py"
-
-                docker create --name vllm-patch-temp $VLLM_IMAGE 2>/dev/null
-                docker cp vllm-patch-temp:$AWQ_MARLIN_PATH $AWQ_PATCH_DIR/awq_marlin.py
-                docker rm vllm-patch-temp
-
-                python3 << 'AWQ_PATCH'
-                path = "/opt/burst/patches/awq_marlin.py"
-                with open(path) as f:
-                    code = f.read()
-                old = 'or user_quant == "awq_marlin")'
-                new = 'or user_quant == "awq_marlin"\n                            or user_quant == "awq")'
-                if old in code and 'or user_quant == "awq")' not in code:
-                    with open(path, 'w') as f:
-                        f.write(code.replace(old, new))
-                    print("[BURST] Patched awq_marlin.py for Marlin kernel activation")
-                else:
-                    print("[BURST] awq_marlin.py already patched or not needed")
-                AWQ_PATCH
-
-                docker run -d --gpus all --restart unless-stopped \
-                    -p $VLLM_PORT:8000 --name vllm \
-                    $VLLM_MODEL_MOUNT \
-                    -v $AWQ_PATCH_DIR/awq_marlin.py:$AWQ_MARLIN_PATH:ro \
-                    $VLLM_IMAGE \
-                    --model $VLLM_MODEL_ARG \
-                    --quantization $VLLM_QUANTIZATION \
-                    --dtype $VLLM_DTYPE \
-                    --gpu-memory-utilization $VLLM_GPU_MEM \
-                    --max-model-len $VLLM_MAX_MODEL_LEN \
-                    --max-num-seqs $VLLM_MAX_NUM_SEQS \
-                    --trust-remote-code \
-                    $VLLM_EXTRA_ARGS
-
-                # Recréer container TEI
-                TEI_MODEL_PATH="/models/$(echo $EMBEDDINGS_MODEL | sed 's|/|--|g')"
-                docker rm -f embeddings 2>/dev/null || true
-
-                # Vérifier si le modèle TEI est en cache local
-                if [ -d "$TEI_MODEL_PATH" ] && [ -f "$TEI_MODEL_PATH/config.json" ]; then
-                    echo "[BURST] TEI local cache found at $TEI_MODEL_PATH"
-                    TEI_MODEL_ARG="/data"
-                    TEI_MODEL_MOUNT="-v $TEI_MODEL_PATH:/data"
-                else
-                    echo "[BURST] TEI no local cache — will download: $EMBEDDINGS_MODEL"
-                    TEI_MODEL_ARG="$EMBEDDINGS_MODEL"
-                    TEI_MODEL_MOUNT=""
-                fi
-
-                echo "Creating TEI container (1.5)..."
-
-                docker run -d --restart unless-stopped --gpus all \
-                    -p $EMB_PORT:80 --name embeddings \
-                    $TEI_MODEL_MOUNT \
-                    ghcr.io/huggingface/text-embeddings-inference:1.5 \
-                    --model-id $TEI_MODEL_ARG \
-                    --max-client-batch-size $TEI_MAX_CLIENT_BATCH_SIZE \
-                    --max-batch-tokens $TEI_MAX_BATCH_TOKENS \
-                    --payload-limit $TEI_PAYLOAD_LIMIT \
-                    --dtype float16 \
-                    --port 80
-
-                sleep 10
-                docker ps
-
-                # Health endpoint (with Spot interruption detection)
-                cat > /opt/health.py << 'EOF'
-                #!/usr/bin/env python3
-                from http.server import HTTPServer, BaseHTTPRequestHandler
-                import json, urllib.request, urllib.error, os
-                VLLM_PORT = int(os.environ.get("VLLM_PORT", 8000))
-                EMB_PORT = int(os.environ.get("EMB_PORT", 8001))
-                SPOT_URL = "http://169.254.169.254/latest/meta-data/spot/instance-action"
-                class H(BaseHTTPRequestHandler):
-                    def do_GET(self):
-                        v = e = False
-                        spot = None
-                        try: v = urllib.request.urlopen(f"http://localhost:{VLLM_PORT}/health", timeout=10).status == 200
-                        except: pass
-                        try: e = urllib.request.urlopen(f"http://localhost:{EMB_PORT}/health", timeout=10).status == 200
-                        except: pass
-                        try:
-                            r = urllib.request.urlopen(SPOT_URL, timeout=2)
-                            if r.status == 200: spot = json.loads(r.read().decode())
-                        except urllib.error.HTTPError: pass
-                        except: pass
-                        self.send_response(200 if v and e else 503)
-                        self.send_header("Content-Type", "application/json")
-                        self.end_headers()
-                        self.wfile.write(json.dumps({"vllm": {"healthy": v}, "embeddings": {"healthy": e}, "healthy": v and e, "spot_interruption": spot}).encode())
-                    def log_message(self, *a): pass
-                HTTPServer(("", 8080), H).serve_forever()
-                EOF
-                chmod +x /opt/health.py
-                VLLM_PORT=$VLLM_PORT EMB_PORT=$EMB_PORT nohup python3 /opt/health.py > /var/log/health.log 2>&1 &
-
-                echo "Bootstrap complete (Health endpoint includes Spot interruption status)"
-
-
-          # ================================================================
-          # g5.2xlarge - NVIDIA A10G 24GB (fallback si g6/L4 en penurie spot)
-          # Meme 24GB VRAM que L4, bande passante superieure - ideal vLLM/TEI
-          # ================================================================
-          - InstanceType: g5.2xlarge
-            ImageId: !Ref AmiId
-            KeyName: !Ref KeyName
-            # Override BlockDeviceMappings : AMI v10 a 120 GB mais saturé
-            # → 200 GB pour cloud-init logs + Docker layers + HF cache + marge
-            BlockDeviceMappings:
-              - DeviceName: /dev/sda1
-                Ebs:
-                  VolumeSize: 200
-                  VolumeType: gp3
-                  DeleteOnTermination: true
-            NetworkInterfaces:
-              - DeviceIndex: 0
-                SubnetId: subnet-3320d458
-                Groups:
-                  - !GetAtt SecurityGroup.GroupId
-                AssociatePublicIpAddress: true
-                DeleteOnTermination: true
-            IamInstanceProfile:
-              Arn: !GetAtt InstanceProfile.Arn
-            TagSpecifications:
-              - ResourceType: instance
-                Tags:
-                  - Key: Name
-                    Value: !Sub "knowwhere-burst-${BatchId}"
-                  - Key: Project
-                    Value: KnowWhere
-            # Même UserData que g6.2xlarge (référence via Sub)
-            UserData:
-              Fn::Base64: !Sub |
-                #!/bin/bash
-                set -ex
-                exec > >(tee /var/log/user-data.log) 2>&1
-                echo "=== OSMOSE Burst Bootstrap (g5.2xlarge) ==="
-
-                VLLM_MODEL="${VllmModel}"
-                EMBEDDINGS_MODEL="${EmbeddingsModel}"
-                VLLM_PORT="${VllmPort}"
-                EMB_PORT="${EmbeddingsPort}"
-                VLLM_QUANTIZATION="${VllmQuantization}"
-                VLLM_DTYPE="${VllmDtype}"
-                VLLM_GPU_MEM="${VllmGpuMemoryUtilization}"
-                VLLM_MAX_MODEL_LEN="${VllmMaxModelLen}"
-                VLLM_MAX_NUM_SEQS="${VllmMaxNumSeqs}"
-                VLLM_ENABLE_PREFIX_CACHING="${VllmEnablePrefixCaching}"
-                VLLM_ENABLE_CHUNKED_PREFILL="${VllmEnableChunkedPrefill}"
-                VLLM_MAX_NUM_BATCHED_TOKENS="${VllmMaxNumBatchedTokens}"
-                TEI_PAYLOAD_LIMIT="${TeiPayloadLimit}"
-                TEI_MAX_CLIENT_BATCH_SIZE="${TeiMaxClientBatchSize}"
-                TEI_MAX_BATCH_TOKENS="${TeiMaxBatchTokens}"
-
-                # Docker setup
-                if ! command -v docker &> /dev/null; then
-                    apt-get update && apt-get install -y docker.io
-                fi
-                systemctl start docker && systemctl enable docker
-
-                # NVIDIA toolkit
-                if ! command -v nvidia-container-toolkit &> /dev/null; then
-                    distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-                    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
-                    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
-                        tee /etc/apt/sources.list.d/nvidia-docker.list
-                    apt-get update && apt-get install -y nvidia-container-toolkit
-                    nvidia-ctk runtime configure --runtime=docker
-                    systemctl restart docker
-                fi
-
-                nvidia-smi
-
-                # Désactiver les services systemd de l'AMI Golden
-                echo "Disabling AMI Golden systemd services..."
-                for svc in burst-vllm burst-embeddings burst-healthcheck; do
-                    systemctl stop $svc.service 2>/dev/null || true
-                    systemctl disable $svc.service 2>/dev/null || true
-                done
-                docker rm -f vllm embeddings 2>/dev/null || true
-
-                # ============================================
-                # Nettoyage disque — supprimer modèles/caches inutiles
-                # ============================================
-                echo "[BURST] Disk cleanup — removing unused models..."
-                python3 << CLEANUP
-                import os, shutil
-                keep_model = "$VLLM_MODEL".replace("/", "--")
-                keep = {keep_model, "intfloat--multilingual-e5-large", "modules"}
-                for d in os.listdir("/models"):
-                    if d in keep:
-                        print(f"[BURST]   KEEP: /models/{d}")
-                    elif os.path.isdir(f"/models/{d}"):
-                        shutil.rmtree(f"/models/{d}")
-                        print(f"[BURST]   DELETE: /models/{d}")
-                CLEANUP
-                docker image prune -af 2>/dev/null || true
-                echo "[BURST] Disk after cleanup:"
-                df -h / | tail -1
-
-                # ============================================
-                # Créer container vLLM (cache local AMI ou download HuggingFace)
-                # ============================================
-                VLLM_MODEL_PATH="/models/$(echo $VLLM_MODEL | sed 's|/|--|g')"
-
-                # Vérifier si le modèle est en cache local sur l'AMI
-                if [ -f "$VLLM_MODEL_PATH/config.json" ]; then
-                    echo "[BURST] Local model cache found at $VLLM_MODEL_PATH"
-                    VLLM_MODEL_ARG="/model"
-                    VLLM_MODEL_MOUNT="-v $VLLM_MODEL_PATH:/model:ro"
-                else
-                    echo "[BURST] No local cache at $VLLM_MODEL_PATH"
-                    echo "[BURST] vLLM will download from HuggingFace: $VLLM_MODEL"
-                    VLLM_MODEL_ARG="$VLLM_MODEL"
-                    VLLM_MODEL_MOUNT=""
-                fi
-
-                # Construire les arguments optionnels
-                VLLM_EXTRA_ARGS=""
-                if [ "$VLLM_ENABLE_PREFIX_CACHING" = "true" ]; then
-                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-prefix-caching"
-                fi
-                if [ "$VLLM_ENABLE_CHUNKED_PREFILL" = "true" ]; then
-                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-chunked-prefill --max-num-batched-tokens $VLLM_MAX_NUM_BATCHED_TOKENS"
-                fi
-
-                # Tool calling activé pour runtime V5.1 agent (tool_choice=auto).
-                # Inerte pour les appels sans tools (extraction claims) — safe.
-                TOOL_CALL_PARSER="${!VLLM_TOOL_CALL_PARSER:-hermes}"
-                VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-auto-tool-choice --tool-call-parser $TOOL_CALL_PARSER"
-                echo "  Auto tool choice: ENABLED (parser=$TOOL_CALL_PARSER)"
-
-                # Attendre que la GPU soit libérée après arrêt des containers AMI
-                echo "Waiting for GPU memory cleanup..."
-                sleep 5
-
-                # Patch AWQ Marlin pour vLLM v0.6.6 (8.5x speedup)
-                AWQ_PATCH_DIR="/opt/burst/patches"
-                mkdir -p $AWQ_PATCH_DIR
-                VLLM_IMAGE="vllm/vllm-openai:v0.6.6.post1"
-                # Chemin Python dans vLLM v0.6.6.post1 (Python 3.12)
-                AWQ_MARLIN_PATH="/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py"
-
-                docker create --name vllm-patch-temp $VLLM_IMAGE 2>/dev/null
-                docker cp vllm-patch-temp:$AWQ_MARLIN_PATH $AWQ_PATCH_DIR/awq_marlin.py
-                docker rm vllm-patch-temp
-
-                python3 << 'AWQ_PATCH'
-                path = "/opt/burst/patches/awq_marlin.py"
-                with open(path) as f:
-                    code = f.read()
-                old = 'or user_quant == "awq_marlin")'
-                new = 'or user_quant == "awq_marlin"\n                            or user_quant == "awq")'
-                if old in code and 'or user_quant == "awq")' not in code:
-                    with open(path, 'w') as f:
-                        f.write(code.replace(old, new))
-                    print("[BURST] Patched awq_marlin.py for Marlin kernel activation")
-                else:
-                    print("[BURST] awq_marlin.py already patched or not needed")
-                AWQ_PATCH
-
-                docker run -d --gpus all --restart unless-stopped \
-                    -p $VLLM_PORT:8000 --name vllm \
-                    $VLLM_MODEL_MOUNT \
-                    -v $AWQ_PATCH_DIR/awq_marlin.py:$AWQ_MARLIN_PATH:ro \
-                    $VLLM_IMAGE \
-                    --model $VLLM_MODEL_ARG \
-                    --quantization $VLLM_QUANTIZATION \
-                    --dtype $VLLM_DTYPE \
-                    --gpu-memory-utilization $VLLM_GPU_MEM \
-                    --max-model-len $VLLM_MAX_MODEL_LEN \
-                    --max-num-seqs $VLLM_MAX_NUM_SEQS \
-                    --trust-remote-code \
-                    $VLLM_EXTRA_ARGS
-
-                # Recréer container TEI
-                TEI_MODEL_PATH="/models/$(echo $EMBEDDINGS_MODEL | sed 's|/|--|g')"
-                docker rm -f embeddings 2>/dev/null || true
-
-                # Vérifier si le modèle TEI est en cache local
-                if [ -d "$TEI_MODEL_PATH" ] && [ -f "$TEI_MODEL_PATH/config.json" ]; then
-                    echo "[BURST] TEI local cache found at $TEI_MODEL_PATH"
-                    TEI_MODEL_ARG="/data"
-                    TEI_MODEL_MOUNT="-v $TEI_MODEL_PATH:/data"
-                else
-                    echo "[BURST] TEI no local cache — will download: $EMBEDDINGS_MODEL"
-                    TEI_MODEL_ARG="$EMBEDDINGS_MODEL"
-                    TEI_MODEL_MOUNT=""
-                fi
-
-                echo "Creating TEI container (1.5)..."
-
-                docker run -d --restart unless-stopped --gpus all \
-                    -p $EMB_PORT:80 --name embeddings \
-                    $TEI_MODEL_MOUNT \
-                    ghcr.io/huggingface/text-embeddings-inference:1.5 \
-                    --model-id $TEI_MODEL_ARG \
-                    --max-client-batch-size $TEI_MAX_CLIENT_BATCH_SIZE \
-                    --max-batch-tokens $TEI_MAX_BATCH_TOKENS \
-                    --payload-limit $TEI_PAYLOAD_LIMIT \
-                    --dtype float16 \
-                    --port 80
-
-                sleep 10
-                docker ps
-
-                # Health endpoint (with Spot interruption detection)
-                cat > /opt/health.py << 'EOF'
-                #!/usr/bin/env python3
-                from http.server import HTTPServer, BaseHTTPRequestHandler
-                import json, urllib.request, urllib.error, os
-                VLLM_PORT = int(os.environ.get("VLLM_PORT", 8000))
-                EMB_PORT = int(os.environ.get("EMB_PORT", 8001))
-                SPOT_URL = "http://169.254.169.254/latest/meta-data/spot/instance-action"
-                class H(BaseHTTPRequestHandler):
-                    def do_GET(self):
-                        v = e = False
-                        spot = None
-                        try: v = urllib.request.urlopen(f"http://localhost:{VLLM_PORT}/health", timeout=10).status == 200
-                        except: pass
-                        try: e = urllib.request.urlopen(f"http://localhost:{EMB_PORT}/health", timeout=10).status == 200
-                        except: pass
-                        try:
-                            r = urllib.request.urlopen(SPOT_URL, timeout=2)
-                            if r.status == 200: spot = json.loads(r.read().decode())
-                        except urllib.error.HTTPError: pass
-                        except: pass
-                        self.send_response(200 if v and e else 503)
-                        self.send_header("Content-Type", "application/json")
-                        self.end_headers()
-                        self.wfile.write(json.dumps({"vllm": {"healthy": v}, "embeddings": {"healthy": e}, "healthy": v and e, "spot_interruption": spot}).encode())
-                    def log_message(self, *a): pass
-                HTTPServer(("", 8080), H).serve_forever()
-                EOF
-                chmod +x /opt/health.py
-                VLLM_PORT=$VLLM_PORT EMB_PORT=$EMB_PORT nohup python3 /opt/health.py > /var/log/health.log 2>&1 &
-
-                echo "Bootstrap complete (Health endpoint includes Spot interruption status)"
-
-          # ================================================================
-          # g5.xlarge - NVIDIA A10G 24GB (fallback si g6/L4 en penurie spot)
-          # Meme 24GB VRAM que L4, bande passante superieure - ideal vLLM/TEI
-          # ================================================================
-          - InstanceType: g5.xlarge
-            ImageId: !Ref AmiId
-            KeyName: !Ref KeyName
-            # Override BlockDeviceMappings : AMI v10 a 120 GB mais saturé
-            # → 200 GB pour cloud-init logs + Docker layers + HF cache + marge
-            BlockDeviceMappings:
-              - DeviceName: /dev/sda1
-                Ebs:
-                  VolumeSize: 200
-                  VolumeType: gp3
-                  DeleteOnTermination: true
-            NetworkInterfaces:
-              - DeviceIndex: 0
-                SubnetId: subnet-3320d458
-                Groups:
-                  - !GetAtt SecurityGroup.GroupId
-                AssociatePublicIpAddress: true
-                DeleteOnTermination: true
-            IamInstanceProfile:
-              Arn: !GetAtt InstanceProfile.Arn
-            TagSpecifications:
-              - ResourceType: instance
-                Tags:
-                  - Key: Name
-                    Value: !Sub "knowwhere-burst-${BatchId}"
-                  - Key: Project
-                    Value: KnowWhere
-            # Même UserData que g6.2xlarge (référence via Sub)
-            UserData:
-              Fn::Base64: !Sub |
-                #!/bin/bash
-                set -ex
-                exec > >(tee /var/log/user-data.log) 2>&1
-                echo "=== OSMOSE Burst Bootstrap (g5.xlarge) ==="
-
-                VLLM_MODEL="${VllmModel}"
-                EMBEDDINGS_MODEL="${EmbeddingsModel}"
-                VLLM_PORT="${VllmPort}"
-                EMB_PORT="${EmbeddingsPort}"
-                VLLM_QUANTIZATION="${VllmQuantization}"
-                VLLM_DTYPE="${VllmDtype}"
-                VLLM_GPU_MEM="${VllmGpuMemoryUtilization}"
-                VLLM_MAX_MODEL_LEN="${VllmMaxModelLen}"
-                VLLM_MAX_NUM_SEQS="${VllmMaxNumSeqs}"
-                VLLM_ENABLE_PREFIX_CACHING="${VllmEnablePrefixCaching}"
-                VLLM_ENABLE_CHUNKED_PREFILL="${VllmEnableChunkedPrefill}"
-                VLLM_MAX_NUM_BATCHED_TOKENS="${VllmMaxNumBatchedTokens}"
-                TEI_PAYLOAD_LIMIT="${TeiPayloadLimit}"
-                TEI_MAX_CLIENT_BATCH_SIZE="${TeiMaxClientBatchSize}"
-                TEI_MAX_BATCH_TOKENS="${TeiMaxBatchTokens}"
-
-                # Docker setup
-                if ! command -v docker &> /dev/null; then
-                    apt-get update && apt-get install -y docker.io
-                fi
-                systemctl start docker && systemctl enable docker
-
-                # NVIDIA toolkit
-                if ! command -v nvidia-container-toolkit &> /dev/null; then
-                    distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-                    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
-                    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
-                        tee /etc/apt/sources.list.d/nvidia-docker.list
-                    apt-get update && apt-get install -y nvidia-container-toolkit
-                    nvidia-ctk runtime configure --runtime=docker
-                    systemctl restart docker
-                fi
-
-                nvidia-smi
-
-                # Désactiver les services systemd de l'AMI Golden
-                echo "Disabling AMI Golden systemd services..."
-                for svc in burst-vllm burst-embeddings burst-healthcheck; do
-                    systemctl stop $svc.service 2>/dev/null || true
-                    systemctl disable $svc.service 2>/dev/null || true
-                done
-                docker rm -f vllm embeddings 2>/dev/null || true
-
-                # ============================================
-                # Nettoyage disque — supprimer modèles/caches inutiles
-                # ============================================
-                echo "[BURST] Disk cleanup — removing unused models..."
-                python3 << CLEANUP
-                import os, shutil
-                keep_model = "$VLLM_MODEL".replace("/", "--")
-                keep = {keep_model, "intfloat--multilingual-e5-large", "modules"}
-                for d in os.listdir("/models"):
-                    if d in keep:
-                        print(f"[BURST]   KEEP: /models/{d}")
-                    elif os.path.isdir(f"/models/{d}"):
-                        shutil.rmtree(f"/models/{d}")
-                        print(f"[BURST]   DELETE: /models/{d}")
-                CLEANUP
-                docker image prune -af 2>/dev/null || true
-                echo "[BURST] Disk after cleanup:"
-                df -h / | tail -1
-
-                # ============================================
-                # Créer container vLLM (cache local AMI ou download HuggingFace)
-                # ============================================
-                VLLM_MODEL_PATH="/models/$(echo $VLLM_MODEL | sed 's|/|--|g')"
-
-                # Vérifier si le modèle est en cache local sur l'AMI
-                if [ -f "$VLLM_MODEL_PATH/config.json" ]; then
-                    echo "[BURST] Local model cache found at $VLLM_MODEL_PATH"
-                    VLLM_MODEL_ARG="/model"
-                    VLLM_MODEL_MOUNT="-v $VLLM_MODEL_PATH:/model:ro"
-                else
-                    echo "[BURST] No local cache at $VLLM_MODEL_PATH"
-                    echo "[BURST] vLLM will download from HuggingFace: $VLLM_MODEL"
-                    VLLM_MODEL_ARG="$VLLM_MODEL"
-                    VLLM_MODEL_MOUNT=""
-                fi
-
-                # Construire les arguments optionnels
-                VLLM_EXTRA_ARGS=""
-                if [ "$VLLM_ENABLE_PREFIX_CACHING" = "true" ]; then
-                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-prefix-caching"
-                fi
-                if [ "$VLLM_ENABLE_CHUNKED_PREFILL" = "true" ]; then
-                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-chunked-prefill --max-num-batched-tokens $VLLM_MAX_NUM_BATCHED_TOKENS"
-                fi
-
-                # Tool calling activé pour runtime V5.1 agent (tool_choice=auto).
-                # Inerte pour les appels sans tools (extraction claims) — safe.
-                TOOL_CALL_PARSER="${!VLLM_TOOL_CALL_PARSER:-hermes}"
-                VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-auto-tool-choice --tool-call-parser $TOOL_CALL_PARSER"
-                echo "  Auto tool choice: ENABLED (parser=$TOOL_CALL_PARSER)"
-
-                # Attendre que la GPU soit libérée après arrêt des containers AMI
-                echo "Waiting for GPU memory cleanup..."
-                sleep 5
-
-                # Patch AWQ Marlin pour vLLM v0.6.6 (8.5x speedup)
-                AWQ_PATCH_DIR="/opt/burst/patches"
-                mkdir -p $AWQ_PATCH_DIR
-                VLLM_IMAGE="vllm/vllm-openai:v0.6.6.post1"
-                # Chemin Python dans vLLM v0.6.6.post1 (Python 3.12)
-                AWQ_MARLIN_PATH="/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py"
-
-                docker create --name vllm-patch-temp $VLLM_IMAGE 2>/dev/null
-                docker cp vllm-patch-temp:$AWQ_MARLIN_PATH $AWQ_PATCH_DIR/awq_marlin.py
-                docker rm vllm-patch-temp
-
-                python3 << 'AWQ_PATCH'
-                path = "/opt/burst/patches/awq_marlin.py"
-                with open(path) as f:
-                    code = f.read()
-                old = 'or user_quant == "awq_marlin")'
-                new = 'or user_quant == "awq_marlin"\n                            or user_quant == "awq")'
-                if old in code and 'or user_quant == "awq")' not in code:
-                    with open(path, 'w') as f:
-                        f.write(code.replace(old, new))
-                    print("[BURST] Patched awq_marlin.py for Marlin kernel activation")
-                else:
-                    print("[BURST] awq_marlin.py already patched or not needed")
-                AWQ_PATCH
-
-                docker run -d --gpus all --restart unless-stopped \
-                    -p $VLLM_PORT:8000 --name vllm \
-                    $VLLM_MODEL_MOUNT \
-                    -v $AWQ_PATCH_DIR/awq_marlin.py:$AWQ_MARLIN_PATH:ro \
-                    $VLLM_IMAGE \
-                    --model $VLLM_MODEL_ARG \
-                    --quantization $VLLM_QUANTIZATION \
-                    --dtype $VLLM_DTYPE \
-                    --gpu-memory-utilization $VLLM_GPU_MEM \
-                    --max-model-len $VLLM_MAX_MODEL_LEN \
-                    --max-num-seqs $VLLM_MAX_NUM_SEQS \
-                    --trust-remote-code \
-                    $VLLM_EXTRA_ARGS
-
-                # Recréer container TEI
-                TEI_MODEL_PATH="/models/$(echo $EMBEDDINGS_MODEL | sed 's|/|--|g')"
-                docker rm -f embeddings 2>/dev/null || true
-
-                # Vérifier si le modèle TEI est en cache local
-                if [ -d "$TEI_MODEL_PATH" ] && [ -f "$TEI_MODEL_PATH/config.json" ]; then
-                    echo "[BURST] TEI local cache found at $TEI_MODEL_PATH"
-                    TEI_MODEL_ARG="/data"
-                    TEI_MODEL_MOUNT="-v $TEI_MODEL_PATH:/data"
-                else
-                    echo "[BURST] TEI no local cache — will download: $EMBEDDINGS_MODEL"
-                    TEI_MODEL_ARG="$EMBEDDINGS_MODEL"
-                    TEI_MODEL_MOUNT=""
-                fi
-
-                echo "Creating TEI container (1.5)..."
-
-                docker run -d --restart unless-stopped --gpus all \
-                    -p $EMB_PORT:80 --name embeddings \
-                    $TEI_MODEL_MOUNT \
-                    ghcr.io/huggingface/text-embeddings-inference:1.5 \
-                    --model-id $TEI_MODEL_ARG \
-                    --max-client-batch-size $TEI_MAX_CLIENT_BATCH_SIZE \
-                    --max-batch-tokens $TEI_MAX_BATCH_TOKENS \
-                    --payload-limit $TEI_PAYLOAD_LIMIT \
-                    --dtype float16 \
-                    --port 80
-
-                sleep 10
-                docker ps
-
-                # Health endpoint (with Spot interruption detection)
-                cat > /opt/health.py << 'EOF'
-                #!/usr/bin/env python3
-                from http.server import HTTPServer, BaseHTTPRequestHandler
-                import json, urllib.request, urllib.error, os
-                VLLM_PORT = int(os.environ.get("VLLM_PORT", 8000))
-                EMB_PORT = int(os.environ.get("EMB_PORT", 8001))
-                SPOT_URL = "http://169.254.169.254/latest/meta-data/spot/instance-action"
-                class H(BaseHTTPRequestHandler):
-                    def do_GET(self):
-                        v = e = False
-                        spot = None
-                        try: v = urllib.request.urlopen(f"http://localhost:{VLLM_PORT}/health", timeout=10).status == 200
-                        except: pass
-                        try: e = urllib.request.urlopen(f"http://localhost:{EMB_PORT}/health", timeout=10).status == 200
-                        except: pass
-                        try:
-                            r = urllib.request.urlopen(SPOT_URL, timeout=2)
-                            if r.status == 200: spot = json.loads(r.read().decode())
-                        except urllib.error.HTTPError: pass
-                        except: pass
-                        self.send_response(200 if v and e else 503)
-                        self.send_header("Content-Type", "application/json")
-                        self.end_headers()
-                        self.wfile.write(json.dumps({"vllm": {"healthy": v}, "embeddings": {"healthy": e}, "healthy": v and e, "spot_interruption": spot}).encode())
-                    def log_message(self, *a): pass
-                HTTPServer(("", 8080), H).serve_forever()
-                EOF
-                chmod +x /opt/health.py
-                VLLM_PORT=$VLLM_PORT EMB_PORT=$EMB_PORT nohup python3 /opt/health.py > /var/log/health.log 2>&1 &
-
-                echo "Bootstrap complete (Health endpoint includes Spot interruption status)"
 
 Outputs:
   SpotFleetId:
