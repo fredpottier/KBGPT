@@ -76,32 +76,18 @@ export default function PostImportPage() {
   const [stepDetail, setStepDetail] = useState<string>('')
   const [completedSteps, setCompletedSteps] = useState<string[]>([])
   const [results, setResults] = useState<PipelineResult | null>(null)
-  // Cockpit multi-tenant : un admin peut suivre/lancer le post-import d'un autre tenant
-  const [tenants, setTenants] = useState<TenantInfo[]>([])
+  // Cette page suit le CORPUS ACTIF GLOBAL (un seul aiguillage, dans Admin → Configuration).
+  // Pas de sélecteur local : le backend opère sur le corpus actif ; on l'affiche en lecture seule.
   const [selectedTenant, setSelectedTenant] = useState<string>('')
-  const [ownTenant, setOwnTenant] = useState<string>('')
   // Forcer la ré-adjudication des contradictions déjà jugées (re-juge tout +
   // double-check). À utiliser après une ré-ingestion (1er passage sans double-check).
   const [forceAdjudication, setForceAdjudication] = useState<boolean>(false)
   const toast = useToast()
 
-  // Charger la liste des tenants + le corpus actif global.
-  // Défaut du sélecteur = CORPUS ACTIF (cohérent avec « je travaille sur aero » →
-  // le post-import vise aero) ; repli sur le tenant du compte si indisponible.
   useEffect(() => {
-    Promise.all([
-      api.tenants.list(),
-      api.activeCorpus.get().catch(() => null),
-    ])
-      .then(([res, ac]) => {
-        const list: TenantInfo[] = res.data?.tenants || []
-        setTenants(list)
-        const own = res.data?.own_tenant || list.find((t) => t.is_own)?.tenant_id || ''
-        setOwnTenant(own)
-        const active = (ac as any)?.data?.active_corpus
-        setSelectedTenant((cur) => cur || active || own)
-      })
-      .catch(() => { /* sélecteur masqué si indisponible */ })
+    api.activeCorpus.get()
+      .then((ac: any) => setSelectedTenant(ac?.data?.active_corpus || 'default'))
+      .catch(() => setSelectedTenant('default'))
   }, [])
 
   const loadSteps = useCallback(async () => {
@@ -137,17 +123,6 @@ export default function PostImportPage() {
   }, [toast, selectedTenant])
 
   useEffect(() => { loadSteps() }, [loadSteps])
-
-  // Au changement de tenant : reset l'affichage avant de recharger le statut ciblé
-  const onTenantChange = (next: string) => {
-    if (next === selectedTenant) return
-    setResults(null)
-    setCompletedSteps([])
-    setCurrentStep(null)
-    setRunning(false)
-    setLoading(true)
-    setSelectedTenant(next)
-  }
 
   // Polling status pendant l'exécution
   useEffect(() => {
@@ -204,7 +179,7 @@ export default function PostImportPage() {
     setCompletedSteps([])
 
     try {
-      const res = await api.postImport.run(Array.from(selectedSteps), selectedTenant || ownTenant, forceAdjudication)
+      const res = await api.postImport.run(Array.from(selectedSteps), selectedTenant, forceAdjudication)
       if (res.data?.success) {
         toast({
           title: `Pipeline lancé (${res.data.steps_queued?.length} étapes)`,
@@ -305,57 +280,28 @@ export default function PostImportPage() {
         </Text>
       </VStack>
 
-      {/* Bannière TENANT ciblé — claire et visible (cockpit multi-tenant) */}
-      {tenants.length > 0 && (
+      {/* Bannière CORPUS ACTIF — lecture seule. L'aiguillage unique est dans
+          Admin → Configuration (CorpusSwitcher) ; le post-import s'exécute dessus. */}
+      {selectedTenant && (
         <HStack
           mb={6}
           p={3}
           px={4}
-          bg={selectedTenant !== ownTenant ? 'rgba(234, 179, 8, 0.10)' : 'rgba(99, 102, 241, 0.08)'}
+          bg="rgba(99, 102, 241, 0.08)"
           border="1px solid"
-          borderColor={selectedTenant !== ownTenant ? 'orange.400' : 'border.default'}
+          borderColor="border.default"
           rounded="lg"
-          justify="space-between"
-          flexWrap="wrap"
           gap={3}
+          flexWrap="wrap"
         >
-          <HStack spacing={3}>
-            <Icon as={FiDatabase} color={selectedTenant !== ownTenant ? 'orange.300' : 'brand.300'} />
-            <Text fontSize="sm" color="text.secondary">Tenant ciblé :</Text>
-            <Badge
-              colorScheme={selectedTenant !== ownTenant ? 'orange' : 'brand'}
-              fontSize="sm"
-              px={3}
-              py={1}
-              rounded="md"
-            >
-              {selectedTenant || ownTenant}
-            </Badge>
-            {selectedTenant !== ownTenant && (
-              <Tooltip label={`Vous suivez un autre tenant que le vôtre (${ownTenant}). Lecture/lancement en supervision admin.`}>
-                <Badge colorScheme="orange" variant="outline" fontSize="xs">
-                  hors de votre tenant
-                </Badge>
-              </Tooltip>
-            )}
-          </HStack>
-          <HStack spacing={2}>
-            <Text fontSize="xs" color="text.muted">Changer :</Text>
-            <Select
-              size="sm"
-              maxW="280px"
-              value={selectedTenant}
-              onChange={(e) => onTenantChange(e.target.value)}
-              isDisabled={running}
-              bg="bg.secondary"
-            >
-              {tenants.map((t) => (
-                <option key={t.tenant_id} value={t.tenant_id}>
-                  {t.tenant_id}{t.is_own ? ' (le vôtre)' : ''} — {t.n_claims.toLocaleString()} claims · {t.n_docs} docs
-                </option>
-              ))}
-            </Select>
-          </HStack>
+          <Icon as={FiDatabase} color="brand.300" />
+          <Text fontSize="sm" color="text.secondary">Corpus actif :</Text>
+          <Badge colorScheme="brand" fontSize="sm" px={3} py={1} rounded="md">
+            {selectedTenant}
+          </Badge>
+          <Text fontSize="xs" color="text.muted">
+            le post-import s'exécute sur ce corpus — changez-le dans Admin → Configuration
+          </Text>
         </HStack>
       )}
 

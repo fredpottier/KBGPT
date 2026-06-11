@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from knowbase.api.dependencies import get_tenant_id, get_cockpit_tenant
+from knowbase.common.active_corpus import get_active_corpus
 
 logger = logging.getLogger(__name__)
 
@@ -271,14 +272,10 @@ async def list_steps():
 
 @router.get("/status", response_model=PipelineStatusResponse)
 async def pipeline_status(
-    tenant_id: str = Depends(get_cockpit_tenant),
+    _auth: str = Depends(get_cockpit_tenant),
 ):
-    """État du pipeline en cours d'exécution.
-
-    Multi-tenant : un admin peut suivre un autre tenant via `?tenant_id=X`
-    (ex: suivre un import comparatif sur le tenant `aero` depuis le compte
-    `default`). Cf get_cockpit_tenant.
-    """
+    """État du pipeline du CORPUS ACTIF global (un seul aiguillage)."""
+    tenant_id = get_active_corpus()
     try:
         from knowbase.common.clients.redis_client import get_redis_client
         rc = get_redis_client()
@@ -295,10 +292,10 @@ async def pipeline_status(
 @router.post("/run", response_model=PipelineStartResponse)
 async def run_pipeline(
     request: PipelineRequest,
-    tenant_id: str = Depends(get_tenant_id),
+    _auth: str = Depends(get_tenant_id),
 ):
-    """Lance le pipeline en arrière-plan via RQ."""
-    tenant_id = request.tenant_id or tenant_id
+    """Lance le pipeline en arrière-plan via RQ, sur le CORPUS ACTIF global."""
+    tenant_id = get_active_corpus()
 
     for step_id in request.steps:
         if step_id not in STEPS_BY_ID:
@@ -336,9 +333,9 @@ async def run_pipeline(
 
 @router.post("/cancel")
 async def cancel_pipeline(
-    tenant_id: str = Depends(get_tenant_id),
+    _auth: str = Depends(get_tenant_id),
 ):
-    """Annule le pipeline en cours.
+    """Annule le pipeline en cours sur le CORPUS ACTIF global.
 
     Pose un flag Redis (`osmose:post_import:cancel:{tenant_id}`, TTL 10min) que
     `run_pipeline_job` checke avant chaque étape (cf §A2.6 ADR_RELATIONS_CLAIM_CLAIM).
@@ -348,6 +345,7 @@ async def cancel_pipeline(
     La clé d'état Redis (`osmose:post_import:state:{tenant_id}`) sera finalisée
     par le job lui-même avec `cancelled=True` + `cancelled_at`.
     """
+    tenant_id = get_active_corpus()
     try:
         from knowbase.common.clients.redis_client import get_redis_client
         rc = get_redis_client()

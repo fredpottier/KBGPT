@@ -21,9 +21,11 @@ import {
   Badge,
   Select,
   Button,
+  Input,
+  Divider,
   useToast,
 } from '@chakra-ui/react'
-import { FiLayers, FiCheck } from 'react-icons/fi'
+import { FiLayers, FiCheck, FiPlus } from 'react-icons/fi'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 
@@ -38,6 +40,7 @@ export default function CorpusSwitcher() {
   const toast = useToast()
   const qc = useQueryClient()
   const [selected, setSelected] = useState<string>('')
+  const [newCorpus, setNewCorpus] = useState<string>('')
 
   const { data: activeData } = useQuery<any>({
     queryKey: ['admin', 'active-corpus'],
@@ -172,6 +175,34 @@ export default function CorpusSwitcher() {
               onClick={() => switchMutation.mutate(selected)}
             >
               Activer
+            </Button>
+          </HStack>
+
+          <Divider borderColor="border.default" />
+
+          {/* Créer un nouveau corpus (= nouveau tenant) avant d'ingérer un domaine */}
+          <HStack spacing={3} flexWrap="wrap">
+            <Text fontSize="sm" color="text.muted" minW="90px">
+              Nouveau corpus :
+            </Text>
+            <Input
+              size="sm"
+              maxW="320px"
+              placeholder="ex. alcohol_health"
+              value={newCorpus}
+              onChange={(e) => setNewCorpus(e.target.value.trim())}
+              bg="bg.secondary"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              colorScheme="brand"
+              leftIcon={<FiPlus />}
+              isDisabled={!newCorpus || newCorpus === active}
+              isLoading={switchMutation.isPending}
+              onClick={() => { switchMutation.mutate(newCorpus); setNewCorpus('') }}
+            >
+              Créer &amp; activer
             </Button>
           </HStack>
 

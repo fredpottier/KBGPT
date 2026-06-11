@@ -72,7 +72,9 @@ import {
   FiPlus,
   FiMinus,
   FiFilter,
+  FiLayers,
 } from 'react-icons/fi'
+import { api } from '@/lib/api'
 
 const MotionBox = motion(Box)
 
@@ -890,6 +892,10 @@ export default function DomainContextPage() {
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useDisclosure()
   const toast = useToast()
 
+  // Multi-corpus : cette page suit le CORPUS ACTIF GLOBAL (un seul aiguillage, choisi
+  // dans Admin → Configuration). Bannière en lecture seule pour toujours savoir où on est.
+  const [activeCorpus, setActiveCorpus] = useState<string>('')
+
   // ---- Form state ----
   const [formData, setFormData] = useState<FormData>({ ...INITIAL_FORM_DATA })
 
@@ -1086,6 +1092,9 @@ export default function DomainContextPage() {
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
+    api.activeCorpus.get()
+      .then((r: any) => setActiveCorpus(r?.data?.active_corpus || ''))
+      .catch(() => {})
     loadDomainContext()
   }, [])
 
@@ -1194,7 +1203,7 @@ export default function DomainContextPage() {
       if (response.ok) {
         const data = await response.json()
         setExistingContext(data)
-        toast({ title: 'Contexte sauvegarde', status: 'success', duration: 3000, position: 'top' })
+        toast({ title: `Contexte sauvegardé (${activeCorpus || 'corpus actif'})`, status: 'success', duration: 3000, position: 'top' })
       } else {
         const error = await response.json()
         throw new Error(error.detail || 'Erreur inconnue')
@@ -1309,6 +1318,14 @@ export default function DomainContextPage() {
                   Domain Context
                 </Text>
                 <StatusBadge configured={!!existingContext} />
+                {activeCorpus && (
+                  <Badge colorScheme="brand" variant="subtle" fontSize="sm" px={3} py={1} rounded="md">
+                    <HStack spacing={1.5}>
+                      <Icon as={FiLayers} boxSize={3.5} />
+                      <Text textTransform="none">Corpus : {activeCorpus}</Text>
+                    </HStack>
+                  </Badge>
+                )}
               </HStack>
               <Text color="text.secondary">
                 Contexte metier pour l'extraction intelligente

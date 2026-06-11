@@ -24,6 +24,7 @@ from knowbase.api.schemas.domain_context import (
     DomainContextPreviewRequest,
     DomainContextPreviewResponse,
 )
+from knowbase.common.active_corpus import get_active_corpus
 from knowbase.ontology.domain_context import DomainContextProfile
 from knowbase.ontology.domain_context_store import get_domain_context_store
 from knowbase.config.settings import get_settings
@@ -400,10 +401,11 @@ def _estimate_tokens(text: str) -> int:
     description="Retourne le contexte métier configuré pour cette instance."
 )
 async def get_domain_context():
-    """Récupère le Domain Context actuel."""
+    """Récupère le Domain Context du CORPUS ACTIF global (un seul aiguillage)."""
     try:
+        tenant_id = get_active_corpus()
         store = get_domain_context_store()
-        profile = store.get_profile(DEFAULT_TENANT_ID)
+        profile = store.get_profile(tenant_id)
 
         if not profile:
             raise HTTPException(
@@ -449,8 +451,9 @@ async def get_domain_context():
     description="Configure le contexte métier global. Si un contexte existe déjà, il sera remplacé."
 )
 async def create_or_update_domain_context(data: DomainContextCreate):
-    """Crée ou met à jour le Domain Context."""
+    """Crée ou met à jour le Domain Context du CORPUS ACTIF global."""
     try:
+        tenant_id = get_active_corpus()
         # Générer le prompt d'injection (avec traduction auto si contenu non-anglais)
         llm_injection_prompt, was_translated = _generate_llm_injection_prompt(
             domain_summary=data.domain_summary,
@@ -470,7 +473,7 @@ async def create_or_update_domain_context(data: DomainContextCreate):
         # Créer le profil
         now = datetime.utcnow()
         profile = DomainContextProfile(
-            tenant_id=DEFAULT_TENANT_ID,
+            tenant_id=tenant_id,
             domain_summary=data.domain_summary,
             industry=data.industry,
             sub_domains=data.sub_domains,
@@ -530,10 +533,11 @@ async def create_or_update_domain_context(data: DomainContextCreate):
     description="Supprime le contexte métier. L'instance reviendra en mode générique (domain-agnostic)."
 )
 async def delete_domain_context():
-    """Supprime le Domain Context."""
+    """Supprime le Domain Context du CORPUS ACTIF global."""
     try:
+        tenant_id = get_active_corpus()
         store = get_domain_context_store()
-        deleted = store.delete_profile(DEFAULT_TENANT_ID)
+        deleted = store.delete_profile(tenant_id)
 
         if not deleted:
             raise HTTPException(
