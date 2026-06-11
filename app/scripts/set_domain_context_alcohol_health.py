@@ -144,7 +144,10 @@ def build_profile(tenant: str) -> DomainContextProfile:
             "strict_expected": False,
         }),
         hygiene_entity_stoplist="",
-        active_packs=[],
+        # Pack NER biomédical (scispaCy BC5CDR : CHEMICAL + DISEASE) + prédicats
+        # canoniques REDUCES/INCREASES/ASSOCIATED_WITH — parfait pour les maladies
+        # (outcomes) et les contradictions « réduit vs augmente le risque ».
+        active_packs=["biomedical"],
         context_priority="high",
         llm_injection_prompt=(
             "[DOMAIN CONTEXT - Alcohol & Health Epidemiology]\n\n"
