@@ -442,12 +442,16 @@ async def get_theme_detail(theme_id: str):
             topic_count=rec["topic_count"] or 0,
         )
 
-        # NarrativeTopics qui contiennent au moins une Perspective de ce thème
+        # NarrativeTopics du thème — via t.topic_ids (modèle robuste, marche pour
+        # l'Atlas KeyPoint comme pour l'Atlas canonique ; l'ancien chemin
+        # GROUPS_PERSPECTIVE/INCLUDES_PERSPECTIVE ne couvrait pas l'Atlas KeyPoint
+        # → page thème vide). Fallback sur l'ancien chemin si topic_ids absent.
         topic_rows = session.run("""
-            MATCH (t:AtlasTheme {theme_id: $tid, tenant_id: $tenant})-[:GROUPS_PERSPECTIVE]->(p:Perspective)
-                  <-[:INCLUDES_PERSPECTIVE]-(nt:NarrativeTopic {tenant_id: $tenant})
+            MATCH (t:AtlasTheme {theme_id: $tid, tenant_id: $tenant})
+            WITH t, coalesce(t.topic_ids, []) AS tids
+            UNWIND tids AS topic_id
+            MATCH (nt:NarrativeTopic {topic_id: topic_id, tenant_id: $tenant})
             OPTIONAL MATCH (ar:AtlasRoot)-[hc:HAS_CHAPTER]->(nt)
-            WITH nt, ar, hc, count(DISTINCT p) AS shared_persp_count
             RETURN nt.topic_id AS topic_id,
                    nt.narrative_label AS title,
                    coalesce(nt.executive_summary, '') AS summary,
@@ -456,8 +460,8 @@ async def get_theme_detail(theme_id: str):
                    coalesce(nt.perspective_count, 0) AS persp_count,
                    coalesce(hc.reading_order, 0) AS reading_order,
                    coalesce(ar.canonical_name, '') AS root_name,
-                   shared_persp_count
-            ORDER BY shared_persp_count DESC, claims DESC
+                   0 AS shared_persp_count
+            ORDER BY reading_order, claims DESC
         """, tid=theme_id, tenant=tenant)
         for r in topic_rows:
             detail.related_topics.append(AtlasTopic(
