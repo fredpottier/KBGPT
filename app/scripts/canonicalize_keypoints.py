@@ -58,9 +58,14 @@ RULES:
   Deterministic, terse, lowercase."""
 
 _DEDUP_SYS = """Two canonical questions are given. Answer YES only if they ask EXACTLY the same
-thing (same outcome/measure, same matter), i.e. one is a pure paraphrase of the other (e.g.
-"minimizes health risk" vs "minimizes health loss"). A different outcome, organ, disease, or a
-narrower/broader scope = NO. Return ONLY {"same": true|false}."""
+thing — one is a PURE REWORDING of the other (e.g. "minimizes health risk" vs "minimizes health
+loss"; "is alcohol a risk factor for cancer" vs "does alcohol cause cancer").
+Answer NO if they differ in ANY of:
+- OUTCOME / endpoint (all-cause mortality ≠ cancer ≠ cardiovascular ≠ breast cancer);
+- DOSE / VOLUME (heavy ≠ low-volume ≠ moderate ≠ occasional);
+- POPULATION (men ≠ women ≠ age group);
+- a narrower/broader matter.
+When unsure, answer NO. Return ONLY {"same": true|false}."""
 
 
 def _ckp_id(tenant: str, cq: str) -> str:
@@ -92,19 +97,40 @@ def _normalize_one(llm, TaskType, q):
 
 
 def _write_canon(s, tenant, kp, cq, dim, val):
+    # canon_q_raw = cache IMMUABLE (Phase 1) ; canonical_question = clé de groupement
+    # de travail (Phase 2 peut la re-pointer). Le reset restaure l'une depuis l'autre.
     s.run("""MERGE (cano:CanonicalKeyPoint {ckp_id:$ckp})
                ON CREATE SET cano.tenant_id=$t, cano.canonical_question=$cq, cano.is_debate=false
              WITH cano MATCH (k:KeyPoint {kp_id:$kp})
-             SET k.canonical_question=$cq, k.scope_dim=$dim, k.scope_val=$val
+             SET k.canonical_question=$cq, k.canon_q_raw=$cq, k.scope_dim=$dim, k.scope_val=$val
              MERGE (k)-[:CANON_OF]->(cano)""",
           ckp=_ckp_id(tenant, cq), t=tenant, cq=cq, kp=kp, dim=dim, val=val)
+
+
+def reset_canon(drv, tenant):
+    """Réinit la couche canonique en préservant le cache de normalisation Phase 1.
+    Les familles POLLUÉES (rep avec aliases, issues d'une dédup sur-fusionnée) sont
+    re-normalisées ; les autres gardent leur canon_q_raw (pas de re-LLM)."""
+    with drv.session() as s:
+        polluted = [r["q"] for r in s.run(
+            "MATCH (c:CanonicalKeyPoint {tenant_id:$t}) WHERE c.aliases IS NOT NULL "
+            "RETURN c.canonical_question AS q", t=tenant)]
+        # graine canon_q_raw depuis canonical_question pour les NON polluées (pas de re-LLM)
+        s.run("MATCH (k:KeyPoint {tenant_id:$t}) WHERE k.canonical_question IS NOT NULL "
+              "AND NOT k.canonical_question IN $p AND k.canon_q_raw IS NULL "
+              "SET k.canon_q_raw = k.canonical_question", t=tenant, p=polluted)
+        # force re-normalisation des polluées
+        s.run("MATCH (k:KeyPoint {tenant_id:$t}) WHERE k.canonical_question IN $p "
+              "REMOVE k.canon_q_raw, k.canonical_question", t=tenant, p=polluted)
+        s.run("MATCH (c:CanonicalKeyPoint {tenant_id:$t}) DETACH DELETE c", t=tenant)
+    print(f"reset_canon : {len(polluted)} familles polluées re-normalisées, reste caché", flush=True)
 
 
 def phase1_normalize(drv, tenant, llm, TaskType, workers=8, limit=0):
     with drv.session() as s:
         rows = [dict(r) for r in s.run(
             "MATCH (k:KeyPoint {tenant_id:$t}) RETURN k.kp_id AS kp, k.question AS q, "
-            "k.canonical_question AS cached, k.scope_dim AS sd, k.scope_val AS sv", t=tenant)]
+            "k.canon_q_raw AS cached, k.scope_dim AS sd, k.scope_val AS sv", t=tenant)]
     cached = [r for r in rows if r.get("cached")]
     todo = [r for r in rows if not r.get("cached")]
     if limit:
@@ -137,60 +163,75 @@ def phase1_normalize(drv, tenant, llm, TaskType, workers=8, limit=0):
     return n_fam
 
 
-# ───────────────────── Phase 2 : dédup petit-n (sous-fusion) ────────────────
-def phase2_dedup(drv, tenant, llm, TaskType, thr=0.93, dry=False):
+# ───────────────────── Phase 2 : dédup ancrée sur les familles multi-doc ────────────────
+def _confirm_same(llm, TaskType, q1, q2):
+    try:
+        resp = llm.complete(task_type=TaskType.FAST_CLASSIFICATION,
+            messages=[{"role": "system", "content": _DEDUP_SYS},
+                      {"role": "user", "content": f"Q1: {q1}\nQ2: {q2}\nJSON:"}],
+            temperature=0.0, response_format={"type": "json_object"}, max_tokens=20)
+        return bool(json.loads(resp if isinstance(resp, str) else json.dumps(resp)).get("same"))
+    except Exception:
+        return False
+
+
+def phase2_dedup(drv, tenant, llm, TaskType, thr=0.93, dry=False, workers=8):
+    """Ne dédup QUE les paraphrases des familles MULTI-DOC (seules pertinentes pour les
+    débats + le surfaçage). Borne les confirms LLM (~ancres × voisines) au lieu du O(n²)
+    sur 4000+ familles. Réversible (aliases). Le surfaçage des variantes mono-doc marche
+    car elles sont absorbées dans la famille multi-doc paraphrase."""
     with drv.session() as s:
-        fams = [dict(r) for r in s.run(
+        allf = [dict(r) for r in s.run(
             "MATCH (c:CanonicalKeyPoint {tenant_id:$t})<-[:CANON_OF]-(k:KeyPoint) "
-            "RETURN c.ckp_id AS id, c.canonical_question AS q, count(k) AS n ORDER BY n DESC", t=tenant)]
-    print(f"Phase 2 : dédup de {len(fams)} familles (cosinus ≥{thr} + confirm LLM)", flush=True)
-    if len(fams) < 2:
+            "RETURN c.ckp_id AS id, c.canonical_question AS q, count(k) AS n", t=tenant)]
+        multidoc = set(r["id"] for r in s.run(
+            "MATCH (c:CanonicalKeyPoint {tenant_id:$t})<-[:CANON_OF]-(:KeyPoint)<-[:ANSWERS_KEYPOINT]-(cl:Claim) "
+            "WITH c, count(DISTINCT split(cl.doc_id,'_')[0]) AS dc WHERE dc>=2 RETURN c.ckp_id AS id", t=tenant))
+    anchor_ix = [i for i, f in enumerate(allf) if f["id"] in multidoc]
+    non_anchor_ix = [i for i, f in enumerate(allf) if f["id"] not in multidoc]
+    print(f"Phase 2 : {len(anchor_ix)} ancres multi-doc / {len(allf)} familles "
+          f"(best-anchor, ancres NON fusionnées entre elles, seuil {thr})", flush=True)
+    if not anchor_ix:
         return 0
     from knowbase.common.clients.embeddings import EmbeddingModelManager
-    embs = np.array(EmbeddingModelManager().encode([f"query: {f['q']}" for f in fams]), dtype=np.float32)
+    embs = np.array(EmbeddingModelManager().encode([f"query: {f['q']}" for f in allf]), dtype=np.float32)
     embs /= (np.linalg.norm(embs, axis=1, keepdims=True) + 1e-9)
-    sim = embs @ embs.T
-    # union-find sur paires CONFIRMÉES uniquement (pas cosinus seul → pas de sur-fusion)
-    parent = list(range(len(fams)))
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]; x = parent[x]
-        return x
-    merges = 0
-    for i in range(len(fams)):
-        for j in range(i + 1, len(fams)):
-            if sim[i, j] < thr or find(i) == find(j):
-                continue
-            try:
-                resp = llm.complete(task_type=TaskType.FAST_CLASSIFICATION,
-                    messages=[{"role": "system", "content": _DEDUP_SYS},
-                              {"role": "user", "content": f"Q1: {fams[i]['q']}\nQ2: {fams[j]['q']}\nJSON:"}],
-                    temperature=0.0, response_format={"type": "json_object"}, max_tokens=20)
-                same = bool(json.loads(resp if isinstance(resp, str) else json.dumps(resp)).get("same"))
-            except Exception:
-                same = False
+    A = embs[anchor_ix]  # (nA, d)
+
+    # chaque non-ancre s'attache à SA SEULE meilleure ancre (≥thr) → zéro transitivité,
+    # zéro chaînage. Les ancres (questions distinctes : cancer ≠ mortalité) ne fusionnent
+    # JAMAIS entre elles.
+    candidates = []  # (non_anchor_i, anchor_global_idx, score)
+    for i in non_anchor_ix:
+        sims = A @ embs[i]
+        best = int(np.argmax(sims))
+        if float(sims[best]) >= thr:
+            candidates.append((i, anchor_ix[best], float(sims[best])))
+    print(f"Phase 2 : {len(candidates)} non-ancres candidates à confirmer ({workers} workers)", flush=True)
+
+    from concurrent.futures import ThreadPoolExecutor
+    def conf(p):
+        i, a, sc = p
+        return (i, a, sc, _confirm_same(llm, TaskType, allf[a]["q"], allf[i]["q"]))
+    merges = []  # (non_anchor_i, anchor_a)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for i, a, sc, same in ex.map(conf, candidates):
             if same:
-                print(f"  merge ({sim[i,j]:.3f}) «{fams[i]['q'][:45]}» ⟸ «{fams[j]['q'][:45]}»", flush=True)
-                parent[find(j)] = find(i)  # i = représentant (plus de claims, vient en premier)
-                merges += 1
+                merges.append((i, a))
+                print(f"  attach ({sc:.3f}) «{allf[a]['q'][:42]}» ⟸ «{allf[i]['q'][:42]}»", flush=True)
     if dry or not merges:
-        print(f"Phase 2 : {merges} fusions {'(dry-run, non écrites)' if dry else ''}", flush=True)
-        return merges
-    # re-pointe CANON_OF des dups vers le représentant, supprime le nœud dup
+        print(f"Phase 2 : {len(merges)} rattachements {'(dry-run, non écrits)' if dry else ''}", flush=True)
+        return len(merges)
     with drv.session() as s:
-        for idx in range(len(fams)):
-            root = find(idx)
-            if root == idx:
-                continue
+        for i, a in merges:
             s.run("""MATCH (dup:CanonicalKeyPoint {ckp_id:$d}), (rep:CanonicalKeyPoint {ckp_id:$r})
                      MATCH (dup)<-[old:CANON_OF]-(k:KeyPoint)
                      SET k.canonical_question = rep.canonical_question
-                     MERGE (k)-[:CANON_OF]->(rep)
-                     DELETE old
+                     MERGE (k)-[:CANON_OF]->(rep) DELETE old
                      WITH dup, rep SET rep.aliases = coalesce(rep.aliases,[]) + dup.canonical_question
-                     DETACH DELETE dup""", d=fams[idx]["id"], r=fams[root]["id"])
-    print(f"Phase 2 OK : {merges} fusions appliquées (réversible via aliases)", flush=True)
-    return merges
+                     DETACH DELETE dup""", d=allf[i]["id"], r=allf[a]["id"])
+    print(f"Phase 2 OK : {len(merges)} rattachements (réversible via aliases)", flush=True)
+    return len(merges)
 
 
 # ──────────────── Phase 3 : débat au niveau canonique ─────────────────
@@ -244,11 +285,15 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="phases 1+2 sans phase 3")
     ap.add_argument("--limit", type=int, default=0, help="limiter Phase 1 (test débit)")
     ap.add_argument("--phase1-only", action="store_true")
+    ap.add_argument("--reset-canon", action="store_true",
+                    help="réinit la couche canonique (garde le cache normalisation) avant re-run")
     args = ap.parse_args()
     drv = driver()
     from knowbase.common.llm_router import get_llm_router, TaskType
     llm = get_llm_router()
 
+    if args.reset_canon:
+        reset_canon(drv, args.tenant)
     phase1_normalize(drv, args.tenant, llm, TaskType, workers=16, limit=args.limit)
     if args.phase1_only or args.limit:
         drv.close(); return
