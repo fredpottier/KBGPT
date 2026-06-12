@@ -105,6 +105,39 @@ class KeyPointAtlasGenerator(AtlasGenerator):
         return out
 
 
+def finalize_schema(drv, tenant):
+    """Aligne le schéma sur ce qu'attend l'endpoint /atlas/homepage + crée les
+    AtlasTheme (sinon : page vide / thèmes None). Le générateur de base écrit
+    name/title ; l'endpoint lit canonical_name/narrative_label/claim_count + nœuds
+    AtlasTheme."""
+    with drv.session() as s:
+        s.run("""
+            MATCH (nt:NarrativeTopic {tenant_id:$t})
+            OPTIONAL MATCH (k:KeyPoint {kp_id: nt.perspective_id})
+            SET nt.narrative_label = coalesce(nt.narrative_label, nt.title),
+                nt.claim_count = coalesce(nt.claim_count, k.claim_count, 0),
+                nt.perspective_count = coalesce(nt.perspective_count, 1),
+                nt.subject_names = coalesce(nt.subject_names, [])
+        """, t=tenant)
+        s.run("""
+            MATCH (ar:AtlasRoot {tenant_id:$t}) SET ar.canonical_name = coalesce(ar.canonical_name, ar.name)
+            WITH ar OPTIONAL MATCH (ar)-[hc:HAS_CHAPTER]->(nt:NarrativeTopic)
+            SET hc.reading_order = coalesce(hc.reading_order, 0)
+            WITH ar, sum(coalesce(nt.claim_count,0)) AS cc SET ar.claim_count = cc
+        """, t=tenant)
+        s.run("MATCH (th:AtlasTheme {tenant_id:$t}) DETACH DELETE th", t=tenant)
+        s.run("""
+            MATCH (r:AtlasRoot {tenant_id:$t})
+            OPTIONAL MATCH (r)-[:HAS_CHAPTER]->(x:NarrativeTopic)
+            WITH r, collect(x) AS topics
+            CREATE (th:AtlasTheme {tenant_id:$t, theme_id:'theme_'+r.root_id, label:r.name,
+                description:coalesce(r.description,''), claim_count:coalesce(r.claim_count,0),
+                topic_coverage:size(topics), topic_ids:[x IN topics | x.topic_id],
+                perspective_labels:[x IN topics | x.title][0..5]})
+        """, t=tenant)
+    print("[Atlas-KP] schéma finalisé (champs endpoint + AtlasTheme)", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tenant", default="alcohol_health")
@@ -123,6 +156,7 @@ def main():
     gen = KeyPointAtlasGenerator(driver=drv, vllm_url=vllm_url, tenant_id=args.tenant)
     stats = gen.generate_all(max_perspectives=args.max_topics)
     print(f"[Atlas-KP] topics={stats.n_perspectives_processed} erreurs={len(stats.errors)}", flush=True)
+    finalize_schema(drv, args.tenant)
     drv.close()
 
 
