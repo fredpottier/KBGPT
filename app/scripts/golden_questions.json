@@ -1,0 +1,37 @@
+{
+  "_doc": "Jeux de questions golden pour la non-régression du runtime (chantier remédiation KeyPoint). `expected` = comportement FINAL visé (après étape 1c). Au baseline (Étape 0, chemin global OFF), sensemaking_debate ABSTIENT — c'est le comportement sûr attendu, et il devient le test d'acceptation de l'étape 1c. Catégories : answer = doit répondre (claims cités) ; abstain = doit se taire ; debate = doit répondre ET surfacer le débat.",
+  "corpora": {
+    "alcohol_health": {
+      "tenant_id": "alcohol_health",
+      "questions": [
+        {"q": "L'alcool augmente-t-il le risque de cancer du sein ?", "cat": "in_scope_factual", "expected": "answer"},
+        {"q": "Quel est l'effet de l'alcool sur le risque d'AVC ?", "cat": "in_scope_factual", "expected": "answer"},
+        {"q": "Quels sont les effets de la consommation d'alcool sur la santé ?", "cat": "in_scope_factual_broad", "expected": "answer"},
+        {"q": "Y a-t-il un niveau de consommation d'alcool sans risque pour la sante ?", "cat": "sensemaking_debate", "expected": "debate", "baseline_expected": "abstain"},
+        {"q": "La consommation modérée d'alcool a-t-elle des bénéfices pour la santé ?", "cat": "sensemaking_debate", "expected": "debate", "baseline_expected": "answer", "_note": "a un sujet → répond via RRF au baseline (sans appendice débat) ; débat attendu après étape 2"},
+        {"q": "Existe-t-il une solution miracle universelle ?", "cat": "out_of_scope_subjectless", "expected": "abstain"},
+        {"q": "Y a-t-il un secret pour devenir riche rapidement ?", "cat": "out_of_scope_subjectless", "expected": "abstain"},
+        {"q": "Quelle est la capitale de la France ?", "cat": "out_of_scope_subject_present", "expected": "abstain"},
+        {"q": "Quel est le PIB du Japon en 2020 ?", "cat": "out_of_scope_subject_present", "expected": "abstain"}
+      ]
+    },
+    "aero": {
+      "tenant_id": "aero",
+      "questions": [
+        {"q": "What is the static test requirement for aircraft seats?", "cat": "in_scope_factual", "expected": "answer"},
+        {"q": "What is the HIC (Head Injury Criterion) limit for seats?", "cat": "in_scope_factual", "expected": "answer"},
+        {"q": "What are the crashworthiness requirements for aircraft seats?", "cat": "in_scope_factual_broad", "expected": "answer"},
+        {"q": "Is there a universal miracle solution?", "cat": "out_of_scope_subjectless", "expected": "abstain"},
+        {"q": "What is the capital of France?", "cat": "out_of_scope_subject_present", "expected": "abstain"},
+        {"q": "What replaced AC 21-25A?", "cat": "lifecycle", "expected": "answer"}
+      ]
+    },
+    "sap_ref": {
+      "tenant_id": "sap_ref",
+      "questions": [
+        {"q": "Is there a universal miracle solution?", "cat": "out_of_scope_subjectless", "expected": "abstain"},
+        {"q": "What is the capital of France?", "cat": "out_of_scope_subject_present", "expected": "abstain"}
+      ]
+    }
+  }
+}

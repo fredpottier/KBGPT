@@ -1,0 +1,30 @@
+# SNAPSHOT BASELINE (Étape 0, branche feat/keypoint-remediation, HEAD 1330987 + toggles OFF)
+# 14/17 conformes après relabel (modérée=answer). Les 3 écarts restants = bug I7 PRÉ-EXISTANT
+# (hors-corpus AVEC sujet → répond, ex capitale France). Cible étape 1c. Référence de non-régression.
+#
+corpus           cat                          exp      got      ?   question
+--------------------------------------------------------------------------------------------------------------
+alcohol_health   in_scope_factual             answer   answer   OK  L'alcool augmente-t-il le risque de cancer du sein
+alcohol_health   in_scope_factual             answer   answer   OK  Quel est l'effet de l'alcool sur le risque d'AVC ?
+alcohol_health   in_scope_factual_broad       answer   answer   OK  Quels sont les effets de la consommation d'alcool 
+alcohol_health   sensemaking_debate           abstain  abstain  OK  Y a-t-il un niveau de consommation d'alcool sans r
+alcohol_health   sensemaking_debate           abstain  answer   XX  La consommation modérée d'alcool a-t-elle des béné
+alcohol_health   out_of_scope_subjectless     abstain  abstain  OK  Existe-t-il une solution miracle universelle ?
+alcohol_health   out_of_scope_subjectless     abstain  abstain  OK  Y a-t-il un secret pour devenir riche rapidement ?
+alcohol_health   out_of_scope_subject_present abstain  answer   XX  Quelle est la capitale de la France ?
+alcohol_health   out_of_scope_subject_present abstain  answer   XX  Quel est le PIB du Japon en 2020 ?
+aero             in_scope_factual             answer   answer   OK  What is the static test requirement for aircraft s
+aero             in_scope_factual             answer   answer   OK  What is the HIC (Head Injury Criterion) limit for 
+aero             in_scope_factual_broad       answer   answer   OK  What are the crashworthiness requirements for airc
+aero             out_of_scope_subjectless     abstain  abstain  OK  Is there a universal miracle solution?
+aero             out_of_scope_subject_present abstain  abstain  OK  What is the capital of France?
+aero             lifecycle                    answer   answer   OK  What replaced AC 21-25A?
+sap_ref          out_of_scope_subjectless     abstain  abstain  OK  Is there a universal miracle solution?
+sap_ref          out_of_scope_subject_present abstain  answer   XX  What is the capital of France?
+--------------------------------------------------------------------------------------------------------------
+RESULT 13/17 conformes (baseline)
+MISMATCHES :
+  [alcohol_health/sensemaking_debate] attendu=abstain obtenu=answer — La consommation modérée d'alcool a-t-elle des bénéfices pour
+  [alcohol_health/out_of_scope_subject_present] attendu=abstain obtenu=answer — Quelle est la capitale de la France ?
+  [alcohol_health/out_of_scope_subject_present] attendu=abstain obtenu=answer — Quel est le PIB du Japon en 2020 ?
+  [sap_ref/out_of_scope_subject_present] attendu=abstain obtenu=answer — What is the capital of France?

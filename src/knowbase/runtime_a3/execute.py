@@ -667,7 +667,8 @@ class Executor:
         # question), injecter les claims des positions OPPOSÉES dans le contexte —
         # sinon la synthèse ne voit que la position dominante. C'est l'avantage KG :
         # présenter le spectre du débat là où le RAG donne une réponse plate.
-        if os.getenv("V6_KEYPOINT_DEBATES", "1") == "1":
+        # Défaut OFF (baseline sûre) — réactivé à l'étape 2 (réconciliation I6).
+        if os.getenv("V6_KEYPOINT_DEBATES", "0") == "1":
             self._attach_keypoint_debates(results, parse_input.tenant_id)
 
         return ExecuteOutput(

@@ -173,16 +173,16 @@ class Planner:
         # Execute.kg_claims utilise BM25/vector sur claim.text sans filtre exact subject.
         # En mode legacy, subject=None reste unmappable (filtre Cypher strict).
         #
-        # FIX 12/06/2026 (chemin « global » / questions sensemaking) : la condition
-        # testait `== "1"` (BM25-only) alors que le mode live est "rrf"/"vector"/"rrf_ce"
-        # → une question sans entité-ancre (« y a-t-il un niveau d'alcool sans risque ? »)
-        # tombait en `missing_subject` → abstention, alors que le RRF (vecteur+BM25 sur la
-        # question) n'a PAS besoin de sujet (retrieval concept-level, cf GraphRAG global /
-        # Dense X). On aligne sur kg_claims_list (`!= "0"`) : tout mode hybride tolère
-        # subject=None et route vers le retrieval vectoriel/hybride.
+        # Chemin « global » (question sans sujet-ancre, ex « y a-t-il un niveau
+        # d'alcool sans risque ? »). DÉSACTIVÉ PAR DÉFAUT (baseline sûre = abstention).
+        # Raison (revue archi 12/06) : élargir le retrieval aux questions sans sujet
+        # rouvre l'over-answering sur les questions HORS-corpus (e5 discrimine mal),
+        # ce qui contredit l'abstention calibrée (cœur produit). Réactivation UNIQUEMENT
+        # via le routage d'intention (chantier remédiation, étape 1c) avec le toggle
+        # dédié `V6_GLOBAL_SUBJECTLESS=1` — jamais en global sans garde-fou.
         import os as _os
-        hybrid_mode = _os.getenv("V6_HYBRID_RETRIEVAL", "0") != "0"
-        if not sub_goal.subject_canonical and not hybrid_mode:
+        global_subjectless = _os.getenv("V6_GLOBAL_SUBJECTLESS", "0") == "1"
+        if not sub_goal.subject_canonical and not global_subjectless:
             return [], "missing_subject_for_kg_claims"
 
         params: Dict = {

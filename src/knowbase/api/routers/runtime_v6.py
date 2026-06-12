@@ -489,7 +489,10 @@ def _build_response(
     # Appendice « débat » (KeyPoint is_debate) — déterministe, surface le spectre
     # des positions divergentes que le ClaimFilter top-5 + la synthèse ont écrasé.
     answer_text = synth.answer_text
-    if os.getenv("V6_KEYPOINT_DEBATES", "1") == "1":
+    # Défaut OFF (baseline sûre) : l'appendice débat n'est réactivé qu'après
+    # réconciliation avec la couche CONTRADICTS/adjudication (remédiation étape 2,
+    # invariant I6 — éviter que chat et /referentiel se contredisent).
+    if os.getenv("V6_KEYPOINT_DEBATES", "0") == "1":
         try:
             answer_text += _build_debate_appendix(
                 [cc.claim_id for cc in synth.cited_claims],
