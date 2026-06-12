@@ -1508,13 +1508,16 @@ class Executor:
         present = {c.claim_id for r in results for c in r.claims if c.claim_id}
         if not present:
             return
+        # CIBLE : le débat vit sur la FAMILLE canonique (CanonicalKeyPoint). On agrège
+        # les claims de TOUTES les variantes de surface de la famille (résout la
+        # fragmentation) via CANON_OF.
         cypher = """
-        MATCH (c:Claim {tenant_id:$tenant_id})-[:ANSWERS_KEYPOINT]->(k:KeyPoint {is_debate:true})
+        MATCH (c:Claim {tenant_id:$tenant_id})-[:ANSWERS_KEYPOINT]->(:KeyPoint)-[:CANON_OF]->(cano:CanonicalKeyPoint {is_debate:true})
         WHERE c.claim_id IN $claim_ids
-        WITH DISTINCT k
-        MATCH (k)<-[:ANSWERS_KEYPOINT]-(m:Claim)
+        WITH DISTINCT cano
+        MATCH (cano)<-[:CANON_OF]-(:KeyPoint)<-[:ANSWERS_KEYPOINT]-(m:Claim)
         WHERE m.invalidated_at IS NULL
-        RETURN k.question AS question,
+        RETURN cano.canonical_question AS question,
                collect({id:m.claim_id, doc:split(m.doc_id,'_')[0],
                         stance:m.kp_stance, answer:m.kp_answer})[0..80] AS members
         """

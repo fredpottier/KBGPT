@@ -405,23 +405,17 @@ def _build_debate_appendix(claim_ids: List[str], question: str = "", tenant_id: 
         gn = get_neo4j_client()
         rows = gn.execute_query(
             "MATCH (c:Claim) WHERE c.claim_id IN $ids "
-            "MATCH (c)-[:ANSWERS_KEYPOINT]->(k0:KeyPoint) "
-            # Étape 4 : le DÉCLENCHEMENT suit aussi SAME_DEBATE_AS. La question peut router
-            # vers un KeyPoint non-débat (ex « minimizes health loss », où les 2 GBD sont
-            # d'accord ≈zéro) dont le JUMEAU (« minimizes health risk ») EST le débat confirmé.
-            # On surface alors le débat du jumeau (honnête : l'appendice montre la vraie
-            # question débattue), au lieu de le rater.
-            "OPTIONAL MATCH (k0)-[:SAME_DEBATE_AS]-(twd:KeyPoint {is_debate: true}) "
-            "WITH DISTINCT (CASE WHEN k0.is_debate THEN k0 ELSE twd END) AS k "
-            "WHERE k IS NOT NULL "
-            # Étape 3 : unir les positions des débats JUMEAUX à l'affichage, sans fusionner
-            # les nœuds (les distinctions dose/sexe restent intactes).
-            "OPTIONAL MATCH (k)-[:SAME_DEBATE_AS]-(tw:KeyPoint) "
-            "WITH k, collect(DISTINCT tw.positions_json) AS twin_pos, "
-            "     coalesce(k.doc_count,0) + coalesce(sum(tw.doc_count),0) AS docs_union "
-            "RETURN k.kp_id AS kp_id, k.question AS question, "
-            "k.positions_json AS positions, twin_pos AS twin_positions, "
-            "k.doc_count AS docs, docs_union AS docs_union ORDER BY docs DESC LIMIT 2",
+            # CIBLE (canonicalisation, consensus 12/06) : famille canonique en 1-hop
+            # déterministe. claim → KeyPoint → CANON_OF → CanonicalKeyPoint{is_debate}.
+            # Résout la FRAGMENTATION : le débat-vedette existe en ~8 variantes de surface
+            # (« health risk / loss / …for men ») ; n'importe quelle variante touchée par le
+            # retrieval remonte au débat de FAMILLE. Remplace SAME_DEBATE_AS (jumeaux = même
+            # canonical_question) + la détection par-KeyPoint. Le débat VIT sur le canonical.
+            "MATCH (c)-[:ANSWERS_KEYPOINT]->(:KeyPoint)-[:CANON_OF]->(cano:CanonicalKeyPoint {is_debate: true}) "
+            "WITH DISTINCT cano "
+            "RETURN cano.ckp_id AS kp_id, cano.canonical_question AS question, "
+            "cano.positions_json AS positions "
+            "ORDER BY size(coalesce(cano.positions_json,'')) DESC LIMIT 2",
             ids=candidate_ids,
         )
     except Exception:
@@ -437,18 +431,7 @@ def _build_debate_appendix(claim_ids: List[str], question: str = "", tenant_id: 
             positions = _json.loads(r.get("positions") or "[]")
         except Exception:
             positions = []
-        # Union des positions des débats JUMEAUX (SAME_DEBATE_AS), dédupliquée
-        seen_pos = {(p.get("doc"), (p.get("answer") or "")[:50]) for p in positions}
-        for tp in (r.get("twin_positions") or []):
-            try:
-                for p in _json.loads(tp or "[]"):
-                    key = (p.get("doc"), (p.get("answer") or "")[:50])
-                    if p.get("answer") and key not in seen_pos:
-                        seen_pos.add(key)
-                        positions.append(p)
-            except Exception:
-                pass
-        docs = r.get("docs_union") or r.get("docs")
+        docs = len({p.get("doc") for p in positions if p.get("doc")})
         if not q or len(positions) < 2:
             continue
         lines = [
@@ -465,8 +448,9 @@ def _build_debate_appendix(claim_ids: List[str], question: str = "", tenant_id: 
         confirmed = False
         try:
             vrows = gn.execute_query(
-                "MATCH (a:Claim)-[:ANSWERS_KEYPOINT]->(k:KeyPoint {kp_id:$kp}) "
-                "MATCH (a)-[rr:CONTRADICTS]-(b:Claim)-[:ANSWERS_KEYPOINT]->(k) "
+                "MATCH (cano:CanonicalKeyPoint {ckp_id:$kp}) "
+                "MATCH (a:Claim)-[:ANSWERS_KEYPOINT]->(:KeyPoint)-[:CANON_OF]->(cano) "
+                "MATCH (a)-[rr:CONTRADICTS]-(b:Claim)-[:ANSWERS_KEYPOINT]->(:KeyPoint)-[:CANON_OF]->(cano) "
                 "WHERE rr.invalidated_relation_at IS NULL AND rr.adjudication='CONFIRMED' "
                 "RETURN count(rr) AS n", kp=kp,
             )
