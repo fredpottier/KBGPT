@@ -89,6 +89,29 @@ def _extract_query_identifiers(text: str) -> List[str]:
     return out
 
 
+# Stopwords FR+EN pour extraire les tokens de CONTENU focaux d'une question
+# (grounding KB-aligned, chantier remédiation étape 1b).
+_FOCAL_STOPWORDS = set(
+    "alors aussi avec sans dans pour par sur sous chez vers cette ces leur leurs "
+    "quel quelle quels quelles quoi dont quand comment pourquoi existe avoir etre "
+    "plus moins tres bien mal entre depuis "
+    "what which where when does did do is are was were the and for with that this "
+    "have has there their from into about over under between level risk".split()
+)
+
+
+def _focal_content_tokens(text: str) -> list:
+    """Tokens de contenu (≥4 lettres, hors stopwords) d'une question — pour le
+    grounding entité (le claim top parle-t-il vraiment du sujet de la question ?)."""
+    import re as _re
+    out, seen = [], set()
+    for w in _re.findall(r"[a-zA-Zà-ÿ]{4,}", (text or "").lower()):
+        if w not in _FOCAL_STOPWORDS and w not in seen:
+            seen.add(w)
+            out.append(w)
+    return out
+
+
 # ============================================================================
 # Cypher templates (cf ADR §4)
 # ============================================================================
@@ -670,6 +693,10 @@ class Executor:
         # Défaut OFF (baseline sûre) — réactivé à l'étape 2 (réconciliation I6).
         if os.getenv("V6_KEYPOINT_DEBATES", "0") == "1":
             self._attach_keypoint_debates(results, parse_input.tenant_id)
+
+        # 7) SHADOW (remédiation 1b) : log intent + signaux de couverture KB-aligned,
+        # sans effet. Calibration avant activation du gate (1c).
+        self._shadow_coverage_gate(parse_input)
 
         return ExecuteOutput(
             results=results,
@@ -1526,6 +1553,58 @@ class Executor:
                 if dc.claim_id not in existing:
                     results[0].claims.append(dc)
             logger.info("[KEYPOINT_DEBATE] %d positions divergentes injectées", len(debate_claims))
+
+    def _shadow_coverage_gate(self, parse_input: "ParseInput") -> None:
+        """SHADOW (remédiation étape 1b) — calcule l'intention déterministe + des
+        signaux de couverture KB-aligned (grounding entité, gap, floor) et les LOGGE
+        en JSON. ZÉRO effet sur le comportement (calibration avant activation 1c).
+        Fait sa PROPRE requête vectorielle (scores bruts), indépendante du retrieval
+        principal. Gated par V6_COVERAGE_GATE_SHADOW=1.
+        """
+        if os.getenv("V6_COVERAGE_GATE_SHADOW", "0") != "1":
+            return
+        try:
+            import json as _json
+            import statistics as _stats
+            question = (parse_input.question or "").strip()
+            tenant = parse_input.tenant_id
+            po = getattr(self, "_current_parse_output", None)
+            subjects, kinds, pconf = [], [], 1.0
+            if po is not None:
+                pconf = float(getattr(po, "parse_confidence", 1.0) or 1.0)
+                for sg in (getattr(po, "sub_goals", None) or []):
+                    if getattr(sg, "subject_canonical", None):
+                        subjects.append(sg.subject_canonical)
+                    kinds.append(str(getattr(sg, "kind", "")))
+            # Intention déterministe (consensus 12/06)
+            if pconf < 0.5:
+                intent = "OUT_OF_SCOPE"
+            elif subjects:
+                intent = "LOCAL_FACTUAL"
+            else:
+                intent = "GLOBAL_SENSEMAKING"
+            # Retrieval vectoriel propre → scores bruts + textes
+            emb = self._get_embedder()(f"query: {question}")
+            rows = self._get_neo4j().execute_query(
+                CYPHER_KG_CLAIMS_VECTOR_ONLY, query_embedding=emb,
+                tenant_id=tenant, as_of="2099-01-01", include_history=True,
+            )
+            scores = [float(r.get("score") or 0.0) for r in rows]
+            texts = [(r.get("text") or "").lower() for r in rows]
+            top1 = scores[0] if scores else 0.0
+            gap = (top1 - _stats.median(scores[1:])) if len(scores) > 2 else 0.0
+            focal = _focal_content_tokens(question)
+            n_grounded = sum(1 for t in texts[:10] if any(f in t for f in focal))
+            log = {
+                "tenant": tenant, "intent": intent, "pconf": round(pconf, 2),
+                "n_subjects": len(subjects), "q": question[:90],
+                "top1": round(top1, 3), "gap": round(gap, 3),
+                "n_grounded10": n_grounded, "n_focal": len(focal),
+                "scores5": [round(s, 3) for s in scores[:5]],
+            }
+            logger.info("[SHADOW_GATE] %s", _json.dumps(log, ensure_ascii=False))
+        except Exception:
+            logger.warning("[SHADOW_GATE] failed (non-fatal)", exc_info=True)
 
     # ------------------------------------------------------------------
     # Parsing utilities
