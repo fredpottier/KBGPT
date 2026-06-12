@@ -7,7 +7,8 @@ SIMILARITÉ DE SURFACE (HDBSCAN d'embeddings) → mêmes faiblesses que la déte
 Ici chaque NarrativeTopic = un KeyPoint (une QUESTION normalisée) → groupement par
 le bon axe (« de quoi ça parle »), et les TENSIONS (réponses opposées sous la même
 question) sont surfacées explicitement dans la description → l'Atlas devient
-débat-aware. Roots = thèmes cliniques (cardiovasculaire, cancer, mortalité…).
+débat-aware. Roots = thèmes dérivés des `sub_domains` du domain-context du tenant
+(domain-agnostique : alcool→cardio/onco… ; aéro→sièges/TSO… ; sinon « General »).
 
 Réutilise 100% de la rédaction LLM + roots + persistance d'AtlasGenerator via une
 sous-classe qui surcharge `_load_perspectives`.
@@ -18,27 +19,51 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from collections import Counter
 
 from neo4j import GraphDatabase
 
 from knowbase.atlas.generator import AtlasGenerator
 
-# Thèmes cliniques (root) par mots-clés dans la question
-_THEMES = [
-    ("Cardiovascular", ["cardiovascular", "heart", "coronary", "stroke", "atrial", "blood pressure", "hypertension"]),
-    ("Cancer", ["cancer", "carcino", "tumor", "tumour", "breast", "oesophag", "esophag", "colorect", "pancrea"]),
-    ("Mortality", ["mortality", "death", "all-cause", "life expectancy", "years of life"]),
-    ("Brain & Cognition", ["brain", "cognition", "cognitive", "dementia", "grey matter", "white matter", "iron"]),
-    ("Metabolic", ["diabetes", "metabolic", "gallstone", "liver", "hepat", "pancreatitis"]),
-    ("Minimum-risk level & guidelines", ["minimi", "safe level", "tmrel", "guideline", "recommend", "standard drink", "low-risk"]),
-    ("Methodology & bias", ["mendelian", "randomi", "confound", "bias", "abstainer", "study design", "reverse caus", "selection"]),
-]
+# ── Thèmes DOMAIN-AGNOSTIQUES : dérivés des `sub_domains` du domain-context du
+# tenant (et non plus codés en dur pour l'alcool/santé). Chaque sous-domaine
+# devient un thème (root) dont les mots-clés viennent de son propre libellé.
+# Aucun domain-context / aucun sous-domaine → tout retombe sur « General »
+# (cf. revue octopus : « General unless tenant supplies them »). L'extracteur de
+# questions, lui, généralise déjà sans few-shot spécifique (test I3 validé aéro).
+_THEME_STOP = {"and", "the", "for", "per", "with", "position", "statements",
+               "research", "disease", "amp", "bias", "level", "test"}
 
 
-def theme_for(question: str) -> str:
+def _theme_name(sub_domain: str) -> str:
+    """Libellé court du thème : avant '(', '/', '&'."""
+    base = sub_domain.split("(")[0].split("/")[0].split("&")[0].strip()
+    return base or sub_domain.strip()
+
+
+def _theme_keywords(sub_domain: str) -> list[str]:
+    """Mots-clés (≥4 lettres, dédupliqués, hors stopwords) du libellé complet."""
+    toks = re.findall(r"[a-zA-Z][a-zA-Z\-]{3,}", sub_domain.lower())
+    return [t for t in dict.fromkeys(toks) if t not in _THEME_STOP]
+
+
+def build_theme_map(tenant_id: str) -> list[tuple[str, list[str]]]:
+    """Construit la table thème→mots-clés depuis les sub_domains du domain-context.
+    Retourne [] si pas de contexte (→ tout « General »)."""
+    try:
+        from knowbase.ontology.domain_context_store import get_domain_context_store
+        prof = get_domain_context_store().get_profile(tenant_id)
+        subs = list(prof.sub_domains) if prof and prof.sub_domains else []
+    except Exception:
+        subs = []
+    themes = [(_theme_name(s), kws) for s in subs if (kws := _theme_keywords(s))]
+    return themes
+
+
+def theme_for(question: str, theme_map: list[tuple[str, list[str]]]) -> str:
     q = (question or "").lower()
-    for name, kws in _THEMES:
+    for name, kws in theme_map:
         if any(k in q for k in kws):
             return name
     return "General"
@@ -46,6 +71,16 @@ def theme_for(question: str) -> str:
 
 class KeyPointAtlasGenerator(AtlasGenerator):
     """Atlas sourcé sur les KeyPoints, tension-aware."""
+
+    @property
+    def _theme_map(self) -> list[tuple[str, list[str]]]:
+        cached = getattr(self, "_theme_map_cache", None)
+        if cached is None:
+            cached = build_theme_map(self.tenant_id)
+            self._theme_map_cache = cached
+            print(f"[Atlas-KP] thèmes dérivés du domain-context ({len(cached)}) : "
+                  f"{[n for n, _ in cached] or '— aucun (→ General)'}", flush=True)
+        return cached
 
     def _load_perspectives(self, limit: int) -> list[dict]:
         cypher = """
@@ -95,7 +130,7 @@ class KeyPointAtlasGenerator(AtlasGenerator):
                 "label": r["question"],
                 "description": desc,
                 "subjects": subjects,
-                "facets": [theme_for(r["question"])],
+                "facets": [theme_for(r["question"], self._theme_map)],
                 "keywords": subjects[:5],
                 "claim_count": r["claim_count"],
                 "doc_count": r["doc_count"],

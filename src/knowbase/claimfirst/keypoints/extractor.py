@@ -27,6 +27,15 @@ class KeyPointSignature(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+# NOTE généricité (test I3, validé 12/06/2026) — bien que les EXEMPLES ci-dessous
+# soient illustrés sur l'alcool/santé (corpus de démo), l'extracteur GÉNÉRALISE :
+# testé sur des claims aéro sans aucun exemple aéro, il produit des questions
+# correctes (« what level of forward deceleration must a seat withstand? »,
+# « maximum allowable head injury criterion », acronyme HIC déplié). Les few-shots
+# enseignent le SCHÉMA + le cadrage neutre, qui transfèrent. Le glossaire/contexte
+# SPÉCIFIQUE au tenant est injecté en plus via `context_injector` (inject_context).
+# → On garde volontairement ces few-shots validés (les réécrire ferait dériver le
+#   bucketing des KeyPoints déjà extraits, qui groupent par chaîne EXACTE de question).
 _SYSTEM_PROMPT = """You normalize a scientific CLAIM into the neutral QUESTION it answers, so that
 claims giving OPPOSITE answers to the same matter share an IDENTICAL question string.
 
