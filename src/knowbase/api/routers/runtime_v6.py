@@ -405,14 +405,21 @@ def _build_debate_appendix(claim_ids: List[str], question: str = "", tenant_id: 
         gn = get_neo4j_client()
         rows = gn.execute_query(
             "MATCH (c:Claim) WHERE c.claim_id IN $ids "
-            "MATCH (c)-[:ANSWERS_KEYPOINT]->(k:KeyPoint {is_debate: true}) "
-            # Étape 3 : unir les débats JUMEAUX (SAME_DEBATE_AS, réversible) à l'affichage —
-            # ex « minimizes health risk » + « minimizes health loss » présentés ensemble,
-            # sans avoir fusionné les nœuds (les distinctions dose/sexe restent intactes).
+            "MATCH (c)-[:ANSWERS_KEYPOINT]->(k0:KeyPoint) "
+            # Étape 4 : le DÉCLENCHEMENT suit aussi SAME_DEBATE_AS. La question peut router
+            # vers un KeyPoint non-débat (ex « minimizes health loss », où les 2 GBD sont
+            # d'accord ≈zéro) dont le JUMEAU (« minimizes health risk ») EST le débat confirmé.
+            # On surface alors le débat du jumeau (honnête : l'appendice montre la vraie
+            # question débattue), au lieu de le rater.
+            "OPTIONAL MATCH (k0)-[:SAME_DEBATE_AS]-(twd:KeyPoint {is_debate: true}) "
+            "WITH DISTINCT (CASE WHEN k0.is_debate THEN k0 ELSE twd END) AS k "
+            "WHERE k IS NOT NULL "
+            # Étape 3 : unir les positions des débats JUMEAUX à l'affichage, sans fusionner
+            # les nœuds (les distinctions dose/sexe restent intactes).
             "OPTIONAL MATCH (k)-[:SAME_DEBATE_AS]-(tw:KeyPoint) "
             "WITH k, collect(DISTINCT tw.positions_json) AS twin_pos, "
             "     coalesce(k.doc_count,0) + coalesce(sum(tw.doc_count),0) AS docs_union "
-            "RETURN DISTINCT k.kp_id AS kp_id, k.question AS question, "
+            "RETURN k.kp_id AS kp_id, k.question AS question, "
             "k.positions_json AS positions, twin_pos AS twin_positions, "
             "k.doc_count AS docs, docs_union AS docs_union ORDER BY docs DESC LIMIT 2",
             ids=candidate_ids,
