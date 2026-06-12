@@ -1,0 +1,25 @@
+corpus           cat                          exp      got      ?   question
+--------------------------------------------------------------------------------------------------------------
+alcohol_health   in_scope_factual             answer   debate   XX  L'alcool augmente-t-il le risque de cancer du sein
+alcohol_health   in_scope_factual             answer   debate   XX  Quel est l'effet de l'alcool sur le risque d'AVC ?
+alcohol_health   in_scope_factual_broad       answer   debate   XX  Quels sont les effets de la consommation d'alcool 
+alcohol_health   sensemaking_debate           debate   debate   OK  Y a-t-il un niveau de consommation d'alcool sans r
+alcohol_health   sensemaking_debate           debate   debate   OK  La consommation modérée d'alcool a-t-elle des béné
+alcohol_health   out_of_scope_subjectless     abstain  abstain  OK  Existe-t-il une solution miracle universelle ?
+alcohol_health   out_of_scope_subjectless     abstain  abstain  OK  Y a-t-il un secret pour devenir riche rapidement ?
+alcohol_health   out_of_scope_subject_present abstain  abstain  OK  Quelle est la capitale de la France ?
+alcohol_health   out_of_scope_subject_present abstain  abstain  OK  Quel est le PIB du Japon en 2020 ?
+aero             in_scope_factual             answer   answer   OK  What is the static test requirement for aircraft s
+aero             in_scope_factual             answer   answer   OK  What is the HIC (Head Injury Criterion) limit for 
+aero             in_scope_factual_broad       answer   answer   OK  What are the crashworthiness requirements for airc
+aero             out_of_scope_subjectless     abstain  abstain  OK  Is there a universal miracle solution?
+aero             out_of_scope_subject_present abstain  abstain  OK  What is the capital of France?
+aero             lifecycle                    answer   answer   OK  What replaced AC 21-25A?
+sap_ref          out_of_scope_subjectless     abstain  abstain  OK  Is there a universal miracle solution?
+sap_ref          out_of_scope_subject_present abstain  abstain  OK  What is the capital of France?
+--------------------------------------------------------------------------------------------------------------
+RESULT 14/17 conformes (final)
+MISMATCHES :
+  [alcohol_health/in_scope_factual] attendu=answer obtenu=debate — L'alcool augmente-t-il le risque de cancer du sein ?
+  [alcohol_health/in_scope_factual] attendu=answer obtenu=debate — Quel est l'effet de l'alcool sur le risque d'AVC ?
+  [alcohol_health/in_scope_factual_broad] attendu=answer obtenu=debate — Quels sont les effets de la consommation d'alcool sur la san

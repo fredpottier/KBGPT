@@ -402,11 +402,12 @@ def _build_debate_appendix(claim_ids: List[str], question: str = "", tenant_id: 
         return ""
     try:
         from knowbase.common.clients.neo4j_client import get_neo4j_client
-        rows = get_neo4j_client().execute_query(
+        gn = get_neo4j_client()
+        rows = gn.execute_query(
             "MATCH (c:Claim) WHERE c.claim_id IN $ids "
             "MATCH (c)-[:ANSWERS_KEYPOINT]->(k:KeyPoint {is_debate: true}) "
-            "RETURN DISTINCT k.question AS question, k.positions_json AS positions, "
-            "k.doc_count AS docs ORDER BY docs DESC LIMIT 2",
+            "RETURN DISTINCT k.kp_id AS kp_id, k.question AS question, "
+            "k.positions_json AS positions, k.doc_count AS docs ORDER BY docs DESC LIMIT 2",
             ids=candidate_ids,
         )
     except Exception:
@@ -417,7 +418,7 @@ def _build_debate_appendix(claim_ids: List[str], question: str = "", tenant_id: 
     import json as _json
     blocks: List[str] = []
     for r in rows:
-        q = r.get("question")
+        q, kp = r.get("question"), r.get("kp_id")
         try:
             positions = _json.loads(r.get("positions") or "[]")
         except Exception:
@@ -430,16 +431,37 @@ def _build_debate_appendix(claim_ids: List[str], question: str = "", tenant_id: 
         ]
         if len(lines) < 2:
             continue
-        blocks.append(
-            f"**⚠️ Question débattue dans le corpus — _{q}_**\n"
-            f"Les sources divergent ({r.get('docs')} documents) :\n" + "\n".join(lines)
-        )
+        # I6 — réconciliation avec la couche CONTRADICTS/adjudication : on ne présente
+        # « contradiction confirmée » QUE si l'adjudicateur a posé CONFIRMED sur une
+        # paire de ce KeyPoint (cohérent avec /referentiel). Sinon : « positions
+        # divergentes selon le périmètre » (≠ contradiction stricte). Évite que le chat
+        # et le référentiel se contredisent.
+        confirmed = False
+        try:
+            vrows = gn.execute_query(
+                "MATCH (a:Claim)-[:ANSWERS_KEYPOINT]->(k:KeyPoint {kp_id:$kp}) "
+                "MATCH (a)-[rr:CONTRADICTS]-(b:Claim)-[:ANSWERS_KEYPOINT]->(k) "
+                "WHERE rr.invalidated_relation_at IS NULL AND rr.adjudication='CONFIRMED' "
+                "RETURN count(rr) AS n", kp=kp,
+            )
+            confirmed = bool(vrows and (vrows[0].get("n") or 0) > 0)
+        except Exception:
+            pass
+        if confirmed:
+            header = (f"**⚠️ Contradiction confirmée dans le corpus — _{q}_**\n"
+                      f"Positions en conflit ({r.get('docs')} documents) :")
+        else:
+            header = (f"**Question débattue dans le corpus — _{q}_**\n"
+                      f"Les sources donnent des réponses différentes _selon le périmètre_ "
+                      f"(âge, méthode, contexte — pas une contradiction stricte au sens de "
+                      f"l'adjudication) ({r.get('docs')} documents) :")
+        blocks.append(header + "\n" + "\n".join(lines))
     if not blocks:
         return ""
     return (
-        "\n\n---\n\n_Le graphe de connaissances a détecté un débat documentaire "
-        "sur cette question (positions précalculées, non visibles d'une recherche "
-        "vectorielle classique) :_\n\n" + "\n\n".join(blocks)
+        "\n\n---\n\n_Le graphe de connaissances a rapproché des positions précalculées "
+        "sur cette question (invisibles d'une recherche vectorielle classique) :_\n\n"
+        + "\n\n".join(blocks)
     )
 
 

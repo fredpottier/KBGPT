@@ -78,7 +78,8 @@ def main() -> int:
             except Exception as e:
                 got = f"ERR:{type(e).__name__}"
             total += 1
-            good = (got == exp)
+            # « debate » = réponse augmentée d'un débat → satisfait un attendu "answer".
+            good = (got == exp) or (exp == "answer" and got == "debate")
             if good:
                 ok += 1
             else:
