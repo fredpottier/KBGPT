@@ -421,6 +421,11 @@ class ExecuteOutput(BaseModel):
     results: List[ToolResult] = Field(default_factory=list)
     total_duration_s: float = Field(default=0.0, ge=0.0)
     schema_version: str = "a3.0"
+    coverage_gate_uncovered: bool = Field(
+        default=False,
+        description="Gate KB-aligned (remédiation 1c) : True si le cross-encoder juge "
+        "la question non couverte par le corpus → abstention dure (pas de re-plan qdrant).",
+    )
 
 
 # ============================================================================

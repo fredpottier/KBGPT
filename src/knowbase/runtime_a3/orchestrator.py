@@ -409,6 +409,31 @@ class Orchestrator:
                 executor=self._executor,
             )
 
+            # 3.bis Gate de couverture KB-aligned (remédiation 1c) — ABSTENTION DURE.
+            # Si le cross-encoder juge la question non couverte par le corpus, on
+            # abstient SANS re-plan : le fallback qdrant ne ferait que ré-halluciner sur
+            # du hors-corpus (corrige le sur-answering sans sujet ET I7 sujet-présent).
+            if getattr(current_execute, "coverage_gate_uncovered", False):
+                current_evaluate = EvaluateOutput(
+                    verdict="INSUFFICIENT_EVIDENCE",
+                    covered_sub_goals=[],
+                    uncovered_sub_goals=list(range(len(current_parse.sub_goals))),
+                    re_plan_hint="none",
+                    confidence=0.9,
+                    reasoning="coverage_gate: le corpus ne couvre pas la question (cross-encoder sous le seuil).",
+                )
+                iterations_trace.append(IterationTrace(
+                    iteration=iteration,
+                    parse_output=current_parse,
+                    plan_output=current_plan,
+                    execute_output=current_execute,
+                    evaluate_output=current_evaluate,
+                    duration_s=time.perf_counter() - iter_t0,
+                    re_plan_hint_applied=last_hint_applied,
+                ))
+                terminated_reason = "coverage_gate_uncovered"
+                break
+
             # 4. EVALUATE
             current_evaluate = evaluate_step(
                 current_parse, current_plan, current_execute,

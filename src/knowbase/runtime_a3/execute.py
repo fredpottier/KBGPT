@@ -694,14 +694,16 @@ class Executor:
         if os.getenv("V6_KEYPOINT_DEBATES", "0") == "1":
             self._attach_keypoint_debates(results, parse_input.tenant_id)
 
-        # 7) SHADOW (remédiation 1b) : log intent + signaux de couverture KB-aligned,
-        # sans effet. Calibration avant activation du gate (1c).
-        self._shadow_coverage_gate(parse_input)
+        # 7) Gate de couverture KB-aligned (remédiation 1b shadow / 1c actif) — au
+        # niveau REQUÊTE. Retourne True si le corpus ne couvre pas la question
+        # (cross-encoder) → l'orchestrateur abstient DUR (sans re-plan qdrant).
+        gate_uncovered = self._coverage_gate(parse_input)
 
         return ExecuteOutput(
             results=results,
             total_duration_s=time.perf_counter() - t0,
             schema_version="a3.0",
+            coverage_gate_uncovered=gate_uncovered,
         )
 
     # ------------------------------------------------------------------
@@ -805,7 +807,10 @@ class Executor:
                     error=f"unknown_tool:{tc.tool}",
                 )
 
-            # Calcul coverage_signal
+            # Calcul coverage_signal (le gate de couverture KB-aligned est appliqué
+            # AU NIVEAU REQUÊTE dans execute(), pas par-tool — cf _coverage_gate :
+            # un tool lifecycle retourne des claims de timeline qui ne matchent pas
+            # le texte de la question → faux abstain si gaté par-tool).
             priority = self._sub_goal_priority(plan_output, tc.sub_goal_idx, parse_input)
             coverage = self._compute_coverage_signal(len(claims), priority)
 
@@ -1554,15 +1559,22 @@ class Executor:
                     results[0].claims.append(dc)
             logger.info("[KEYPOINT_DEBATE] %d positions divergentes injectées", len(debate_claims))
 
-    def _shadow_coverage_gate(self, parse_input: "ParseInput") -> None:
-        """SHADOW (remédiation étape 1b) — calcule l'intention déterministe + des
-        signaux de couverture KB-aligned (grounding entité, gap, floor) et les LOGGE
-        en JSON. ZÉRO effet sur le comportement (calibration avant activation 1c).
-        Fait sa PROPRE requête vectorielle (scores bruts), indépendante du retrieval
-        principal. Gated par V6_COVERAGE_GATE_SHADOW=1.
+    def _coverage_gate(self, parse_input: "ParseInput") -> bool:
+        """Gate de couverture KB-aligned (remédiation 1b shadow / 1c actif). Calcule
+        l'intention déterministe + le score cross-encoder sur le retrieval VECTORIEL
+        de la question (cohérent quel que soit le tool), LOGGE les signaux, et RETOURNE
+        `uncovered` (True = le corpus ne couvre pas la question → abstention dure).
+
+        Le cross-encoder sépare nettement in/out (~0.4 de marge) là où le cosinus
+        bi-encodeur e5 échoue (1 pt) — validé en shadow sur 3 corpus. Au niveau REQUÊTE
+        (pas par-tool : un tool lifecycle retourne des claims timeline non-matchants).
+
+        Shadow : V6_COVERAGE_GATE_SHADOW=1 (log seul). Actif : V6_COVERAGE_GATE_ENABLED=1.
         """
-        if os.getenv("V6_COVERAGE_GATE_SHADOW", "0") != "1":
-            return
+        shadow = os.getenv("V6_COVERAGE_GATE_SHADOW", "0") == "1"
+        enabled = os.getenv("V6_COVERAGE_GATE_ENABLED", "0") == "1"
+        if not (shadow or enabled):
+            return False
         try:
             import json as _json
             import statistics as _stats
@@ -1611,17 +1623,44 @@ class Executor:
                     ce_topn = round(sum(ce_scores[:5]) / min(5, len(ce_scores)), 3)
             except Exception:
                 logger.warning("[SHADOW_GATE] cross-encoder scoring failed", exc_info=True)
+            tau = float(os.getenv("V6_COVERAGE_GATE_TAU", "0.10"))
+            uncovered = bool(enabled and ce_top1 is not None and ce_top1 < tau)
             log = {
                 "tenant": tenant, "intent": intent, "pconf": round(pconf, 2),
                 "n_subjects": len(subjects), "q": question[:90],
                 "top1": round(top1, 3), "gap": round(gap, 3),
-                "ce_top1": ce_top1, "ce_topn": ce_topn,
-                "n_grounded10": n_grounded, "n_focal": len(focal),
+                "ce_top1": ce_top1, "ce_topn": ce_topn, "tau": tau,
+                "uncovered": uncovered, "enabled": enabled,
                 "scores5": [round(s, 3) for s in scores[:5]],
             }
-            logger.info("[SHADOW_GATE] %s", _json.dumps(log, ensure_ascii=False))
+            logger.info("[COVERAGE_GATE] %s", _json.dumps(log, ensure_ascii=False))
+            return uncovered
         except Exception:
-            logger.warning("[SHADOW_GATE] failed (non-fatal)", exc_info=True)
+            logger.warning("[COVERAGE_GATE] failed (non-fatal)", exc_info=True)
+            return False
+
+    def _coverage_ce_top1(self, question: str, claims, top_k: int = 15):
+        """Score cross-encoder MAX sur les top-K claims récupérés (gate de couverture
+        KB-aligned, remédiation 1c). None si CE indispo (→ pas de gate, fail-open).
+        Le cross-encoder sépare nettement in/out (~0.4 de marge) là où le cosinus
+        bi-encodeur e5 échoue (1 pt). Domain-agnostic : score de pertinence query↔claim."""
+        try:
+            cand = []
+            for c in (claims or [])[:top_k]:
+                t = (getattr(c, "text", None) or getattr(c, "claim_verbatim", "") or "")
+                if t.strip():
+                    cand.append(t)
+            if not cand:
+                return None
+            from knowbase.common.clients.reranker import get_cross_encoder
+            ce = get_cross_encoder(
+                model_name=os.getenv("V6_CE_RERANK_MODEL", "BAAI/bge-reranker-v2-m3"),
+                device=None,
+            )
+            return max(float(s) for s in ce.predict([(question, t) for t in cand]))
+        except Exception:
+            logger.warning("[COVERAGE_GATE] cross-encoder failed (non-fatal, no gate)", exc_info=True)
+            return None
 
     # ------------------------------------------------------------------
     # Parsing utilities
