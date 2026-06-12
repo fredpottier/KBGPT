@@ -1595,10 +1595,27 @@ class Executor:
             gap = (top1 - _stats.median(scores[1:])) if len(scores) > 2 else 0.0
             focal = _focal_content_tokens(question)
             n_grounded = sum(1 for t in texts[:10] if any(f in t for f in focal))
+            # Cross-encoder (BGE-reranker-v2-m3) sur les top-15 — test de séparation
+            # in/out (le bi-encodeur e5 ne sépare qu'à 1 pt ; le reranker devrait mieux).
+            ce_top1 = ce_topn = None
+            try:
+                from knowbase.common.clients.reranker import get_cross_encoder
+                ce = get_cross_encoder(
+                    model_name=os.getenv("V6_CE_RERANK_MODEL", "BAAI/bge-reranker-v2-m3"),
+                    device=None,
+                )
+                cand = [r.get("text") or "" for r in rows[:15] if (r.get("text") or "").strip()]
+                if cand:
+                    ce_scores = sorted((float(s) for s in ce.predict([(question, t) for t in cand])), reverse=True)
+                    ce_top1 = round(ce_scores[0], 3)
+                    ce_topn = round(sum(ce_scores[:5]) / min(5, len(ce_scores)), 3)
+            except Exception:
+                logger.warning("[SHADOW_GATE] cross-encoder scoring failed", exc_info=True)
             log = {
                 "tenant": tenant, "intent": intent, "pconf": round(pconf, 2),
                 "n_subjects": len(subjects), "q": question[:90],
                 "top1": round(top1, 3), "gap": round(gap, 3),
+                "ce_top1": ce_top1, "ce_topn": ce_topn,
                 "n_grounded10": n_grounded, "n_focal": len(focal),
                 "scores5": [round(s, 3) for s in scores[:5]],
             }
