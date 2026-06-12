@@ -406,8 +406,15 @@ def _build_debate_appendix(claim_ids: List[str], question: str = "", tenant_id: 
         rows = gn.execute_query(
             "MATCH (c:Claim) WHERE c.claim_id IN $ids "
             "MATCH (c)-[:ANSWERS_KEYPOINT]->(k:KeyPoint {is_debate: true}) "
+            # Étape 3 : unir les débats JUMEAUX (SAME_DEBATE_AS, réversible) à l'affichage —
+            # ex « minimizes health risk » + « minimizes health loss » présentés ensemble,
+            # sans avoir fusionné les nœuds (les distinctions dose/sexe restent intactes).
+            "OPTIONAL MATCH (k)-[:SAME_DEBATE_AS]-(tw:KeyPoint) "
+            "WITH k, collect(DISTINCT tw.positions_json) AS twin_pos, "
+            "     coalesce(k.doc_count,0) + coalesce(sum(tw.doc_count),0) AS docs_union "
             "RETURN DISTINCT k.kp_id AS kp_id, k.question AS question, "
-            "k.positions_json AS positions, k.doc_count AS docs ORDER BY docs DESC LIMIT 2",
+            "k.positions_json AS positions, twin_pos AS twin_positions, "
+            "k.doc_count AS docs, docs_union AS docs_union ORDER BY docs DESC LIMIT 2",
             ids=candidate_ids,
         )
     except Exception:
@@ -423,6 +430,18 @@ def _build_debate_appendix(claim_ids: List[str], question: str = "", tenant_id: 
             positions = _json.loads(r.get("positions") or "[]")
         except Exception:
             positions = []
+        # Union des positions des débats JUMEAUX (SAME_DEBATE_AS), dédupliquée
+        seen_pos = {(p.get("doc"), (p.get("answer") or "")[:50]) for p in positions}
+        for tp in (r.get("twin_positions") or []):
+            try:
+                for p in _json.loads(tp or "[]"):
+                    key = (p.get("doc"), (p.get("answer") or "")[:50])
+                    if p.get("answer") and key not in seen_pos:
+                        seen_pos.add(key)
+                        positions.append(p)
+            except Exception:
+                pass
+        docs = r.get("docs_union") or r.get("docs")
         if not q or len(positions) < 2:
             continue
         lines = [
@@ -449,12 +468,12 @@ def _build_debate_appendix(claim_ids: List[str], question: str = "", tenant_id: 
             pass
         if confirmed:
             header = (f"**⚠️ Contradiction confirmée dans le corpus — _{q}_**\n"
-                      f"Positions en conflit ({r.get('docs')} documents) :")
+                      f"Positions en conflit ({docs} documents) :")
         else:
             header = (f"**Question débattue dans le corpus — _{q}_**\n"
                       f"Les sources donnent des réponses différentes _selon le périmètre_ "
                       f"(âge, méthode, contexte — pas une contradiction stricte au sens de "
-                      f"l'adjudication) ({r.get('docs')} documents) :")
+                      f"l'adjudication) ({docs} documents) :")
         blocks.append(header + "\n" + "\n".join(lines))
     if not blocks:
         return ""
