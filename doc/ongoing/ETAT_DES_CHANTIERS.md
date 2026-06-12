@@ -77,6 +77,15 @@
 - Bugs tenant **C1/C2 du PremiseVerifier** (introduits, à corriger : filtre tenant manquant)
 - Rate-limiting (S8), validation `pack_name` (S5), Next.js 14.0.3→14.2.35 (S13)
 
+### F. Vision / Multimodal — intégrer les schémas SAP SANS polluer le graphe (TRACÉ, non démarré)
+- **Décision Fred 12/06** : vrai chantier futur, pas maintenant — analyse capitalisée.
+- Idée cardinale : le visuel (schémas .pptx SAP) est porteur d'info, mais une lecture VLM =
+  **interprétation hallucinable ≠ verbatim** → l'intégrer **à un niveau de preuve inférieur**
+  (evidence tiers T1 verbatim / T2 table-OCR / T3 vision-inférée ; un T2/T3 ne peut **jamais**
+  trancher une contradiction/adjudication).
+- **Quick-win identifié** : texte des formes .pptx via XML (python-pptx) = **verbatim T1 sans VLM**.
+- 📄 Détail complet (littérature + modèle + phasage) : **[CHANTIER_VISION_MULTIMODAL.md](CHANTIER_VISION_MULTIMODAL.md)**
+
 ---
 
 ## Cibles & repères

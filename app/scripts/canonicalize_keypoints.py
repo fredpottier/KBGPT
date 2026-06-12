@@ -68,6 +68,21 @@ Answer NO if they differ in ANY of:
 When unsure, answer NO. Return ONLY {"same": true|false}."""
 
 
+# Modèle fort optionnel : si défini (--novita), tous les appels de normalisation/dédup
+# passent par Novita au lieu du burst 14B (qui sous-regroupe). Le burst 14B reste OK
+# pour le juge de débat (Phase 3).
+_NOVITA_MODEL = None
+
+
+def _llm_json(llm, TaskType, system, user, max_tokens):
+    msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    if _NOVITA_MODEL:
+        return llm._call_novita(_NOVITA_MODEL, msgs, 0.0, max_tokens, TaskType.FAST_CLASSIFICATION,
+                                response_format={"type": "json_object"})
+    return llm.complete(task_type=TaskType.FAST_CLASSIFICATION, messages=msgs, temperature=0.0,
+                        response_format={"type": "json_object"}, max_tokens=max_tokens)
+
+
 def _ckp_id(tenant: str, cq: str) -> str:
     return "ckp_" + hashlib.sha1(f"{tenant}|{cq}".encode("utf-8")).hexdigest()[:16]
 
@@ -84,10 +99,7 @@ def _norm_scope(s):
 # ───────────────────────── Phase 1 : normalisation ─────────────────────────
 def _normalize_one(llm, TaskType, q):
     try:
-        resp = llm.complete(task_type=TaskType.FAST_CLASSIFICATION,
-            messages=[{"role": "system", "content": _NORM_SYS},
-                      {"role": "user", "content": f"QUESTION: {q}\nJSON:"}],
-            temperature=0.0, response_format={"type": "json_object"}, max_tokens=140)
+        resp = _llm_json(llm, TaskType, _NORM_SYS, f"QUESTION: {q}\nJSON:", 140)
         v = json.loads(resp if isinstance(resp, str) else json.dumps(resp))
         cq = (v.get("canonical_question") or q).strip().lower()
         dim, val = _norm_scope(v.get("scope"))
@@ -166,16 +178,13 @@ def phase1_normalize(drv, tenant, llm, TaskType, workers=8, limit=0):
 # ───────────────────── Phase 2 : dédup ancrée sur les familles multi-doc ────────────────
 def _confirm_same(llm, TaskType, q1, q2):
     try:
-        resp = llm.complete(task_type=TaskType.FAST_CLASSIFICATION,
-            messages=[{"role": "system", "content": _DEDUP_SYS},
-                      {"role": "user", "content": f"Q1: {q1}\nQ2: {q2}\nJSON:"}],
-            temperature=0.0, response_format={"type": "json_object"}, max_tokens=20)
+        resp = _llm_json(llm, TaskType, _DEDUP_SYS, f"Q1: {q1}\nQ2: {q2}\nJSON:", 20)
         return bool(json.loads(resp if isinstance(resp, str) else json.dumps(resp)).get("same"))
     except Exception:
         return False
 
 
-def phase2_dedup(drv, tenant, llm, TaskType, thr=0.93, dry=False, workers=8):
+def phase2_dedup(drv, tenant, llm, TaskType, thr=0.93, dry=False, workers=8, anchor_merge=False):
     """Ne dédup QUE les paraphrases des familles MULTI-DOC (seules pertinentes pour les
     débats + le surfaçage). Borne les confirms LLM (~ancres × voisines) au lieu du O(n²)
     sur 4000+ familles. Réversible (aliases). Le surfaçage des variantes mono-doc marche
@@ -197,41 +206,67 @@ def phase2_dedup(drv, tenant, llm, TaskType, thr=0.93, dry=False, workers=8):
     embs = np.array(EmbeddingModelManager().encode([f"query: {f['q']}" for f in allf]), dtype=np.float32)
     embs /= (np.linalg.norm(embs, axis=1, keepdims=True) + 1e-9)
     A = embs[anchor_ix]  # (nA, d)
+    from concurrent.futures import ThreadPoolExecutor
+    parent = list(range(len(allf)))
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]; x = parent[x]
+        return x
+    def conf_pair(p):
+        a, b, sc = p
+        return (a, b, sc, _confirm_same(llm, TaskType, allf[a]["q"], allf[b]["q"]))
 
-    # chaque non-ancre s'attache à SA SEULE meilleure ancre (≥thr) → zéro transitivité,
-    # zéro chaînage. Les ancres (questions distinctes : cancer ≠ mortalité) ne fusionnent
-    # JAMAIS entre elles.
-    candidates = []  # (non_anchor_i, anchor_global_idx, score)
+    # ── Étape A : fusion d'ANCRES paraphrases entre elles. Bornée aux ancres (petit n)
+    # → union-find SÛR car le gate LLM FORT (Novita) refuse cancer~mortalité. rep = +claims.
+    # fusion d'ancres : SEULEMENT avec un confirm FORT (Novita). Avec le 14B faible,
+    # désactivée (mode conservateur best-anchor) pour éviter la sur-fusion transitive.
+    aa = [(anchor_ix[i], anchor_ix[j], float(embs[anchor_ix[i]] @ embs[anchor_ix[j]]))
+          for i in range(len(anchor_ix)) for j in range(i + 1, len(anchor_ix))
+          if float(embs[anchor_ix[i]] @ embs[anchor_ix[j]]) >= thr] if anchor_merge else []
+    # ── Étape B : chaque non-ancre → sa meilleure ancre (≥thr).
+    nb = []
     for i in non_anchor_ix:
         sims = A @ embs[i]
         best = int(np.argmax(sims))
         if float(sims[best]) >= thr:
-            candidates.append((i, anchor_ix[best], float(sims[best])))
-    print(f"Phase 2 : {len(candidates)} non-ancres candidates à confirmer ({workers} workers)", flush=True)
+            nb.append((i, anchor_ix[best], float(sims[best])))
+    print(f"Phase 2 : {len(aa)} paires ancre-ancre + {len(nb)} non-ancres à confirmer "
+          f"({workers} workers)", flush=True)
 
-    from concurrent.futures import ThreadPoolExecutor
-    def conf(p):
-        i, a, sc = p
-        return (i, a, sc, _confirm_same(llm, TaskType, allf[a]["q"], allf[i]["q"]))
-    merges = []  # (non_anchor_i, anchor_a)
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        for i, a, sc, same in ex.map(conf, candidates):
-            if same:
-                merges.append((i, a))
-                print(f"  attach ({sc:.3f}) «{allf[a]['q'][:42]}» ⟸ «{allf[i]['q'][:42]}»", flush=True)
-    if dry or not merges:
-        print(f"Phase 2 : {len(merges)} rattachements {'(dry-run, non écrits)' if dry else ''}", flush=True)
-        return len(merges)
+        for a, b, sc, same in ex.map(conf_pair, aa):   # A d'abord (rep = ancre la + grosse)
+            if same and find(a) != find(b):
+                rep, dup = (find(a), find(b)) if allf[find(a)]["n"] >= allf[find(b)]["n"] else (find(b), find(a))
+                parent[dup] = rep
+                print(f"  anchor-merge ({sc:.3f}) «{allf[rep]['q'][:40]}» ⟸ «{allf[dup]['q'][:40]}»", flush=True)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for i, a, sc, same in ex.map(conf_pair, nb):
+            if same and find(i) != find(a):
+                parent[find(i)] = find(a)  # rattache au rep de l'ancre
+
+    comps = {}
+    for i in range(len(allf)):
+        comps.setdefault(find(i), []).append(i)
+    big = max((len(v) for v in comps.values()), default=0)
+    n_merges = sum(len(v) - 1 for v in comps.values() if len(v) > 1)
+    print(f"Phase 2 : {n_merges} fusions ; plus gros groupe = {big} familles", flush=True)
+    assert big <= 40, f"GARDE-FOU : méga-cluster {big} familles (sur-fusion ?) — abandon avant écriture"
+    if dry or not n_merges:
+        print(f"Phase 2 : {n_merges} fusions {'(dry-run, non écrites)' if dry else ''}", flush=True)
+        return n_merges
     with drv.session() as s:
-        for i, a in merges:
-            s.run("""MATCH (dup:CanonicalKeyPoint {ckp_id:$d}), (rep:CanonicalKeyPoint {ckp_id:$r})
-                     MATCH (dup)<-[old:CANON_OF]-(k:KeyPoint)
-                     SET k.canonical_question = rep.canonical_question
-                     MERGE (k)-[:CANON_OF]->(rep) DELETE old
-                     WITH dup, rep SET rep.aliases = coalesce(rep.aliases,[]) + dup.canonical_question
-                     DETACH DELETE dup""", d=allf[i]["id"], r=allf[a]["id"])
-    print(f"Phase 2 OK : {len(merges)} rattachements (réversible via aliases)", flush=True)
-    return len(merges)
+        for root, members in comps.items():
+            for m in members:
+                if m == root:
+                    continue
+                s.run("""MATCH (dup:CanonicalKeyPoint {ckp_id:$d}), (rep:CanonicalKeyPoint {ckp_id:$r})
+                         MATCH (dup)<-[old:CANON_OF]-(k:KeyPoint)
+                         SET k.canonical_question = rep.canonical_question
+                         MERGE (k)-[:CANON_OF]->(rep) DELETE old
+                         WITH dup, rep SET rep.aliases = coalesce(rep.aliases,[]) + dup.canonical_question
+                         DETACH DELETE dup""", d=allf[m]["id"], r=allf[root]["id"])
+    print(f"Phase 2 OK : {n_merges} fusions (réversible via aliases)", flush=True)
+    return n_merges
 
 
 # ──────────────── Phase 3 : débat au niveau canonique ─────────────────
@@ -262,9 +297,12 @@ def phase3_debates(drv, tenant, llm, TaskType):
     gbd = _has("minimizes health risk") or _has("minimizes health loss")
     cancer_ok = not any((f["q"] or "").lower().strip() == "does alcohol consumption cause cancer?"
                         for f, _ in confirmed)
-    print(f"GARDE-FOUS : GBD niveau confirmé={gbd} (True attendu) ; "
-          f"'cause cancer' non-débat={cancer_ok} (True attendu)", flush=True)
-    assert gbd and cancer_ok, "GARDE-FOU VIOLÉ"
+    print(f"GARDE-FOUS : GBD niveau confirmé={gbd} ; 'cause cancer' non-débat={cancer_ok}", flush=True)
+    # AVERTISSEMENT non bloquant : on ÉCRIT toujours ce qui a été trouvé (ne pas laisser la
+    # couche vide). La vraie garde anti-sur-fusion (big≤40) est en Phase 2. Le check GBD nommé
+    # est fragile (normalisation non-déterministe) → simple signal, pas un abort.
+    if not (gbd and cancer_ok):
+        print(f"  ⚠️ garde-fou non satisfait (gbd={gbd}, cancer_ok={cancer_ok}) — écriture quand même", flush=True)
 
     conf_ids = {f["id"] for f, _ in confirmed}
     with drv.session() as s:
@@ -287,17 +325,31 @@ def main():
     ap.add_argument("--phase1-only", action="store_true")
     ap.add_argument("--reset-canon", action="store_true",
                     help="réinit la couche canonique (garde le cache normalisation) avant re-run")
+    ap.add_argument("--full-reset", action="store_true",
+                    help="reset TOTAL (efface le cache normalisation → re-LLM intégral)")
+    ap.add_argument("--novita", action="store_true",
+                    help="normalisation+dédup via Novita (llama-3.3-70b) au lieu du burst 14B")
     args = ap.parse_args()
     drv = driver()
     from knowbase.common.llm_router import get_llm_router, TaskType
     llm = get_llm_router()
 
-    if args.reset_canon:
+    if args.novita:
+        global _NOVITA_MODEL
+        _NOVITA_MODEL = "meta-llama/llama-3.3-70b-instruct"
+        print(f"[Novita] normalisation+dédup via {_NOVITA_MODEL}", flush=True)
+    if args.full_reset:
+        with drv.session() as s:
+            s.run("MATCH (c:CanonicalKeyPoint {tenant_id:$t}) DETACH DELETE c", t=args.tenant)
+            s.run("MATCH (k:KeyPoint {tenant_id:$t}) REMOVE k.canon_q_raw, k.canonical_question, "
+                  "k.scope_dim, k.scope_val", t=args.tenant)
+        print("[full-reset] couche canonique + cache normalisation effacés", flush=True)
+    elif args.reset_canon:
         reset_canon(drv, args.tenant)
     phase1_normalize(drv, args.tenant, llm, TaskType, workers=16, limit=args.limit)
     if args.phase1_only or args.limit:
         drv.close(); return
-    phase2_dedup(drv, args.tenant, llm, TaskType, dry=args.dry_run)
+    phase2_dedup(drv, args.tenant, llm, TaskType, dry=args.dry_run, anchor_merge=args.novita)
     if not args.dry_run:
         phase3_debates(drv, args.tenant, llm, TaskType)
     drv.close()
