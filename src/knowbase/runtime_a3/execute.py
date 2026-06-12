@@ -724,7 +724,13 @@ class Executor:
                     parse_input.question,
                 )
                 resolved_params["include_history"] = self._include_history_for_call(tc)
-                claims, sections = self._call_kg_claims(resolved_params)
+                # Question SANS sujet-ancre (chemin global/sensemaking) → retrieval
+                # vectoriel à plancher de pertinence (abstient si hors-corpus) au lieu
+                # du RRF non gardé (qui hallucinait sur les questions hors-corpus).
+                if not resolved_params.get("subject"):
+                    claims, sections = self._call_kg_claims_vector_floor(resolved_params)
+                else:
+                    claims, sections = self._call_kg_claims(resolved_params)
                 relations: List[RelationSummary] = []
             elif tc.tool == "kg_claims_list":
                 resolved_params = self._resolve_subject_for_call(tc, "subject_filter")
@@ -953,6 +959,49 @@ class Executor:
         load_rows = self._get_neo4j().execute_query(
             CYPHER_LOAD_CLAIMS_BY_IDS,
             claim_ids=claim_ids, tenant_id=params["tenant_id"],
+        )
+        return self._parse_claim_rows(load_rows)
+
+    def _call_kg_claims_vector_floor(
+        self, params: Dict[str, Any]
+    ) -> Tuple[List[ClaimSummary], List[SectionSummary]]:
+        """Chemin « global » (question SANS sujet-ancre) : retrieval vectoriel pur
+        AVEC PLANCHER DE PERTINENCE. Garde le gain sur les questions sensemaking
+        EN-corpus (claims très similaires) tout en restaurant l'ABSTENTION sur les
+        questions hors-corpus (rien d'assez proche → 0 claim → abstention).
+
+        Sans ce plancher, élargir kg_claims aux questions sans sujet faisait
+        halluciner sur « capitale de la France ? » (12/06/2026). e5-large cosine :
+        pertinent ~0.82-0.88, hors-sujet ~0.74-0.79 → plancher 0.80 discrimine.
+        """
+        floor = float(os.getenv("V6_GLOBAL_RELEVANCE_FLOOR", "0.80"))
+        query_text = (params.get("query_text") or "").strip()
+        if not query_text:
+            return [], []
+        try:
+            emb = self._get_embedder()(f"query: {query_text}")
+            rows = self._get_neo4j().execute_query(
+                CYPHER_KG_CLAIMS_VECTOR_ONLY,
+                query_embedding=emb,
+                tenant_id=params["tenant_id"],
+                as_of=params["as_of"],
+                include_history=params.get("include_history", False),
+            )
+        except Exception:
+            logger.warning("vector_floor: retrieval failed (abstention)", exc_info=True)
+            return [], []
+        kept = [r for r in rows if (r.get("score") or 0.0) >= floor]
+        top = rows[0]["score"] if rows else 0.0
+        logger.info(
+            "[GLOBAL_RETRIEVAL] %d/%d claims >= floor %.2f (top score=%.3f) — %s",
+            len(kept), len(rows), floor, top,
+            "answer" if kept else "ABSTENTION (hors-corpus)",
+        )
+        if not kept:
+            return [], []
+        load_rows = self._get_neo4j().execute_query(
+            CYPHER_LOAD_CLAIMS_BY_IDS,
+            claim_ids=[r["claim_id"] for r in kept], tenant_id=params["tenant_id"],
         )
         return self._parse_claim_rows(load_rows)
 

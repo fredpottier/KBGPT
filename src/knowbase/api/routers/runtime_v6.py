@@ -278,7 +278,7 @@ async def answer(request: RuntimeV6Request) -> RuntimeV6Response:
             detail=f"Orchestrator error: {str(exc)[:300]}",
         )
 
-    return _build_response(result, include_trace=request.include_trace)
+    return _build_response(result, request)
 
 
 # ============================================================================
@@ -372,14 +372,33 @@ def _hydrate_citation_sources(claim_ids: List[str]) -> Dict[str, Dict[str, Any]]
         return {}
 
 
-def _build_debate_appendix(claim_ids: List[str]) -> str:
-    """Si un claim cité relève d'un KeyPoint « débat » (positions divergentes
-    cross-doc sur la même question), produit un appendice markdown présentant le
-    spectre des positions. Déterministe → bypass ClaimFilter + synthèse (qui ne
-    voient qu'un côté). C'est l'avantage KG : surfacer le débat là où le RAG donne
-    une réponse plate. Fail-soft : toute erreur → chaîne vide.
+def _build_debate_appendix(claim_ids: List[str], question: str = "", tenant_id: str = "") -> str:
+    """Si la question touche un KeyPoint « débat » (positions divergentes cross-doc
+    sur la même question), produit un appendice markdown présentant le spectre des
+    positions. Déterministe → bypass ClaimFilter + synthèse (qui ne voient qu'un
+    côté). C'est l'avantage KG : surfacer le débat là où le RAG donne une réponse
+    plate.
+
+    Robustesse : on ne se limite PAS aux claims cités (la synthèse ne cite pas
+    toujours le claim porteur du débat) — on élargit aux claims les plus proches de
+    la QUESTION (retrieval vectoriel). Fail-soft : toute erreur → chaîne vide.
     """
-    if not claim_ids:
+    candidate_ids = list(claim_ids or [])
+    if question and tenant_id:
+        try:
+            from knowbase.common.clients.embeddings import EmbeddingModelManager
+            from knowbase.common.clients.neo4j_client import get_neo4j_client as _gn
+            emb = EmbeddingModelManager().encode([f"query: {question}"])[0].tolist()
+            qrows = _gn().execute_query(
+                "CALL db.index.vector.queryNodes('claim_embedding_idx', 25, $emb) "
+                "YIELD node AS c, score WHERE c.tenant_id = $tid AND score >= 0.82 "
+                "RETURN c.claim_id AS id",
+                emb=emb, tid=tenant_id,
+            )
+            candidate_ids += [r["id"] for r in qrows]
+        except Exception:
+            logger.warning("runtime_v6: debate appendix question-retrieval failed", exc_info=True)
+    if not candidate_ids:
         return ""
     try:
         from knowbase.common.clients.neo4j_client import get_neo4j_client
@@ -387,8 +406,8 @@ def _build_debate_appendix(claim_ids: List[str]) -> str:
             "MATCH (c:Claim) WHERE c.claim_id IN $ids "
             "MATCH (c)-[:ANSWERS_KEYPOINT]->(k:KeyPoint {is_debate: true}) "
             "RETURN DISTINCT k.question AS question, k.positions_json AS positions, "
-            "k.doc_count AS docs ORDER BY docs DESC LIMIT 3",
-            ids=claim_ids,
+            "k.doc_count AS docs ORDER BY docs DESC LIMIT 2",
+            ids=candidate_ids,
         )
     except Exception:
         logger.warning("runtime_v6: debate appendix lookup failed", exc_info=True)
@@ -430,8 +449,9 @@ _DOC_HASH_SUFFIX_RE = re.compile(r"_[a-f0-9]{6,}$", re.IGNORECASE)
 
 def _build_response(
     result: OrchestratorResult,
-    include_trace: bool,
+    request: "RuntimeV6Request",
 ) -> RuntimeV6Response:
+    include_trace = request.include_trace
     synth = result.synthesize_output
 
     sources = _hydrate_citation_sources([cc.claim_id for cc in synth.cited_claims])
@@ -471,7 +491,11 @@ def _build_response(
     answer_text = synth.answer_text
     if os.getenv("V6_KEYPOINT_DEBATES", "1") == "1":
         try:
-            answer_text += _build_debate_appendix([cc.claim_id for cc in synth.cited_claims])
+            answer_text += _build_debate_appendix(
+                [cc.claim_id for cc in synth.cited_claims],
+                question=request.question,
+                tenant_id=request.tenant_id,
+            )
         except Exception:
             logger.warning("runtime_v6: debate appendix failed (non-fatal)", exc_info=True)
 
