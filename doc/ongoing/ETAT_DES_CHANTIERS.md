@@ -86,6 +86,15 @@
 - **Quick-win identifié** : texte des formes .pptx via XML (python-pptx) = **verbatim T1 sans VLM**.
 - 📄 Détail complet (littérature + modèle + phasage) : **[CHANTIER_VISION_MULTIMODAL.md](CHANTIER_VISION_MULTIMODAL.md)**
 
+### G. Précision canonicalisation KeyPoint / détection de débats (OPEN, non résolu)
+- **État (12/06)** : couche `CanonicalKeyPoint` livrée et FONCTIONNELLE (surface des débats, bat
+  le RAG ; live = 15 débats), MAIS précision non atteinte (« même question → même débat précis »).
+- **Whack-a-mole** : 14B **sous-fusionne** (incohérence de formulation), Novita **sur-découpe le
+  scope** (perd GBD), dédup union-find+gate-faible **sur-fusionne** (cancer=mortalité), détection
+  débat **non-déterministe**. Curseur sous/sur-fusion/sur-scope non équilibré.
+- À reprendre avec **consensus octopus + littérature**, PAS un patch de plus.
+- 📄 Diagnostic complet + pistes : **[CHANTIER_CANONICALISATION_PRECISION.md](CHANTIER_CANONICALISATION_PRECISION.md)**
+
 ---
 
 ## Cibles & repères
